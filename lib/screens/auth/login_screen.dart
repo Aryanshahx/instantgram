@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../core/errors.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../services/auth_service.dart';
+import '../../widgets/brand_logo.dart';
 import 'signup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -25,21 +28,14 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _toast(String msg) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(msg)));
-  }
-
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
     try {
       await AuthService.instance
           .signIn(email: _email.text, password: _password.text);
-      // AuthGate switches to Home automatically.
     } catch (e) {
-      _toast(AuthService.friendlyError(e));
+      if (mounted) showToast(context, friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -48,14 +44,14 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _forgot() async {
     final email = _email.text.trim();
     if (email.isEmpty) {
-      _toast('Enter your email above first.');
+      showToast(context, 'Enter your email above first.');
       return;
     }
     try {
       await AuthService.instance.sendPasswordReset(email);
-      _toast('Password reset email sent.');
+      if (mounted) showToast(context, 'Password reset email sent.');
     } catch (e) {
-      _toast(AuthService.friendlyError(e));
+      if (mounted) showToast(context, friendlyError(e));
     }
   }
 
@@ -72,16 +68,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text(
-                    'Instantgram',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 40,
-                      fontWeight: FontWeight.w700,
-                      fontStyle: FontStyle.italic,
-                      color: AppTheme.brand,
-                    ),
-                  ),
+                  const Center(child: BrandLogo(size: 44)),
                   const SizedBox(height: 36),
                   TextFormField(
                     controller: _email,
@@ -100,9 +87,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     decoration: InputDecoration(
                       hintText: 'Password',
                       suffixIcon: IconButton(
-                        icon: Icon(_obscure
-                            ? Icons.visibility_off
-                            : Icons.visibility),
+                        icon: Icon(
+                            _obscure ? Icons.visibility_off : Icons.visibility),
                         onPressed: () => setState(() => _obscure = !_obscure),
                       ),
                     ),
@@ -127,16 +113,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           )
                         : const Text('Log in'),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 28),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Text("Don't have an account?"),
+                      Text("Don't have an account?",
+                          style: TextStyle(color: context.muted)),
                       TextButton(
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) => const SignupScreen()),
-                        ),
+                        onPressed: () => openScreen(context, const SignupScreen()),
                         child: const Text('Sign up'),
                       ),
                     ],

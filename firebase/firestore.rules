@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    // true if the write only touches the listed fields
+    function onlyChanges(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    // username -> uid lookup (used to keep usernames unique)
+    match /usernames/{name} {
+      allow get: if true;
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.auth.uid == uid;
+      // owner edits anything; anyone may change followersCount (follow/unfollow)
+      allow update: if signedIn() && (request.auth.uid == uid || onlyChanges(['followersCount']));
+      allow delete: if false;
+
+      // people who follow {uid}: the follower writes their own doc
+      match /followers/{followerId} {
+        allow read: if signedIn();
+        allow write: if signedIn() && request.auth.uid == followerId;
+      }
+      // people {uid} follows: only the owner writes
+      match /following/{targetId} {
+        allow read: if signedIn();
+        allow write: if signedIn() && request.auth.uid == uid;
+      }
+    }
+
+    match /posts/{postId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
+      // author edits anything; anyone may change like/comment counters
+      allow update: if signedIn() && (resource.data.authorId == request.auth.uid
+                                      || onlyChanges(['likeCount', 'commentCount']));
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+
+      match /likes/{uid} {
+        allow read: if signedIn();
+        allow write: if signedIn() && request.auth.uid == uid;
+      }
+
+      match /comments/{commentId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
+        // comment author OR the post author can delete
+        allow delete: if signedIn() && (
+          resource.data.authorId == request.auth.uid ||
+          get(/databases/$(database)/documents/posts/$(postId)).data.authorId == request.auth.uid
+        );
+      }
+    }
+
+    match /stories/{storyId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+    }
+  }
+}

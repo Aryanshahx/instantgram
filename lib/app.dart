@@ -12,6 +12,8 @@ class InstantgramApp extends StatelessWidget {
       title: 'Instantgram',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: ThemeMode.system,
       home: const AuthGate(),
     );
   }

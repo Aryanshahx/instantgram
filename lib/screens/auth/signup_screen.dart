@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../core/errors.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../services/auth_service.dart';
+import '../../widgets/brand_logo.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -13,6 +16,7 @@ class SignupScreen extends StatefulWidget {
 class _SignupScreenState extends State<SignupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _email = TextEditingController();
+  final _fullName = TextEditingController();
   final _username = TextEditingController();
   final _password = TextEditingController();
   bool _loading = false;
@@ -21,15 +25,10 @@ class _SignupScreenState extends State<SignupScreen> {
   @override
   void dispose() {
     _email.dispose();
+    _fullName.dispose();
     _username.dispose();
     _password.dispose();
     super.dispose();
-  }
-
-  void _toast(String msg) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _signUp() async {
@@ -40,11 +39,11 @@ class _SignupScreenState extends State<SignupScreen> {
         email: _email.text,
         password: _password.text,
         username: _username.text,
+        fullName: _fullName.text,
       );
-      // Account created: close this screen, AuthGate shows Home.
       if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
     } catch (e) {
-      _toast(AuthService.friendlyError(e));
+      if (mounted) showToast(context, friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -64,22 +63,14 @@ class _SignupScreenState extends State<SignupScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text(
-                    'Sign up',
+                  const Center(child: BrandLogo(size: 36)),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Sign up to share photos and videos with your friends.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.brand,
-                    ),
+                    style: TextStyle(color: context.muted),
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Create an account to share photos and videos.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.black54),
-                  ),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 26),
                   TextFormField(
                     controller: _email,
                     keyboardType: TextInputType.emailAddress,
@@ -87,6 +78,12 @@ class _SignupScreenState extends State<SignupScreen> {
                     validator: (v) => (v == null || !v.contains('@'))
                         ? 'Enter a valid email'
                         : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _fullName,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(hintText: 'Full name'),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
@@ -110,9 +107,8 @@ class _SignupScreenState extends State<SignupScreen> {
                     decoration: InputDecoration(
                       hintText: 'Password',
                       suffixIcon: IconButton(
-                        icon: Icon(_obscure
-                            ? Icons.visibility_off
-                            : Icons.visibility),
+                        icon: Icon(
+                            _obscure ? Icons.visibility_off : Icons.visibility),
                         onPressed: () => setState(() => _obscure = !_obscure),
                       ),
                     ),
@@ -120,7 +116,7 @@ class _SignupScreenState extends State<SignupScreen> {
                         ? 'At least 6 characters'
                         : null,
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 22),
                   FilledButton(
                     onPressed: _loading ? null : _signUp,
                     child: _loading
