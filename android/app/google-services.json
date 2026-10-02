@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "937352524661",
+    "project_id": "instantgram-ad0cd",
+    "storage_bucket": "instantgram-ad0cd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:937352524661:android:96d65e0dcd06f841bcd93c",
+        "android_client_info": {
+          "package_name": "com.hypertechlabs.instantgram"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAOs4hqZW_j7hbCPulhLI4JfF9PlyH0KDE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
