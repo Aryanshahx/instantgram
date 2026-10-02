@@ -134,7 +134,7 @@ class _GroupPlayerState extends State<_GroupPlayer>
     _anim.stop();
     final ok = await confirm(
       context,
-      title: 'Delete story?',
+      title: 'Delete moment?',
       confirmLabel: 'Delete',
       destructive: true,
     );
@@ -239,7 +239,7 @@ class _GroupPlayerState extends State<_GroupPlayer>
                   const SizedBox(height: 10),
                   Row(
                     children: [
-                      UserAvatar(url: widget.group.photoUrl, radius: 16),
+                      UserAvatar(url: widget.group.photoUrl, name: widget.group.username, radius: 16),
                       const SizedBox(width: 10),
                       Text(widget.group.username,
                           style: const TextStyle(

@@ -45,7 +45,7 @@ String friendlyError(Object e) {
     final msg = (e.message ?? '').toLowerCase();
     switch (e.code) {
       case 'permission-denied':
-        return 'Permission denied. Check your Firestore rules.';
+        return 'Firestore blocked this request. Publish firebase/firestore.rules in the Firebase console (see FIREBASE_SETUP.md).';
       case 'failed-precondition':
         if (msg.contains('index')) {
           return 'A Firestore index is missing. Create the composite indexes '

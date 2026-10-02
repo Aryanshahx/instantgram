@@ -86,48 +86,42 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 12,
-        title: SizedBox(
-          height: 40,
-          child: TextField(
-            controller: _controller,
-            onChanged: _onChanged,
-            textInputAction: TextInputAction.search,
-            autocorrect: false,
-            decoration: InputDecoration(
-              hintText: 'Search people',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: _query.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () {
-                        _controller.clear();
-                        _onChanged('');
-                      },
-                    ),
-              contentPadding: EdgeInsets.zero,
-              filled: true,
-              fillColor: context.softFill,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
+    return SafeArea(
+      bottom: false,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 14, 20, 12),
+            child: Text('Explore',
+                style: TextStyle(
+                    fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: -1.2)),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: TextField(
+              controller: _controller,
+              onChanged: _onChanged,
+              textInputAction: TextInputAction.search,
+              autocorrect: false,
+              decoration: InputDecoration(
+                hintText: 'Find people by username',
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () {
+                          _controller.clear();
+                          _onChanged('');
+                        },
+                      ),
               ),
             ),
           ),
-        ),
+          Expanded(child: _query.isEmpty ? _exploreGrid() : _userResults()),
+        ],
       ),
-      body: _query.isEmpty ? _exploreGrid() : _userResults(),
     );
   }
 
@@ -138,21 +132,34 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     if (_results.isEmpty) {
       return EmptyState(
-        icon: Icons.person_search_outlined,
-        title: 'No users found',
+        icon: Icons.person_search_rounded,
+        title: 'No one found',
         subtitle: 'Nobody matches "$_query".',
       );
     }
     return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, kNavSpace),
       itemCount: _results.length,
       itemBuilder: (context, i) {
         final u = _results[i];
-        return ListTile(
-          leading: UserAvatar(url: u.photoUrl, radius: 24),
-          title: Text(u.username,
-              style: const TextStyle(fontWeight: FontWeight.w700)),
-          subtitle: u.fullName.isEmpty ? null : Text(u.fullName),
-          onTap: () => openScreen(context, ProfileScreen(uid: u.uid)),
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          decoration: BoxDecoration(
+            color: context.card,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: context.hairline.withValues(alpha: 0.7)),
+          ),
+          child: ListTile(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            contentPadding: const EdgeInsets.all(10),
+            leading: UserAvatar(url: u.photoUrl, name: u.username, radius: 25),
+            title: Text(u.username,
+                style: const TextStyle(fontWeight: FontWeight.w800)),
+            subtitle: u.fullName.isEmpty ? null : Text(u.fullName),
+            trailing: Icon(Icons.arrow_forward_ios_rounded,
+                size: 16, color: context.muted),
+            onTap: () => openScreen(context, ProfileScreen(uid: u.uid)),
+          ),
         );
       },
     );
@@ -168,7 +175,7 @@ class _SearchScreenState extends State<SearchScreen> {
         }
         if (_explore.isEmpty) {
           return const EmptyState(
-            icon: Icons.explore_outlined,
+            icon: Icons.explore_rounded,
             title: 'Nothing to explore yet',
             subtitle: 'Posts from everyone will show up here.',
           );
@@ -185,9 +192,10 @@ class _SearchScreenState extends State<SearchScreen> {
                   child: Padding(
                     padding: EdgeInsets.all(20),
                     child: Center(
-                        child: CircularProgressIndicator(strokeWidth: 2.5)),
+                        child: CircularProgressIndicator(strokeWidth: 3)),
                   ),
                 ),
+              const SliverToBoxAdapter(child: SizedBox(height: kNavSpace)),
             ],
           ),
         );

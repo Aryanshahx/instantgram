@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/errors.dart';
+import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/app_user.dart';
 import '../../services/storage_service.dart';
@@ -59,62 +60,74 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Edit profile',
-            style: TextStyle(fontWeight: FontWeight.w700)),
-        actions: [
-          TextButton(
-            onPressed: _saving ? null : _save,
-            child: _saving
-                ? const SizedBox(
-                    height: 18,
-                    width: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('Done',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Edit profile')),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
         children: [
           Center(
             child: GestureDetector(
               onTap: _saving ? null : _pickPhoto,
-              child: Column(
+              child: Stack(
+                clipBehavior: Clip.none,
                 children: [
                   _photo != null
-                      ? CircleAvatar(
-                          radius: 52, backgroundImage: FileImage(_photo!))
-                      : UserAvatar(url: widget.user.photoUrl, radius: 52),
-                  const SizedBox(height: 10),
-                  const Text('Change profile photo',
-                      style: TextStyle(
-                          color: Color(0xFF0095F6),
-                          fontWeight: FontWeight.w600)),
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(36),
+                          child: Image.file(_photo!,
+                              width: 104, height: 104, fit: BoxFit.cover),
+                        )
+                      : UserAvatar(
+                          url: widget.user.photoUrl,
+                          name: widget.user.username,
+                          radius: 52),
+                  Positioned(
+                    right: -6,
+                    bottom: -6,
+                    child: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: AppTheme.volt,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: context.bg, width: 3),
+                      ),
+                      child: const Icon(Icons.photo_camera_rounded,
+                          size: 18, color: AppTheme.ink),
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 28),
           TextField(
             controller: _name,
             enabled: !_saving,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(labelText: 'Name'),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           TextField(
             controller: _bio,
             enabled: !_saving,
             maxLength: 150,
             maxLines: 4,
-            minLines: 2,
+            minLines: 3,
             decoration: const InputDecoration(labelText: 'Bio'),
           ),
-          const SizedBox(height: 8),
-          Text('Username: @${widget.user.username}',
-              style: const TextStyle(color: Colors.grey)),
+          Text('Username  @${widget.user.username}',
+              style: TextStyle(color: context.muted)),
+          const SizedBox(height: 26),
+          FilledButton(
+            onPressed: _saving ? null : _save,
+            child: _saving
+                ? const SizedBox(
+                    height: 22,
+                    width: 22,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2.5, color: AppTheme.ink))
+                : const Text('Save changes'),
+          ),
         ],
       ),
     );

@@ -10,10 +10,9 @@ class PostDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Post', style: TextStyle(fontWeight: FontWeight.w700)),
-      ),
+      appBar: AppBar(title: const Text('Post')),
       body: SingleChildScrollView(
+        padding: const EdgeInsets.only(bottom: 24),
         child: PostCard(
           post: post,
           onDeleted: () => Navigator.of(context).pop(),

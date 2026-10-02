@@ -26,26 +26,31 @@ class EmptyState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.all(18),
+              width: 84,
+              height: 84,
               decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                    color: Theme.of(context).colorScheme.onSurface, width: 2),
+                color: context.card,
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: context.hairline),
               ),
-              child: Icon(icon, size: 36),
+              child: ShaderMask(
+                blendMode: BlendMode.srcIn,
+                shaderCallback: (r) => AppTheme.auroraGradient.createShader(r),
+                child: Icon(icon, size: 40, color: Colors.white),
+              ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 18),
             Text(title,
                 textAlign: TextAlign.center,
-                style:
-                    const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                style: const TextStyle(
+                    fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -0.4)),
             if (subtitle != null) ...[
               const SizedBox(height: 8),
               Text(subtitle!,
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: context.muted)),
+                  style: TextStyle(color: context.muted, height: 1.35)),
             ],
-            if (action != null) ...[const SizedBox(height: 16), action!],
+            if (action != null) ...[const SizedBox(height: 18), action!],
           ],
         ),
       ),
@@ -63,21 +68,29 @@ class ErrorState extends StatelessWidget {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.cloud_off_outlined, size: 44, color: context.muted),
-            const SizedBox(height: 12),
-            Text(friendlyError(error),
-                textAlign: TextAlign.center,
-                style: TextStyle(color: context.muted)),
-            const SizedBox(height: 12),
-            OutlinedButton(
-              style: OutlinedButton.styleFrom(minimumSize: const Size(120, 40)),
-              onPressed: onRetry,
-              child: const Text('Try again'),
-            ),
-          ],
+        child: Container(
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: context.card,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: context.hairline),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off_rounded, size: 40, color: AppTheme.coral),
+              const SizedBox(height: 12),
+              Text(friendlyError(error),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: context.muted, height: 1.35)),
+              const SizedBox(height: 14),
+              OutlinedButton(
+                style: OutlinedButton.styleFrom(minimumSize: const Size(130, 44)),
+                onPressed: onRetry,
+                child: const Text('Try again'),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -88,5 +101,5 @@ class CenteredLoader extends StatelessWidget {
   const CenteredLoader({super.key});
   @override
   Widget build(BuildContext context) =>
-      const Center(child: CircularProgressIndicator(strokeWidth: 2.5));
+      const Center(child: CircularProgressIndicator(strokeWidth: 3));
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/app_events.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/app_user.dart';
@@ -9,9 +10,9 @@ import '../../services/post_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/follow_button.dart';
+import '../../widgets/glass.dart';
 import '../../widgets/post_grid.dart';
 import '../../widgets/state_views.dart';
-import '../../core/app_events.dart';
 import 'edit_profile_screen.dart';
 import 'follow_list_screen.dart';
 
@@ -32,6 +33,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     () => PostService.instance.userPostsQuery(widget.uid),
     pageSize: 18,
   );
+  late final Stream<AppUser?> _user =
+      UserService.instance.watchUser(widget.uid);
   final ScrollController _scroll = ScrollController();
 
   bool get _isMe => widget.uid == UserService.instance.myUid;
@@ -71,33 +74,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<AppUser?>(
-      stream: UserService.instance.watchUser(widget.uid),
+      stream: _user,
       builder: (context, snap) {
         final user = snap.data;
-        return Scaffold(
-          appBar: AppBar(
-            automaticallyImplyLeading: !widget.isTab,
-            title: Text(user?.username ?? '',
-                style: const TextStyle(fontWeight: FontWeight.w800)),
-            actions: [
-              if (widget.isTab)
-                IconButton(
-                  tooltip: 'Log out',
-                  icon: const Icon(Icons.logout),
-                  onPressed: _logout,
-                ),
-            ],
-          ),
-          body: snap.hasError
-              ? ErrorState(error: snap.error!, onRetry: () => setState(() {}))
-              : user == null
-                  ? (snap.connectionState == ConnectionState.waiting
+        if (user == null) {
+          return Scaffold(
+            appBar: widget.isTab ? null : AppBar(),
+            body: SafeArea(
+              child: snap.hasError
+                  ? ErrorState(error: snap.error!, onRetry: () => setState(() {}))
+                  : snap.connectionState == ConnectionState.waiting
                       ? const CenteredLoader()
                       : const EmptyState(
                           icon: Icons.person_off_outlined,
-                          title: 'User not found'))
-                  : _body(context, user),
-        );
+                          title: 'User not found'),
+            ),
+          );
+        }
+        return Scaffold(body: _body(context, user));
       },
     );
   }
@@ -107,32 +101,61 @@ class _ProfileScreenState extends State<ProfileScreen> {
       listenable: _pager,
       builder: (context, _) {
         return RefreshIndicator(
-          onRefresh: () async {
-            await _pager.refresh();
-          },
+          onRefresh: _pager.refresh,
           child: CustomScrollView(
             controller: _scroll,
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
               SliverToBoxAdapter(child: _header(context, user)),
-              const SliverToBoxAdapter(child: Divider()),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 22, 22, 12),
+                  child: Row(
+                    children: [
+                      const Text('Posts',
+                          style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.5)),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 9, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: context.card,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: context.hairline),
+                        ),
+                        child: Text('${user.postsCount}',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w800, fontSize: 12)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               if (_pager.initialLoading)
-                const SliverFillRemaining(
-                    hasScrollBody: false, child: CenteredLoader())
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.all(40),
+                    child: CenteredLoader(),
+                  ),
+                )
               else if (_pager.error != null && _pager.posts.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
+                SliverToBoxAdapter(
                   child: ErrorState(error: _pager.error!, onRetry: _pager.retry),
                 )
               else if (_pager.posts.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: EmptyState(
-                    icon: Icons.photo_camera_outlined,
-                    title: _isMe ? 'Share your first post' : 'No posts yet',
-                    subtitle: _isMe
-                        ? 'Tap + to post a photo or a video link.'
-                        : null,
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: EmptyState(
+                      icon: Icons.photo_camera_outlined,
+                      title: _isMe ? 'Share your first post' : 'No posts yet',
+                      subtitle: _isMe
+                          ? 'Tap + to post a photo or a video link.'
+                          : null,
+                    ),
                   ),
                 )
               else
@@ -142,9 +165,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Padding(
                     padding: EdgeInsets.all(20),
                     child: Center(
-                        child: CircularProgressIndicator(strokeWidth: 2.5)),
+                        child: CircularProgressIndicator(strokeWidth: 3)),
                   ),
                 ),
+              const SliverToBoxAdapter(child: SizedBox(height: kNavSpace)),
             ],
           ),
         );
@@ -153,57 +177,119 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _header(BuildContext context, AppUser user) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              UserAvatar(url: user.photoUrl, radius: 42),
-              const SizedBox(width: 20),
-              Expanded(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _Stat(label: 'Posts', value: user.postsCount),
-                    _Stat(
-                      label: 'Followers',
-                      value: user.followersCount,
-                      onTap: () => openScreen(
-                        context,
-                        FollowListScreen(uid: user.uid, followers: true),
-                      ),
-                    ),
-                    _Stat(
-                      label: 'Following',
-                      value: user.followingCount,
-                      onTap: () => openScreen(
-                        context,
-                        FollowListScreen(uid: user.uid, followers: false),
-                      ),
-                    ),
-                  ],
-                ),
+    final top = MediaQuery.of(context).padding.top;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ---- banner with aurora colours + floating avatar
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              height: 150 + top,
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+              decoration: BoxDecoration(
+                borderRadius:
+                    const BorderRadius.vertical(bottom: Radius.circular(36)),
+                gradient: AppTheme.auroraGradient,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.violet.withValues(alpha: 0.25),
+                    blurRadius: 30,
+                    offset: const Offset(0, 14),
+                  ),
+                ],
               ),
+            ),
+            Positioned(
+              top: top + 10,
+              left: 24,
+              right: 24,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  if (widget.isTab)
+                    const SizedBox(width: 44)
+                  else
+                    GlassIconButton(
+                      icon: Icons.arrow_back_rounded,
+                      onTap: () => Navigator.of(context).maybePop(),
+                    ),
+                  if (widget.isTab)
+                    GlassIconButton(
+                      icon: Icons.logout_rounded,
+                      tooltip: 'Log out',
+                      onTap: _logout,
+                    ),
+                ],
+              ),
+            ),
+            Positioned(
+              left: 30,
+              bottom: -44,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: context.bg,
+                  borderRadius: BorderRadius.circular(38),
+                ),
+                child: UserAvatar(
+                    url: user.photoUrl, name: user.username, radius: 42),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 54),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                user.fullName.isNotEmpty ? user.fullName : user.username,
+                style: const TextStyle(
+                    fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -1),
+              ),
+              const SizedBox(height: 2),
+              Text('@${user.username}', style: TextStyle(color: context.muted)),
+              if (user.bio.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(user.bio, style: const TextStyle(fontSize: 15, height: 1.35)),
+              ],
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  _Stat(label: 'Posts', value: user.postsCount),
+                  const SizedBox(width: 10),
+                  _Stat(
+                    label: 'Followers',
+                    value: user.followersCount,
+                    onTap: () => openScreen(context,
+                        FollowListScreen(uid: user.uid, followers: true)),
+                  ),
+                  const SizedBox(width: 10),
+                  _Stat(
+                    label: 'Following',
+                    value: user.followingCount,
+                    onTap: () => openScreen(context,
+                        FollowListScreen(uid: user.uid, followers: false)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (_isMe)
+                FilledButton.icon(
+                  onPressed: () =>
+                      openScreen(context, EditProfileScreen(user: user)),
+                  icon: const Icon(Icons.edit_rounded, size: 18),
+                  label: const Text('Edit profile'),
+                )
+              else
+                FollowButton(uid: user.uid),
             ],
           ),
-          const SizedBox(height: 12),
-          if (user.fullName.isNotEmpty)
-            Text(user.fullName,
-                style: const TextStyle(fontWeight: FontWeight.w700)),
-          if (user.bio.isNotEmpty) Text(user.bio),
-          const SizedBox(height: 14),
-          if (_isMe)
-            OutlinedButton(
-              onPressed: () =>
-                  openScreen(context, EditProfileScreen(user: user)),
-              child: const Text('Edit profile'),
-            )
-          else
-            FollowButton(uid: user.uid),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -216,18 +302,25 @@ class _Stat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.all(6),
-        child: Column(
-          children: [
-            Text('$value',
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-            Text(label, style: TextStyle(color: context.muted, fontSize: 13)),
-          ],
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          decoration: BoxDecoration(
+            color: context.card,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: context.hairline.withValues(alpha: 0.7)),
+          ),
+          child: Column(
+            children: [
+              Text('$value',
+                  style: const TextStyle(
+                      fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+              const SizedBox(height: 2),
+              Text(label, style: TextStyle(color: context.muted, fontSize: 12.5)),
+            ],
+          ),
         ),
       ),
     );

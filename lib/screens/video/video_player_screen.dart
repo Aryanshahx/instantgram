@@ -17,8 +17,7 @@ class VideoPlayerScreen extends StatelessWidget {
         backgroundColor: Colors.black,
         appBar: AppBar(
           backgroundColor: Colors.black,
-          title: Text('@${post.authorUsername}',
-              style: const TextStyle(fontWeight: FontWeight.w700)),
+          title: Text('@${post.authorUsername}'),
         ),
         body: SafeArea(
           child: Column(

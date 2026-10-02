@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../../core/app_events.dart';
 import '../../core/errors.dart';
+import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/post.dart';
 import '../../models/video_link.dart';
 import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/glass.dart';
 import '../../widgets/like_button.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/video_embed.dart';
@@ -74,7 +76,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
             if (_pager.posts.isEmpty) {
               return const EmptyState(
                 icon: Icons.smart_display_outlined,
-                title: 'No reels yet',
+                title: 'No clips yet',
                 subtitle:
                     'Share a YouTube Short, TikTok or Instagram Reel link with the + button.',
               );
@@ -157,14 +159,40 @@ class _ReelPageState extends State<_ReelPage> {
         else
           VideoThumb(post: post),
 
+        // "Clips" title
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 70,
+          child: SafeArea(
+            bottom: false,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(18, 12, 12, 20),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.black54, Colors.transparent],
+                ),
+              ),
+              child: const Text('Clips',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -1)),
+            ),
+          ),
+        ),
+
         // Bottom info. These overlays are opaque so vertical swipes on them
         // change the page even though the video WebView swallows gestures.
         Positioned(
           left: 0,
-          right: 64,
+          right: 70,
           bottom: 0,
           child: Container(
-            padding: const EdgeInsets.fromLTRB(14, 24, 8, 14),
+            padding: const EdgeInsets.fromLTRB(16, 40, 8, kNavSpace - 6),
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.bottomCenter,
@@ -179,26 +207,37 @@ class _ReelPageState extends State<_ReelPage> {
                 GestureDetector(
                   onTap: () =>
                       openScreen(context, ProfileScreen(uid: post.authorId)),
-                  child: Row(
-                    children: [
-                      UserAvatar(url: post.authorPhotoUrl, radius: 14),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(post.authorUsername,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white)),
-                      ),
-                    ],
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(4, 4, 14, 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.16),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        UserAvatar(
+                            url: post.authorPhotoUrl,
+                            name: post.authorUsername,
+                            radius: 15),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text('@${post.authorUsername}',
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white)),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 if (post.caption.isNotEmpty) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   Text(post.caption,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white)),
+                      style: const TextStyle(color: Colors.white, height: 1.3)),
                 ],
               ],
             ),
@@ -210,37 +249,45 @@ class _ReelPageState extends State<_ReelPage> {
           right: 0,
           top: 0,
           bottom: 0,
-          width: 64,
+          width: 70,
           child: Container(
-            color: Colors.black26,
+            color: Colors.black.withValues(alpha: 0.02),
+            padding: const EdgeInsets.only(bottom: kNavSpace - 10),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                IconButton(
-                  onPressed: widget.onPrevious,
-                  icon: const Icon(Icons.keyboard_arrow_up, size: 30),
+                GlassIconButton(
+                  icon: Icons.keyboard_arrow_up_rounded,
+                  size: 40,
+                  onTap: widget.onPrevious,
                 ),
-                IconButton(
-                  onPressed: widget.onNext,
-                  icon: const Icon(Icons.keyboard_arrow_down, size: 30),
+                const SizedBox(height: 8),
+                GlassIconButton(
+                  icon: Icons.keyboard_arrow_down_rounded,
+                  size: 40,
+                  onTap: widget.onNext,
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 22),
                 LikeIconButton(
                   controller: _like,
-                  color: Colors.white,
                   onError: (e) {
                     if (mounted) showToast(context, friendlyError(e));
                   },
                 ),
+                const SizedBox(height: 4),
                 ListenableBuilder(
                   listenable: _like,
                   builder: (_, _) => Text('${_like.count}',
-                      style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800)),
                 ),
-                const SizedBox(height: 10),
-                IconButton(
-                  iconSize: 28,
-                  onPressed: () => openScreen(
+                const SizedBox(height: 14),
+                GlassIconButton(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  size: 50,
+                  onTap: () => openScreen(
                     context,
                     CommentsScreen(
                       post: post,
@@ -249,18 +296,20 @@ class _ReelPageState extends State<_ReelPage> {
                       },
                     ),
                   ),
-                  icon: const Icon(Icons.mode_comment_outlined),
                 ),
+                const SizedBox(height: 4),
                 Text('$_comments',
-                    style: const TextStyle(color: Colors.white, fontSize: 12)),
-                const SizedBox(height: 10),
-                IconButton(
-                  iconSize: 26,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800)),
+                const SizedBox(height: 14),
+                GlassIconButton(
+                  icon: Icons.open_in_new_rounded,
+                  size: 44,
                   tooltip: 'Open in ${platform.label}',
-                  onPressed: () => openExternally(post.videoUrl),
-                  icon: const Icon(Icons.open_in_new),
+                  onTap: () => openExternally(post.videoUrl),
                 ),
-                const SizedBox(height: 16),
               ],
             ),
           ),

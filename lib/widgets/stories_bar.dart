@@ -91,7 +91,7 @@ class _StoriesBarState extends State<StoriesBar> {
       setState(() => _uploading = true);
       await StoryService.instance.addStory(file);
       await _load();
-      if (mounted) showToast(context, 'Story added (visible for 24 hours)');
+      if (mounted) showToast(context, 'Moment shared (visible for 24 hours)');
     } catch (e) {
       if (mounted) showToast(context, friendlyError(e));
     } finally {
@@ -114,14 +114,14 @@ class _StoriesBarState extends State<StoriesBar> {
     final others = _groups.where((g) => g.authorId != _myUid).toList();
 
     return SizedBox(
-      height: 104,
+      height: 108,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         children: [
           _item(
             context,
-            label: 'Your story',
+            label: 'You',
             url: _me?.photoUrl ?? '',
             ring: mine != null,
             plus: true,
@@ -163,7 +163,7 @@ class _StoriesBarState extends State<StoriesBar> {
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  UserAvatar(url: url, radius: 29, ring: ring),
+                  UserAvatar(url: url, name: label, radius: 29, ring: ring),
                   if (loading)
                     const Positioned.fill(
                       child: Padding(
@@ -179,14 +179,14 @@ class _StoriesBarState extends State<StoriesBar> {
                         onTap: onPlus,
                         child: Container(
                           decoration: BoxDecoration(
-                            color: AppTheme.blue,
+                            color: AppTheme.volt,
                             shape: BoxShape.circle,
                             border: Border.all(
                               color: Theme.of(context).scaffoldBackgroundColor,
                               width: 2,
                             ),
                           ),
-                          child: const Icon(Icons.add, color: Colors.white, size: 16),
+                          child: const Icon(Icons.add_rounded, color: AppTheme.ink, size: 16),
                         ),
                       ),
                     ),
@@ -197,7 +197,7 @@ class _StoriesBarState extends State<StoriesBar> {
             Text(label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12)),
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
           ],
         ),
       ),

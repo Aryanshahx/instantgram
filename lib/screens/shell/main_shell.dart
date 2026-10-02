@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_events.dart';
+import '../../core/theme.dart';
 import '../../services/user_service.dart';
+import '../../widgets/glass.dart';
 import '../feed/feed_screen.dart';
 import '../post/create_post_screen.dart';
 import '../profile/profile_screen.dart';
@@ -36,48 +38,149 @@ class _MainShellState extends State<MainShell> {
     final tabs = <Widget>[
       const FeedScreen(),
       const SearchScreen(),
-      const SizedBox.shrink(), // "+" opens the create screen instead
-      ReelsScreen(active: _index == 3),
+      ReelsScreen(active: _index == 2),
       ProfileScreen(uid: UserService.instance.myUid, isTab: true),
     ];
+    final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
 
     return Scaffold(
-      body: IndexedStack(index: _index, children: tabs),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) {
-          if (i == 2) {
-            _createPost();
-          } else {
-            setState(() => _index = i);
-          }
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined, size: 28),
-            selectedIcon: Icon(Icons.home, size: 28),
-            label: 'Home',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.search, size: 28),
-            selectedIcon: Icon(Icons.search, size: 30),
-            label: 'Search',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.add_box_outlined, size: 28),
-            label: 'Post',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.smart_display_outlined, size: 28),
-            selectedIcon: Icon(Icons.smart_display, size: 28),
-            label: 'Reels',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline, size: 28),
-            selectedIcon: Icon(Icons.person, size: 28),
-            label: 'Profile',
-          ),
+      body: Stack(
+        children: [
+          IndexedStack(index: _index, children: tabs),
+          if (!keyboardOpen)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 12 + bottomInset,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Glass(
+                      radius: 30,
+                      blur: 22,
+                      opacity: 0.78,
+                      padding: const EdgeInsets.all(6),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _NavItem(
+                            icon: Icons.home_outlined,
+                            activeIcon: Icons.home_rounded,
+                            label: 'Home',
+                            selected: _index == 0,
+                            onTap: () => setState(() => _index = 0),
+                          ),
+                          _NavItem(
+                            icon: Icons.explore_outlined,
+                            activeIcon: Icons.explore_rounded,
+                            label: 'Explore',
+                            selected: _index == 1,
+                            onTap: () => setState(() => _index = 1),
+                          ),
+                          _NavItem(
+                            icon: Icons.play_circle_outline_rounded,
+                            activeIcon: Icons.play_circle_rounded,
+                            label: 'Clips',
+                            selected: _index == 2,
+                            onTap: () => setState(() => _index = 2),
+                          ),
+                          _NavItem(
+                            icon: Icons.person_outline_rounded,
+                            activeIcon: Icons.person_rounded,
+                            label: 'Me',
+                            selected: _index == 3,
+                            onTap: () => setState(() => _index = 3),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  GestureDetector(
+                    onTap: _createPost,
+                    child: Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        gradient: AppTheme.voltGradient,
+                        borderRadius: BorderRadius.circular(22),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.volt.withValues(alpha: 0.45),
+                            blurRadius: 22,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(Icons.add_rounded,
+                          size: 32, color: AppTheme.ink),
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
+      ),
+    );
+  }
+}
+
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        height: 48,
+        padding: EdgeInsets.symmetric(horizontal: selected ? 14 : 11),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.volt : Colors.transparent,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              selected ? activeIcon : icon,
+              size: 26,
+              color: selected
+                  ? AppTheme.ink
+                  : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+            ),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutCubic,
+              child: selected
+                  ? Padding(
+                      padding: const EdgeInsets.only(left: 6),
+                      child: Text(label,
+                          style: const TextStyle(
+                              color: AppTheme.ink,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14)),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ),
       ),
     );
   }

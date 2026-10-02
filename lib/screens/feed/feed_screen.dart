@@ -1,136 +1,74 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_events.dart';
+import '../../core/theme.dart';
+import '../../core/ui.dart';
+import '../../models/app_user.dart';
 import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
 import '../../services/user_service.dart';
+import '../../widgets/avatar.dart';
 import '../../widgets/brand_logo.dart';
+import '../../widgets/pill_tabs.dart';
 import '../../widgets/post_card.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/stories_bar.dart';
+import '../profile/profile_screen.dart';
 
-class FeedScreen extends StatelessWidget {
+class FeedScreen extends StatefulWidget {
   const FeedScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const BrandLogo(size: 28),
-          bottom: const TabBar(
-            tabs: [Tab(text: 'For you'), Tab(text: 'Following')],
-          ),
-        ),
-        body: const TabBarView(
-          children: [_ForYouTab(), _FollowingTab()],
-        ),
-      ),
-    );
-  }
+  State<FeedScreen> createState() => _FeedScreenState();
 }
 
-// ------------------------------------------------------------------- For you
-
-class _ForYouTab extends StatefulWidget {
-  const _ForYouTab();
-
-  @override
-  State<_ForYouTab> createState() => _ForYouTabState();
-}
-
-class _ForYouTabState extends State<_ForYouTab>
-    with AutomaticKeepAliveClientMixin {
-  late final PostPager _pager =
+class _FeedScreenState extends State<FeedScreen> {
+  late final PostPager _discover =
       PostPager(PostService.instance.latestQuery, pageSize: 8);
+  late final Stream<AppUser?> _me =
+      UserService.instance.watchUser(UserService.instance.myUid);
 
-  @override
-  bool get wantKeepAlive => true;
+  PostPager? _following;
+  bool _followingLoading = false;
+  bool _noFollowing = false;
+  Object? _followingError;
+  int _tab = 0;
 
   @override
   void initState() {
     super.initState();
-    _pager.loadMore();
+    _discover.loadMore();
     AppEvents.feedRefresh.addListener(_onRefresh);
   }
-
-  void _onRefresh() => _pager.refresh();
 
   @override
   void dispose() {
     AppEvents.feedRefresh.removeListener(_onRefresh);
-    _pager.dispose();
+    _discover.dispose();
+    _following?.dispose();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    return PagedPostList(
-      pager: _pager,
-      header: const StoriesBar(),
-      onRefresh: () async {
-        // Reloads posts, stories and the Following tab together.
-        AppEvents.refreshFeed();
-        while (_pager.loading) {
-          await Future<void>.delayed(const Duration(milliseconds: 100));
-        }
-      },
-      empty: const EmptyState(
-        icon: Icons.photo_camera_outlined,
-        title: 'No posts yet',
-        subtitle: 'Tap + to share the first photo or video link.',
-      ),
-    );
-  }
-}
-
-// ----------------------------------------------------------------- Following
-
-class _FollowingTab extends StatefulWidget {
-  const _FollowingTab();
-
-  @override
-  State<_FollowingTab> createState() => _FollowingTabState();
-}
-
-class _FollowingTabState extends State<_FollowingTab>
-    with AutomaticKeepAliveClientMixin {
-  PostPager? _pager;
-  Object? _error;
-  bool _loading = true;
-  bool _noFollowing = false;
-
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  void initState() {
-    super.initState();
-    _init();
-    AppEvents.feedRefresh.addListener(_init);
+  void _onRefresh() {
+    _discover.refresh();
+    if (_tab == 1 || _following != null) _loadFollowing();
   }
 
-  @override
-  void dispose() {
-    AppEvents.feedRefresh.removeListener(_init);
-    _pager?.dispose();
-    super.dispose();
-  }
-
-  Future<void> _init() async {
+  Future<void> _loadFollowing() async {
+    setState(() {
+      _followingLoading = true;
+      _followingError = null;
+    });
     try {
       final me = UserService.instance.myUid;
       final ids = await UserService.instance.followingIds();
       if (!mounted) return;
-      _pager?.dispose();
-      _pager = null;
+      _following?.dispose();
+      _following = null;
       if (ids.isEmpty) {
         setState(() {
           _noFollowing = true;
-          _loading = false;
-          _error = null;
+          _followingLoading = false;
         });
         return;
       }
@@ -139,55 +77,185 @@ class _FollowingTabState extends State<_FollowingTab>
       final pager = PostPager(
         () => PostService.instance.followingQuery(authors),
         pageSize: 8,
-      );
-      pager.loadMore();
+      )..loadMore();
       setState(() {
-        _pager = pager;
+        _following = pager;
         _noFollowing = false;
-        _loading = false;
-        _error = null;
+        _followingLoading = false;
       });
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = e;
-          _loading = false;
+          _followingError = e;
+          _followingLoading = false;
         });
       }
     }
   }
 
+  void _setTab(int i) {
+    if (i == _tab) return;
+    setState(() => _tab = i);
+    if (i == 1 && _following == null && !_followingLoading && !_noFollowing) {
+      _loadFollowing();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    super.build(context);
-    if (_loading) return const CenteredLoader();
-    if (_error != null) {
-      return ErrorState(error: _error!, onRetry: _init);
+    final header = _FeedHeader(me: _me, tab: _tab, onTab: _setTab);
+    return SafeArea(
+      bottom: false,
+      child: _tab == 0
+          ? PagedPostList(
+              pager: _discover,
+              header: header,
+              onRefresh: () async {
+                // Reloads posts, moments and the Following tab together.
+                AppEvents.refreshFeed();
+                while (_discover.loading) {
+                  await Future<void>.delayed(const Duration(milliseconds: 100));
+                }
+              },
+              empty: const EmptyState(
+                icon: Icons.bolt_rounded,
+                title: 'Nothing here yet',
+                subtitle: 'Tap the + button to share the first photo or clip.',
+              ),
+            )
+          : _followingBody(header),
+    );
+  }
+
+  Widget _followingBody(Widget header) {
+    Widget wrap(Widget child) => RefreshIndicator(
+          onRefresh: _loadFollowing,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [header, child, const SizedBox(height: kNavSpace)],
+          ),
+        );
+
+    if (_followingLoading && _following == null) {
+      return wrap(const Padding(
+        padding: EdgeInsets.only(top: 60),
+        child: CenteredLoader(),
+      ));
     }
-    if (_noFollowing || _pager == null) {
-      return RefreshIndicator(
-        onRefresh: _init,
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          children: const [
-            SizedBox(height: 120),
-            EmptyState(
-              icon: Icons.people_outline,
-              title: "You're not following anyone yet",
-              subtitle: 'Use Search to find people. Their posts will show up here.',
-            ),
-          ],
+    if (_followingError != null) {
+      return wrap(ErrorState(error: _followingError!, onRetry: _loadFollowing));
+    }
+    if (_noFollowing || _following == null) {
+      return wrap(const Padding(
+        padding: EdgeInsets.only(top: 30),
+        child: EmptyState(
+          icon: Icons.group_add_outlined,
+          title: 'Follow people to fill this feed',
+          subtitle: 'Find friends in Explore. Their posts will land here.',
         ),
-      );
+      ));
     }
     return PagedPostList(
-      pager: _pager!,
-      onRefresh: _init,
+      pager: _following!,
+      header: header,
+      onRefresh: _loadFollowing,
       empty: const EmptyState(
         icon: Icons.photo_outlined,
-        title: 'Nothing here yet',
-        subtitle: 'People you follow have not posted anything.',
+        title: 'Quiet for now',
+        subtitle: 'The people you follow have not posted yet.',
       ),
+    );
+  }
+}
+
+class _FeedHeader extends StatelessWidget {
+  const _FeedHeader({required this.me, required this.tab, required this.onTab});
+
+  final Stream<AppUser?> me;
+  final int tab;
+  final ValueChanged<int> onTab;
+
+  String get _greeting {
+    final h = DateTime.now().hour;
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+          child: Row(
+            children: [
+              const BrandLogo(size: 24),
+              const Spacer(),
+              StreamBuilder<AppUser?>(
+                stream: me,
+                builder: (context, snap) {
+                  final u = snap.data;
+                  return GestureDetector(
+                    onTap: u == null
+                        ? null
+                        : () => openScreen(context, ProfileScreen(uid: u.uid)),
+                    child: UserAvatar(
+                        url: u?.photoUrl ?? '',
+                        name: u?.username ?? '',
+                        radius: 19),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 4),
+          child: StreamBuilder<AppUser?>(
+            stream: me,
+            builder: (context, snap) {
+              final u = snap.data;
+              final name = (u == null)
+                  ? ''
+                  : (u.fullName.trim().isNotEmpty
+                      ? u.fullName.trim().split(' ').first
+                      : u.username);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_greeting, style: TextStyle(color: context.muted, fontSize: 14)),
+                  const SizedBox(height: 2),
+                  Text(
+                    name.isEmpty ? "What's new?" : "$name, what's new?",
+                    style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -1,
+                        height: 1.1),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(20, 14, 20, 0),
+          child: Text('Moments',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+        ),
+        const StoriesBar(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
+          child: PillTabs(
+            labels: const ['Discover', 'Following'],
+            icons: const [Icons.auto_awesome_rounded, Icons.people_alt_rounded],
+            index: tab,
+            onChanged: onTab,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -231,17 +299,40 @@ class _PagedPostListState extends State<PagedPostList> {
     super.dispose();
   }
 
+  Widget _footer(BuildContext context) {
+    final pager = widget.pager;
+    Widget body;
+    if (pager.loading) {
+      body = const Padding(
+        padding: EdgeInsets.all(28),
+        child: Center(child: CircularProgressIndicator(strokeWidth: 3)),
+      );
+    } else if (pager.error != null && pager.posts.isEmpty) {
+      body = ErrorState(error: pager.error!, onRetry: pager.retry);
+    } else if (pager.error != null) {
+      body = Padding(
+        padding: const EdgeInsets.all(16),
+        child: Center(
+          child: TextButton(onPressed: pager.retry, child: const Text('Retry')),
+        ),
+      );
+    } else if (pager.posts.isEmpty) {
+      body = Padding(
+        padding: const EdgeInsets.only(top: 30),
+        child: widget.empty,
+      );
+    } else {
+      body = const SizedBox.shrink();
+    }
+    return Column(children: [body, const SizedBox(height: kNavSpace)]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final pager = widget.pager;
     return ListenableBuilder(
       listenable: pager,
       builder: (context, _) {
-        if (pager.initialLoading) return const CenteredLoader();
-        if (pager.error != null && pager.posts.isEmpty) {
-          return ErrorState(error: pager.error!, onRetry: pager.retry);
-        }
-
         final hasHeader = widget.header != null;
         final headerCount = hasHeader ? 1 : 0;
         final posts = pager.posts;
@@ -263,30 +354,7 @@ class _PagedPostListState extends State<PagedPostList> {
                   onDeleted: () => pager.removeById(post.id),
                 );
               }
-              // footer
-              if (pager.loading) {
-                return const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Center(
-                      child: CircularProgressIndicator(strokeWidth: 2.5)),
-                );
-              }
-              if (pager.error != null) {
-                return Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Center(
-                    child: TextButton(
-                        onPressed: pager.retry, child: const Text('Retry')),
-                  ),
-                );
-              }
-              if (posts.isEmpty) {
-                return Padding(
-                  padding: const EdgeInsets.only(top: 40),
-                  child: widget.empty,
-                );
-              }
-              return const SizedBox(height: 24);
+              return _footer(context);
             },
           ),
         );

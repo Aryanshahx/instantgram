@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/app_user.dart';
 import '../../services/user_service.dart';
@@ -34,10 +35,7 @@ class _FollowListScreenState extends State<FollowListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.followers ? 'Followers' : 'Following',
-            style: const TextStyle(fontWeight: FontWeight.w700)),
-      ),
+      appBar: AppBar(title: Text(widget.followers ? 'Followers' : 'Following')),
       body: FutureBuilder<List<AppUser>>(
         future: _future,
         builder: (context, snap) {
@@ -51,21 +49,34 @@ class _FollowListScreenState extends State<FollowListScreen> {
           final users = snap.data!;
           if (users.isEmpty) {
             return EmptyState(
-              icon: Icons.people_outline,
+              icon: Icons.group_outlined,
               title: widget.followers ? 'No followers yet' : 'Not following anyone',
             );
           }
           return ListView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
             itemCount: users.length,
             itemBuilder: (context, i) {
               final u = users[i];
-              return ListTile(
-                leading: UserAvatar(url: u.photoUrl, radius: 24),
-                title: Text(u.username,
-                    style: const TextStyle(fontWeight: FontWeight.w700)),
-                subtitle: u.fullName.isEmpty ? null : Text(u.fullName),
-                trailing: FollowButton(uid: u.uid, compact: true),
-                onTap: () => openScreen(context, ProfileScreen(uid: u.uid)),
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                decoration: BoxDecoration(
+                  color: context.card,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: context.hairline.withValues(alpha: 0.7)),
+                ),
+                child: ListTile(
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(24)),
+                  contentPadding: const EdgeInsets.all(10),
+                  leading: UserAvatar(url: u.photoUrl, name: u.username, radius: 24),
+                  title: Text(u.username,
+                      style: const TextStyle(fontWeight: FontWeight.w800)),
+                  subtitle: u.fullName.isEmpty ? null : Text(u.fullName),
+                  trailing: SizedBox(
+                      width: 104, child: FollowButton(uid: u.uid, compact: true)),
+                  onTap: () => openScreen(context, ProfileScreen(uid: u.uid)),
+                ),
               );
             },
           );
