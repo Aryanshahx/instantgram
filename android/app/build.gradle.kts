@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.hypertechlabs.instantgram.instantgram"
+    namespace = "com.hypertechlabs.instantgram"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -17,7 +17,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.hypertechlabs.instantgram.instantgram"
+        applicationId = "com.hypertechlabs.instantgram"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = maxOf(23, flutter.minSdkVersion)
