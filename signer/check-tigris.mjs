@@ -46,7 +46,7 @@ async function main() {
         const res = await fetch(`https://${bucket}.${domain}/${key}`, { headers: { range: "bytes=0-9" } });
         lastStatus = res.status;
         const text = await res.text();
-        if ((res.status === 206 || res.status === 200) && text.startsWith("instagram")) {
+        if ((res.status === 206 || res.status === 200) && text.startsWith("instantgra")) {
           found = `https://${bucket}.${domain}`;
           range = res.status === 206;
           break;
