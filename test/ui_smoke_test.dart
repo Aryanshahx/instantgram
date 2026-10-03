@@ -103,6 +103,11 @@ void main() {
           find.descendant(of: frame, matching: find.byType(FilledButton)),
           findsNothing,
         );
+        // square corners
+        expect(
+          find.descendant(of: frame, matching: find.byType(ClipRRect)),
+          findsNothing,
+        );
         // the buttons are outside, under it
         expect(find.text('Choose a photo'), findsOneWidget);
         await t.tap(find.text('Clips'));
@@ -215,9 +220,39 @@ void main() {
             entry.value,
           ),
         );
-        expect(find.text('1:23'), findsOneWidget);
+        // no duration chip and no button background, just the picture and a play icon
+        expect(find.text('1:23'), findsNothing);
+        expect(
+          find.descendant(
+            of: find.byType(VideoThumb),
+            matching: find.byType(DecoratedBox),
+          ),
+          // only the placeholder gradient (no round button behind the icon)
+          findsOneWidget,
+        );
         expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
         expect(t.takeException(), isNull);
+      });
+
+      testWidgets('avatars are circles', (t) async {
+        await t.pumpWidget(
+          _app(
+            const Scaffold(
+              body: Center(
+                child: UserAvatar(
+                  url: '',
+                  name: 'aryan',
+                  radius: 30,
+                  ring: true,
+                ),
+              ),
+            ),
+            entry.value,
+          ),
+        );
+        expect(find.byType(ClipOval), findsOneWidget);
+        expect(find.byType(ClipRRect), findsNothing);
+        expect(t.getSize(find.byType(ClipOval)), const Size(60, 60));
       });
 
       testWidgets('shared widgets render', (t) async {

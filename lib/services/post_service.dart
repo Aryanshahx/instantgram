@@ -56,6 +56,8 @@ class PostService {
     required File image,
     required String caption,
     void Function(double progress)? onProgress,
+    int width = 0,
+    int height = 0,
   }) async {
     // Look up the profile while the photo is uploading (saves a round trip).
     final meFuture = _me();
@@ -75,6 +77,8 @@ class PostService {
       'type': 'image',
       'caption': caption.trim(),
       'imageUrl': uploaded.ref,
+      if (width > 0 && height > 0) 'imageWidth': width,
+      if (width > 0 && height > 0) 'imageHeight': height,
       'likeCount': 0,
       'commentCount': 0,
       'createdAt': FieldValue.serverTimestamp(),

@@ -254,7 +254,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
                   color: context.bg,
-                  borderRadius: BorderRadius.circular(38),
+                  shape: BoxShape.circle,
                 ),
                 child: UserAvatar(
                   url: user.photoUrl,

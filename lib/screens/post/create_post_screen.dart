@@ -14,8 +14,12 @@ import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../services/media_server.dart';
 import '../../services/media_service.dart';
+import '../../services/mp4_faststart.dart';
+import '../../services/photo_edit.dart';
 import '../../services/post_service.dart';
 import '../../widgets/pill_tabs.dart';
+import 'photo_editor_screen.dart';
+import 'video_editor_screen.dart';
 
 /// Two steps:
 ///  1. Preview: a clean 9:16 frame that only shows your photo or clip (never stretched or
@@ -32,16 +36,20 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   int _mode = 0; // 0 = post (photo), 1 = clips (video)
   int _step = 0; // 0 = preview, 1 = details
 
-  File? _image;
+  File? _image; // what gets uploaded (the original, or its edited copy)
+  File? _imageOriginal;
+  PhotoEdits? _imageEdits;
   int _imageBytes = 0;
 
   File? _video;
   File? _videoThumb;
-  int _videoSeconds = 0;
+  int _videoSeconds = 0; // length that will be published (after trimming)
+  int _videoSecondsFull = 0;
   int _videoBytes = 0;
   bool _original = true; // upload the clip exactly as recorded
   int _videoW = 0;
   int _videoH = 0;
+  VideoEdits? _videoEdits;
 
   /// Live preview of the picked clip (silent until the user taps the frame to pause).
   VideoPlayerController? _preview;
@@ -59,6 +67,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   void dispose() {
     _caption.dispose();
     _preview?.dispose();
+    _dropEditedCopy();
     if (_busy) VideoCompress.cancelCompression();
     super.dispose();
   }
@@ -116,8 +125,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       if (file == null) return;
       final bytes = await file.length();
       if (!mounted) return;
+      _dropEditedCopy();
       setState(() {
         _image = file;
+        _imageOriginal = file;
+        _imageEdits = null;
         _imageBytes = bytes;
       });
     } catch (e) {
@@ -174,9 +186,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         _video = File(picked.path);
         _videoThumb = thumb;
         _videoSeconds = seconds;
+        _videoSecondsFull = seconds;
         _videoBytes = bytes;
         _videoW = w;
         _videoH = h;
+        _videoEdits = null;
         _previewPaused = false;
       });
       await _startPreview(File(picked.path));
@@ -195,6 +209,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     try {
       await c.initialize();
       await c.setLooping(true);
+      await c.setVolume(_videoEdits?.mute == true ? 0 : 1);
+      c.addListener(_previewTick);
       if (!mounted || _video?.path != file.path) {
         await c.dispose();
         return;
@@ -203,6 +219,72 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _syncPreview();
     } catch (_) {
       await c.dispose(); // the frame then shows the thumbnail instead
+    }
+  }
+
+  /// Keeps the preview inside the trimmed part of the clip.
+  void _previewTick() {
+    final c = _preview;
+    final e = _videoEdits;
+    if (c == null || e == null || !e.trimmed) return;
+    final pos = c.value.position;
+    if (pos >= Duration(seconds: e.end) ||
+        pos < Duration(seconds: e.start) - const Duration(milliseconds: 400)) {
+      c.seekTo(Duration(seconds: e.start));
+    }
+  }
+
+  void _dropEditedCopy({File? except}) {
+    final i = _image;
+    final o = _imageOriginal;
+    if (i != null && o != null && i.path != o.path && i.path != except?.path) {
+      i.delete().ignore();
+    }
+  }
+
+  Future<void> _edit() async {
+    if (_mode == 0) {
+      final src = _imageOriginal;
+      if (src == null) return;
+      final r = await Navigator.of(context).push<PhotoEditResult>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) =>
+              PhotoEditorScreen(original: src, initial: _imageEdits),
+        ),
+      );
+      if (r == null || !mounted) return;
+      final bytes = await r.file.length();
+      _dropEditedCopy(except: r.file);
+      if (!mounted) return;
+      setState(() {
+        _image = r.file;
+        _imageEdits = r.edits.isEmpty ? null : r.edits;
+        _imageBytes = bytes;
+      });
+    } else {
+      final f = _video;
+      if (f == null) return;
+      _preview?.pause();
+      final r = await Navigator.of(context).push<VideoEdits>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => VideoEditorScreen(file: f, initial: _videoEdits),
+        ),
+      );
+      if (!mounted) return;
+      if (r != null) {
+        setState(() {
+          _videoEdits = r.isEmpty ? null : r;
+          _videoSeconds = r.isEmpty ? _videoSecondsFull : r.length;
+        });
+        final c = _preview;
+        if (c != null) {
+          await c.setVolume(r.mute ? 0 : 1);
+          await c.seekTo(Duration(seconds: r.trimmed ? r.start : 0));
+        }
+      }
+      _syncPreview();
     }
   }
 
@@ -257,8 +339,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _progress = null;
       _totalBytes = 0;
       _stage = (_mode == 1 && _willShrink)
-          ? 'Optimising video...'
-          : 'Uploading...';
+          ? 'Processing video...'
+          : (_mode == 1 ? 'Getting ready...' : 'Uploading...');
     });
     _syncPreview();
     try {
@@ -268,10 +350,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           ..reset()
           ..start();
         setState(() => _progress = 0);
+        final dims = await PhotoEditor.probeSize(_image!);
         await PostService.instance.createImagePost(
           image: _image!,
           caption: _caption.text,
           onProgress: _onProgress,
+          width: dims?.width.round() ?? 0,
+          height: dims?.height.round() ?? 0,
         );
       } else {
         await _publishVideo();
@@ -286,27 +371,37 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  bool get _willShrink => !_original || _videoBytes > kMaxVideoMb * 1024 * 1024;
+  bool get _willShrink =>
+      !_original ||
+      _videoBytes > kMaxVideoMb * 1024 * 1024 ||
+      _videoEdits != null;
 
   static String _mb(int bytes) => bytes >= 1024 * 1024
       ? '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB'
       : '${(bytes / 1024).round()} KB';
 
   Future<void> _publishVideo() async {
-    // 1) original quality: upload the file untouched. Only shrink to 720p when the user
-    //    switched "Original quality" off, or when the file is bigger than the service accepts.
+    // 1) Original quality: the file is uploaded untouched. It is only saved again (at up to
+    //    1080p, or 720p when "Original quality" is off) when the clip was edited, when the
+    //    user turned the switch off, or when it is bigger than the service accepts.
     File out = _video!;
     MediaInfo? info;
     if (_willShrink) {
       final sub = VideoCompress.compressProgress$.subscribe((p) {
         if (mounted) setState(() => _progress = (p / 100).clamp(0.0, 1.0));
       });
+      final ve = _videoEdits;
+      final cut = ve != null && ve.trimmed;
       try {
         info = await VideoCompress.compressVideo(
           _video!.path,
-          quality: VideoQuality.Res1280x720Quality,
+          quality: _original
+              ? VideoQuality.Res1920x1080Quality
+              : VideoQuality.Res1280x720Quality,
           deleteOrigin: false,
-          includeAudio: true,
+          startTime: cut ? ve.start : null,
+          duration: cut ? ve.length : null,
+          includeAudio: !(ve?.mute ?? false),
         );
       } finally {
         sub.unsubscribe();
@@ -320,36 +415,53 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       out = shrunk;
     }
 
-    // 2) upload straight to the Tigris bucket
-    _totalBytes = await out.length();
-    _clock
-      ..reset()
-      ..start();
+    // 2) Put the index of the video at the front so it starts playing straight away for
+    //    viewers. Nothing is re-encoded; the picture and sound bytes stay identical.
     if (mounted) {
       setState(() {
-        _stage = 'Uploading...';
-        _progress = 0;
+        _stage = 'Getting ready...';
+        _progress = null;
       });
     }
-    var w = info?.width ?? _videoW;
-    var h = info?.height ?? _videoH;
-    if (w == 0 || h == 0) {
-      w = _videoW;
-      h = _videoH;
+    final fast = await Mp4FastStart.run(out);
+    final tempCopy = fast.path != out.path ? fast : null;
+    out = fast;
+
+    try {
+      // 3) upload straight to the Tigris bucket
+      _totalBytes = await out.length();
+      _clock
+        ..reset()
+        ..start();
+      if (mounted) {
+        setState(() {
+          _stage = 'Uploading...';
+          _progress = 0;
+        });
+      }
+      // proportions: the picked file's (already turned upright); a saved copy keeps them
+      var w = _videoW;
+      var h = _videoH;
+      if (w == 0 || h == 0) {
+        w = info?.width ?? 0;
+        h = info?.height ?? 0;
+      }
+      final media = await MediaServer.instance.uploadVideo(
+        file: out,
+        thumb: _videoThumb,
+        onProgress: _onProgress,
+      );
+      if (mounted) setState(() => _stage = 'Publishing...');
+      await PostService.instance.createVideoPost(
+        media: media,
+        caption: _caption.text,
+        duration: _videoSeconds,
+        width: w,
+        height: h,
+      );
+    } finally {
+      tempCopy?.delete().ignore();
     }
-    final media = await MediaServer.instance.uploadVideo(
-      file: out,
-      thumb: _videoThumb,
-      onProgress: _onProgress,
-    );
-    if (mounted) setState(() => _stage = 'Publishing...');
-    await PostService.instance.createVideoPost(
-      media: media,
-      caption: _caption.text,
-      duration: _videoSeconds,
-      width: w,
-      height: h,
-    );
     VideoCompress.deleteAllCache();
   }
 
@@ -428,18 +540,31 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
             child: _hasMedia
-                ? Row(
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _mode == 0 ? _pickImage : _pickVideo,
-                          icon: const Icon(Icons.swap_horiz_rounded),
-                          label: const Text('Change'),
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _mode == 0 ? _pickImage : _pickVideo,
+                              icon: const Icon(Icons.swap_horiz_rounded),
+                              label: const Text('Change'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _edit,
+                              icon: const Icon(Icons.tune_rounded),
+                              label: const Text('Edit'),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 2,
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
                         child: FilledButton.icon(
                           onPressed: () => _go(1),
                           icon: const Icon(Icons.arrow_forward_rounded),
@@ -481,8 +606,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             key: const ValueKey('previewFrame'),
             width: w,
             height: w * 16 / 9,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(w < 150 ? 14 : 26),
+            child: ClipRect(
               child: ColoredBox(color: const Color(0xFF0A0A0A), child: child),
             ),
           ),
@@ -586,9 +710,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             const SizedBox(width: 6),
                             Flexible(
                               child: Text(
-                                isVideo
-                                    ? '${formatDuration(_videoSeconds)}  \u00b7  ${_mb(_videoBytes)}'
-                                    : 'Original  \u00b7  ${_mb(_imageBytes)}',
+                                _summary(),
                                 style: TextStyle(
                                   color: context.muted,
                                   fontWeight: FontWeight.w700,
@@ -681,6 +803,40 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
+  String _summary() {
+    if (_mode == 0) {
+      return '${_imageEdits != null ? 'Edited' : 'Original'}  \u00b7  ${_mb(_imageBytes)}';
+    }
+    final e = _videoEdits;
+    final tags = <String>[
+      formatDuration(_videoSeconds),
+      _mb(_videoBytes),
+      if (e != null && e.trimmed) 'Trimmed',
+      if (e != null && e.mute) 'No sound',
+    ];
+    return tags.join('  \u00b7  ');
+  }
+
+  String _qualityText(bool big) {
+    if (big && _original) {
+      return 'This file is over $kMaxVideoMb MB, so it will be shrunk to fit.';
+    }
+    if (!_original) {
+      return 'Saved at 720p on your phone first. Smaller, so it uploads and plays faster.';
+    }
+    final mbps = _videoSecondsFull > 0
+        ? _videoBytes * 8 / _videoSecondsFull / 1e6
+        : 0;
+    final edited = _videoEdits != null
+        ? ' Edited clips are saved again at up to 1080p.'
+        : '';
+    if (mbps > 15) {
+      return 'Uploaded as recorded (${mbps.round()} Mbps). Heavy clips like this can '
+          'buffer on slow connections: turn this off for smoother playback.$edited';
+    }
+    return 'Uploaded exactly as recorded. Big files take longer to upload and to load for viewers.$edited';
+  }
+
   Widget _qualityTile(BuildContext context) {
     final big = _videoBytes > kMaxVideoMb * 1024 * 1024;
     return Container(
@@ -698,11 +854,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         subtitle: Text(
-          big && _original
-              ? 'This file is over $kMaxVideoMb MB, so it will be shrunk to fit.'
-              : _original
-              ? 'Uploaded exactly as recorded. Big files take longer to upload and to load for viewers.'
-              : 'Shrunk to 720p on your phone first. Smaller, so it uploads and plays faster.',
+          _qualityText(big),
           style: TextStyle(color: context.muted, fontSize: 12.5, height: 1.3),
         ),
       ),

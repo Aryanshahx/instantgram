@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../core/theme.dart';
 import '../services/post_service.dart';
 
 /// Optimistic like state for a single post.
@@ -54,69 +53,15 @@ class LikeController extends ChangeNotifier {
   }
 }
 
-/// Bolt "spark" pill shown on top of images.
-class LikePill extends StatelessWidget {
-  const LikePill({super.key, required this.controller, this.onError});
+/// The colour of a liked heart.
+const Color kHeartColor = Color(0xFFFF3B5C);
 
-  final LikeController controller;
-  final void Function(Object error)? onError;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (context, _) {
-        final liked = controller.liked;
-        final fg = liked ? AppTheme.ink : Colors.white;
-        return GestureDetector(
-          onTap: () async {
-            final err = await controller.toggle();
-            if (err != null) onError?.call(err);
-          },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(
-              color: liked
-                  ? AppTheme.volt
-                  : Colors.black.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AnimatedScale(
-                  scale: liked ? 1.25 : 1,
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutBack,
-                  child: Icon(Icons.bolt_rounded, size: 20, color: fg),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '${controller.count}',
-                  style: TextStyle(
-                    color: fg,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-/// Round bolt button (used in the Clips rail).
-class LikeIconButton extends StatelessWidget {
-  const LikeIconButton({
+/// Heart + count, no background. Used under posts.
+class HeartButton extends StatelessWidget {
+  const HeartButton({
     super.key,
     required this.controller,
-    this.size = 50,
+    this.size = 28,
     this.onError,
   });
 
@@ -131,30 +76,37 @@ class LikeIconButton extends StatelessWidget {
       builder: (context, _) {
         final liked = controller.liked;
         return GestureDetector(
+          behavior: HitTestBehavior.opaque,
           onTap: () async {
             final err = await controller.toggle();
             if (err != null) onError?.call(err);
           },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            width: size,
-            height: size,
-            decoration: BoxDecoration(
-              color: liked
-                  ? AppTheme.volt
-                  : Colors.black.withValues(alpha: 0.45),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-            ),
-            child: AnimatedScale(
-              scale: liked ? 1.2 : 1,
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutBack,
-              child: Icon(
-                Icons.bolt_rounded,
-                size: size * 0.55,
-                color: liked ? AppTheme.ink : Colors.white,
-              ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedScale(
+                  scale: liked ? 1.18 : 1,
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutBack,
+                  child: Icon(
+                    liked
+                        ? Icons.favorite_rounded
+                        : Icons.favorite_border_rounded,
+                    size: size,
+                    color: liked ? kHeartColor : null,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '${controller.count}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14.5,
+                  ),
+                ),
+              ],
             ),
           ),
         );

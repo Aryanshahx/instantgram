@@ -359,7 +359,7 @@ class _ReelPageState extends State<_ReelPage> {
                     const SizedBox(width: 10),
                     Flexible(
                       child: Text(
-                        '@${post.authorUsername}',
+                        post.authorUsername,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontWeight: FontWeight.w800,
@@ -402,14 +402,12 @@ class _ReelPageState extends State<_ReelPage> {
             onLike: _toggleLike,
             onSave: _toggleSave,
             onShare: _share,
-            onComments: () => openScreen(
+            onComments: () => showCommentsSheet(
               context,
-              CommentsScreen(
-                post: post,
-                onCountChanged: (d) {
-                  if (mounted) setState(() => _comments += d);
-                },
-              ),
+              post: post,
+              onCountChanged: (d) {
+                if (mounted) setState(() => _comments += d);
+              },
             ),
           ),
         ),

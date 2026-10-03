@@ -1,24 +1,16 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../core/media_url.dart';
-import '../core/theme.dart';
 import '../models/post.dart';
+import 'reel_actions.dart';
 
 /// Thumbnail of a video post (a cheap image; no player is created in lists).
+/// Just the picture and a plain play icon: no duration, no button background.
 class VideoThumb extends StatelessWidget {
-  const VideoThumb({
-    super.key,
-    required this.post,
-    this.playSize = 56,
-    this.showBadge = true,
-  });
+  const VideoThumb({super.key, required this.post, this.playSize = 56});
 
   final Post post;
   final double playSize;
-
-  /// Shows the duration chip.
-  final bool showBadge;
 
   @override
   Widget build(BuildContext context) {
@@ -52,40 +44,13 @@ class VideoThumb extends StatelessWidget {
             errorWidget: (_, _, _) => placeholder,
           ),
         Center(
-          child: Container(
-            width: playSize,
-            height: playSize,
-            decoration: const BoxDecoration(
-              color: Colors.black45,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.play_arrow_rounded,
-              color: Colors.white,
-              size: playSize * 0.7,
-            ),
+          child: Icon(
+            Icons.play_arrow_rounded,
+            color: Colors.white,
+            size: playSize,
+            shadows: kReelShadow,
           ),
         ),
-        if (showBadge && post.videoDuration > 0)
-          Positioned(
-            top: 10,
-            right: 10,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppTheme.volt,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                formatDuration(post.videoDuration),
-                style: const TextStyle(
-                  color: AppTheme.ink,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ),
       ],
     );
   }

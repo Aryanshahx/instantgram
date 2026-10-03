@@ -20,6 +20,8 @@ class Post {
     this.videoDuration = 0,
     this.videoWidth = 0,
     this.videoHeight = 0,
+    this.imageWidth = 0,
+    this.imageHeight = 0,
     this.likeCount = 0,
     this.commentCount = 0,
   });
@@ -43,6 +45,10 @@ class Post {
   final int videoWidth;
   final int videoHeight;
 
+  /// Proportions of a photo (only the ratio matters; 0 for photos from before v1.5).
+  final int imageWidth;
+  final int imageHeight;
+
   final int likeCount;
   final int commentCount;
 
@@ -61,6 +67,10 @@ class Post {
   double get videoAspect =>
       (videoWidth > 0 && videoHeight > 0) ? videoWidth / videoHeight : 0;
 
+  /// width / height of the photo (0 if unknown).
+  double get imageAspect =>
+      (imageWidth > 0 && imageHeight > 0) ? imageWidth / imageHeight : 0;
+
   factory Post.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? const <String, dynamic>{};
     final ts = m['createdAt'];
@@ -78,6 +88,8 @@ class Post {
       videoDuration: _int(m['videoDuration']),
       videoWidth: _int(m['videoWidth']),
       videoHeight: _int(m['videoHeight']),
+      imageWidth: _int(m['imageWidth']),
+      imageHeight: _int(m['imageHeight']),
       likeCount: _int(m['likeCount']),
       commentCount: _int(m['commentCount']),
     );

@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import '../core/media_url.dart';
 import '../core/theme.dart';
 
-/// Squircle avatar (rounded square) with an optional lime "moment" ring.
-/// Falls back to a gradient tile with the user's initial.
+/// Round profile picture with an optional lime "moment" ring.
+/// Falls back to a gradient circle with the user's initial.
 class UserAvatar extends StatelessWidget {
   const UserAvatar({
     super.key,
@@ -25,7 +25,6 @@ class UserAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final size = radius * 2;
-    final corner = size * 0.34;
 
     Widget initial() => Container(
       width: size,
@@ -42,8 +41,7 @@ class UserAvatar extends StatelessWidget {
       ),
     );
 
-    final inner = ClipRRect(
-      borderRadius: BorderRadius.circular(corner),
+    final inner = ClipOval(
       child: SizedBox(
         width: size,
         height: size,
@@ -63,16 +61,13 @@ class UserAvatar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(2.5),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(corner + 5),
+        shape: BoxShape.circle,
         gradient: seen ? null : AppTheme.voltGradient,
         color: seen ? context.hairline : null,
       ),
       child: Container(
         padding: const EdgeInsets.all(2.5),
-        decoration: BoxDecoration(
-          color: context.bg,
-          borderRadius: BorderRadius.circular(corner + 2.5),
-        ),
+        decoration: BoxDecoration(color: context.bg, shape: BoxShape.circle),
         child: inner,
       ),
     );

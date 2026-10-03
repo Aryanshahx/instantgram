@@ -74,8 +74,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   clipBehavior: Clip.none,
                   children: [
                     _photo != null
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(36),
+                        ? ClipOval(
                             child: Image.file(
                               _photo!,
                               width: 104,
@@ -96,7 +95,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         height: 38,
                         decoration: BoxDecoration(
                           color: AppTheme.volt,
-                          borderRadius: BorderRadius.circular(14),
+                          shape: BoxShape.circle,
                           border: Border.all(color: context.bg, width: 3),
                         ),
                         child: const Icon(
