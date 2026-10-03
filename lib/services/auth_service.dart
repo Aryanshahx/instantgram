@@ -60,7 +60,6 @@ class AuthService {
           'email': email.trim(),
           'bio': '',
           'photoUrl': '',
-          'photoPath': '',
           'followersCount': 0,
           'followingCount': 0,
           'postsCount': 0,

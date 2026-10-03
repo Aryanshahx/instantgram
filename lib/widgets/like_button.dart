@@ -78,7 +78,9 @@ class LikePill extends StatelessWidget {
             curve: Curves.easeOutCubic,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
             decoration: BoxDecoration(
-              color: liked ? AppTheme.volt : Colors.black.withValues(alpha: 0.5),
+              color: liked
+                  ? AppTheme.volt
+                  : Colors.black.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(22),
               border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
             ),
@@ -92,9 +94,14 @@ class LikePill extends StatelessWidget {
                   child: Icon(Icons.bolt_rounded, size: 20, color: fg),
                 ),
                 const SizedBox(width: 4),
-                Text('${controller.count}',
-                    style: TextStyle(
-                        color: fg, fontWeight: FontWeight.w800, fontSize: 13)),
+                Text(
+                  '${controller.count}',
+                  style: TextStyle(
+                    color: fg,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                  ),
+                ),
               ],
             ),
           ),
@@ -106,7 +113,12 @@ class LikePill extends StatelessWidget {
 
 /// Round bolt button (used in the Clips rail).
 class LikeIconButton extends StatelessWidget {
-  const LikeIconButton({super.key, required this.controller, this.size = 50, this.onError});
+  const LikeIconButton({
+    super.key,
+    required this.controller,
+    this.size = 50,
+    this.onError,
+  });
 
   final LikeController controller;
   final double size;
@@ -128,7 +140,9 @@ class LikeIconButton extends StatelessWidget {
             width: size,
             height: size,
             decoration: BoxDecoration(
-              color: liked ? AppTheme.volt : Colors.black.withValues(alpha: 0.45),
+              color: liked
+                  ? AppTheme.volt
+                  : Colors.black.withValues(alpha: 0.45),
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
             ),
@@ -136,8 +150,11 @@ class LikeIconButton extends StatelessWidget {
               scale: liked ? 1.2 : 1,
               duration: const Duration(milliseconds: 220),
               curve: Curves.easeOutBack,
-              child: Icon(Icons.bolt_rounded,
-                  size: size * 0.55, color: liked ? AppTheme.ink : Colors.white),
+              child: Icon(
+                Icons.bolt_rounded,
+                size: size * 0.55,
+                color: liked ? AppTheme.ink : Colors.white,
+              ),
             ),
           ),
         );

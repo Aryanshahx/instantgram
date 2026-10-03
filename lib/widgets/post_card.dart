@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
 import '../core/errors.dart';
+import '../core/media_url.dart';
 import '../core/theme.dart';
 import '../core/ui.dart';
 import '../models/post.dart';
-import '../models/video_link.dart';
 import '../screens/post/comments_screen.dart';
 import '../screens/profile/profile_screen.dart';
 import '../screens/video/video_player_screen.dart';
@@ -108,10 +108,7 @@ class _PostCardState extends State<PostCard> {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _media(context),
-          _info(context),
-        ],
+        children: [_media(context), _info(context)],
       ),
     );
   }
@@ -132,7 +129,7 @@ class _PostCardState extends State<PostCard> {
     return ClipRRect(
       borderRadius: BorderRadius.circular(26),
       child: AspectRatio(
-        aspectRatio: 4 / 5,
+        aspectRatio: MediaQuery.sizeOf(context).width > 600 ? 1.0 : 4 / 5,
         child: GestureDetector(
           onTap: _openMedia,
           onDoubleTap: _doubleTapLike,
@@ -146,7 +143,12 @@ class _PostCardState extends State<PostCard> {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [Colors.black38, Colors.transparent, Colors.transparent, Colors.black45],
+                    colors: [
+                      Colors.black38,
+                      Colors.transparent,
+                      Colors.transparent,
+                      Colors.black45,
+                    ],
                     stops: [0, 0.22, 0.7, 1],
                   ),
                 ),
@@ -159,8 +161,11 @@ class _PostCardState extends State<PostCard> {
                   child: AnimatedOpacity(
                     opacity: _showBolt ? 1 : 0,
                     duration: const Duration(milliseconds: 200),
-                    child: const Icon(Icons.bolt_rounded,
-                        color: AppTheme.volt, size: 120),
+                    child: const Icon(
+                      Icons.bolt_rounded,
+                      color: AppTheme.volt,
+                      size: 120,
+                    ),
                   ),
                 ),
               ),
@@ -200,17 +205,23 @@ class _PostCardState extends State<PostCard> {
                       },
                     ),
                     const SizedBox(width: 8),
-                    _pill(Icons.chat_bubble_outline_rounded, '$_comments',
-                        _openComments),
+                    _pill(
+                      Icons.chat_bubble_outline_rounded,
+                      '$_comments',
+                      _openComments,
+                    ),
                   ],
                 ),
               ),
-              if (post.isVideo && post.videoPlatform != null)
+              if (post.isVideo && post.videoDuration > 0)
                 Positioned(
                   right: 10,
                   bottom: 10,
-                  child: _pill(platformIcon(post.videoPlatform),
-                      post.videoPlatform!.label, _openMedia),
+                  child: _pill(
+                    Icons.play_arrow_rounded,
+                    formatDuration(post.videoDuration),
+                    _openMedia,
+                  ),
                 ),
             ],
           ),
@@ -233,13 +244,19 @@ class _PostCardState extends State<PostCard> {
           mainAxisSize: MainAxisSize.min,
           children: [
             UserAvatar(
-                url: post.authorPhotoUrl, name: post.authorUsername, radius: 14),
+              url: post.authorPhotoUrl,
+              name: post.authorUsername,
+              radius: 14,
+            ),
             const SizedBox(width: 8),
-            Text('@${post.authorUsername}',
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13)),
+            Text(
+              '@${post.authorUsername}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+              ),
+            ),
           ],
         ),
       ),
@@ -261,11 +278,14 @@ class _PostCardState extends State<PostCard> {
           children: [
             Icon(icon, size: 18, color: Colors.white),
             const SizedBox(width: 5),
-            Text(label,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13)),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+              ),
+            ),
           ],
         ),
       ),
@@ -284,24 +304,29 @@ class _PostCardState extends State<PostCard> {
               child: Text(
                 post.caption,
                 maxLines: _expanded ? null : 3,
-                overflow: _expanded ? TextOverflow.visible : TextOverflow.ellipsis,
+                overflow: _expanded
+                    ? TextOverflow.visible
+                    : TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 15, height: 1.35),
               ),
             ),
           if (post.caption.isNotEmpty) const SizedBox(height: 8),
           Row(
             children: [
-              Text(timeago.format(post.createdAt),
-                  style: TextStyle(color: context.muted, fontSize: 12.5)),
+              Text(
+                timeago.format(post.createdAt),
+                style: TextStyle(color: context.muted, fontSize: 12.5),
+              ),
               const Spacer(),
               GestureDetector(
                 onTap: _openComments,
                 child: Text(
                   _comments > 0 ? 'See $_comments comments' : 'Add a comment',
                   style: TextStyle(
-                      color: context.accentInk,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12.5),
+                    color: context.accentInk,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12.5,
+                  ),
                 ),
               ),
             ],

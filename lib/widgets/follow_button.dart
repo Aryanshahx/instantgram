@@ -65,9 +65,13 @@ class _FollowButtonState extends State<FollowButton> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.uid == UserService.instance.myUid) return const SizedBox.shrink();
+    if (widget.uid == UserService.instance.myUid) {
+      return const SizedBox.shrink();
+    }
     final following = _following ?? false;
-    final size = widget.compact ? const Size(96, 34) : const Size.fromHeight(40);
+    final size = widget.compact
+        ? const Size(96, 34)
+        : const Size.fromHeight(40);
 
     if (following) {
       return OutlinedButton(

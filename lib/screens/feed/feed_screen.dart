@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_events.dart';
+import '../../core/responsive.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/app_user.dart';
@@ -9,7 +10,6 @@ import '../../services/post_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/brand_logo.dart';
-import '../../widgets/pill_tabs.dart';
 import '../../widgets/post_card.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/stories_bar.dart';
@@ -23,164 +23,61 @@ class FeedScreen extends StatefulWidget {
 }
 
 class _FeedScreenState extends State<FeedScreen> {
-  late final PostPager _discover =
-      PostPager(PostService.instance.latestQuery, pageSize: 8);
-  late final Stream<AppUser?> _me =
-      UserService.instance.watchUser(UserService.instance.myUid);
-
-  PostPager? _following;
-  bool _followingLoading = false;
-  bool _noFollowing = false;
-  Object? _followingError;
-  int _tab = 0;
+  late final PostPager _pager = PostPager(
+    PostService.instance.latestQuery,
+    pageSize: 8,
+  );
+  late final Stream<AppUser?> _me = UserService.instance.watchUser(
+    UserService.instance.myUid,
+  );
 
   @override
   void initState() {
     super.initState();
-    _discover.loadMore();
+    _pager.loadMore();
     AppEvents.feedRefresh.addListener(_onRefresh);
   }
 
   @override
   void dispose() {
     AppEvents.feedRefresh.removeListener(_onRefresh);
-    _discover.dispose();
-    _following?.dispose();
+    _pager.dispose();
     super.dispose();
   }
 
-  void _onRefresh() {
-    _discover.refresh();
-    if (_tab == 1 || _following != null) _loadFollowing();
-  }
-
-  Future<void> _loadFollowing() async {
-    setState(() {
-      _followingLoading = true;
-      _followingError = null;
-    });
-    try {
-      final me = UserService.instance.myUid;
-      final ids = await UserService.instance.followingIds();
-      if (!mounted) return;
-      _following?.dispose();
-      _following = null;
-      if (ids.isEmpty) {
-        setState(() {
-          _noFollowing = true;
-          _followingLoading = false;
-        });
-        return;
-      }
-      // Firestore `whereIn` accepts up to 30 values.
-      final authors = <String>[me, ...ids].take(30).toList();
-      final pager = PostPager(
-        () => PostService.instance.followingQuery(authors),
-        pageSize: 8,
-      )..loadMore();
-      setState(() {
-        _following = pager;
-        _noFollowing = false;
-        _followingLoading = false;
-      });
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _followingError = e;
-          _followingLoading = false;
-        });
-      }
-    }
-  }
-
-  void _setTab(int i) {
-    if (i == _tab) return;
-    setState(() => _tab = i);
-    if (i == 1 && _following == null && !_followingLoading && !_noFollowing) {
-      _loadFollowing();
-    }
-  }
+  void _onRefresh() => _pager.refresh();
 
   @override
   Widget build(BuildContext context) {
-    final header = _FeedHeader(me: _me, tab: _tab, onTab: _setTab);
     return SafeArea(
       bottom: false,
-      child: _tab == 0
-          ? PagedPostList(
-              pager: _discover,
-              header: header,
-              onRefresh: () async {
-                // Reloads posts, moments and the Following tab together.
-                AppEvents.refreshFeed();
-                while (_discover.loading) {
-                  await Future<void>.delayed(const Duration(milliseconds: 100));
-                }
-              },
-              empty: const EmptyState(
-                icon: Icons.bolt_rounded,
-                title: 'Nothing here yet',
-                subtitle: 'Tap the + button to share the first photo or clip.',
-              ),
-            )
-          : _followingBody(header),
-    );
-  }
-
-  Widget _followingBody(Widget header) {
-    Widget wrap(Widget child) => RefreshIndicator(
-          onRefresh: _loadFollowing,
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            children: [header, child, const SizedBox(height: kNavSpace)],
+      child: ContentWidth(
+        maxWidth: 680,
+        child: PagedPostList(
+          pager: _pager,
+          header: _FeedHeader(me: _me),
+          onRefresh: () async {
+            // Reloads posts and moments together.
+            AppEvents.refreshFeed();
+            while (_pager.loading) {
+              await Future<void>.delayed(const Duration(milliseconds: 100));
+            }
+          },
+          empty: const EmptyState(
+            icon: Icons.bolt_rounded,
+            title: 'Nothing here yet',
+            subtitle: 'Tap the + button to share the first photo or clip.',
           ),
-        );
-
-    if (_followingLoading && _following == null) {
-      return wrap(const Padding(
-        padding: EdgeInsets.only(top: 60),
-        child: CenteredLoader(),
-      ));
-    }
-    if (_followingError != null) {
-      return wrap(ErrorState(error: _followingError!, onRetry: _loadFollowing));
-    }
-    if (_noFollowing || _following == null) {
-      return wrap(const Padding(
-        padding: EdgeInsets.only(top: 30),
-        child: EmptyState(
-          icon: Icons.group_add_outlined,
-          title: 'Follow people to fill this feed',
-          subtitle: 'Find friends in Explore. Their posts will land here.',
         ),
-      ));
-    }
-    return PagedPostList(
-      pager: _following!,
-      header: header,
-      onRefresh: _loadFollowing,
-      empty: const EmptyState(
-        icon: Icons.photo_outlined,
-        title: 'Quiet for now',
-        subtitle: 'The people you follow have not posted yet.',
       ),
     );
   }
 }
 
 class _FeedHeader extends StatelessWidget {
-  const _FeedHeader({required this.me, required this.tab, required this.onTab});
+  const _FeedHeader({required this.me});
 
   final Stream<AppUser?> me;
-  final int tab;
-  final ValueChanged<int> onTab;
-
-  String get _greeting {
-    final h = DateTime.now().hour;
-    if (h < 12) return 'Good morning';
-    if (h < 17) return 'Good afternoon';
-    return 'Good evening';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -188,7 +85,7 @@ class _FeedHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 6),
           child: Row(
             children: [
               const BrandLogo(size: 24),
@@ -202,59 +99,18 @@ class _FeedHeader extends StatelessWidget {
                         ? null
                         : () => openScreen(context, ProfileScreen(uid: u.uid)),
                     child: UserAvatar(
-                        url: u?.photoUrl ?? '',
-                        name: u?.username ?? '',
-                        radius: 19),
+                      url: u?.photoUrl ?? '',
+                      name: u?.username ?? '',
+                      radius: 19,
+                    ),
                   );
                 },
               ),
             ],
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 4),
-          child: StreamBuilder<AppUser?>(
-            stream: me,
-            builder: (context, snap) {
-              final u = snap.data;
-              final name = (u == null)
-                  ? ''
-                  : (u.fullName.trim().isNotEmpty
-                      ? u.fullName.trim().split(' ').first
-                      : u.username);
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(_greeting, style: TextStyle(color: context.muted, fontSize: 14)),
-                  const SizedBox(height: 2),
-                  Text(
-                    name.isEmpty ? "What's new?" : "$name, what's new?",
-                    style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -1,
-                        height: 1.1),
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(20, 14, 20, 0),
-          child: Text('Moments',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-        ),
         const StoriesBar(),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
-          child: PillTabs(
-            labels: const ['Discover', 'Following'],
-            icons: const [Icons.auto_awesome_rounded, Icons.people_alt_rounded],
-            index: tab,
-            onChanged: onTab,
-          ),
-        ),
+        const SizedBox(height: 4),
       ],
     );
   }
@@ -324,7 +180,12 @@ class _PagedPostListState extends State<PagedPostList> {
     } else {
       body = const SizedBox.shrink();
     }
-    return Column(children: [body, const SizedBox(height: kNavSpace)]);
+    return Column(
+      children: [
+        body,
+        const SizedBox(height: kNavSpace),
+      ],
+    );
   }
 
   @override

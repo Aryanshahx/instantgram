@@ -44,83 +44,99 @@ class _MainShellState extends State<MainShell> {
     final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
     final bottomInset = MediaQuery.of(context).viewPadding.bottom;
 
-    return Scaffold(
-      body: Stack(
-        children: [
-          IndexedStack(index: _index, children: tabs),
-          if (!keyboardOpen)
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: 12 + bottomInset,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Glass(
-                      radius: 30,
-                      blur: 22,
-                      opacity: 0.78,
-                      padding: const EdgeInsets.all(6),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          _NavItem(
-                            icon: Icons.home_outlined,
-                            activeIcon: Icons.home_rounded,
-                            label: 'Home',
-                            selected: _index == 0,
-                            onTap: () => setState(() => _index = 0),
+    // Back from any other tab goes to Discover first; only then exits the app.
+    return PopScope(
+      canPop: _index == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) setState(() => _index = 0);
+      },
+      child: Scaffold(
+        body: Stack(
+          children: [
+            IndexedStack(index: _index, children: tabs),
+            if (!keyboardOpen)
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 12 + bottomInset,
+                child: Center(
+                  heightFactor: 1,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Glass(
+                            radius: 30,
+                            blur: 22,
+                            opacity: 0.78,
+                            padding: const EdgeInsets.all(6),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                _NavItem(
+                                  icon: Icons.home_outlined,
+                                  activeIcon: Icons.home_rounded,
+                                  label: 'Discover',
+                                  selected: _index == 0,
+                                  onTap: () => setState(() => _index = 0),
+                                ),
+                                _NavItem(
+                                  icon: Icons.explore_outlined,
+                                  activeIcon: Icons.explore_rounded,
+                                  label: 'Explore',
+                                  selected: _index == 1,
+                                  onTap: () => setState(() => _index = 1),
+                                ),
+                                _NavItem(
+                                  icon: Icons.play_circle_outline_rounded,
+                                  activeIcon: Icons.play_circle_rounded,
+                                  label: 'Clips',
+                                  selected: _index == 2,
+                                  onTap: () => setState(() => _index = 2),
+                                ),
+                                _NavItem(
+                                  icon: Icons.person_outline_rounded,
+                                  activeIcon: Icons.person_rounded,
+                                  label: 'Me',
+                                  selected: _index == 3,
+                                  onTap: () => setState(() => _index = 3),
+                                ),
+                              ],
+                            ),
                           ),
-                          _NavItem(
-                            icon: Icons.explore_outlined,
-                            activeIcon: Icons.explore_rounded,
-                            label: 'Explore',
-                            selected: _index == 1,
-                            onTap: () => setState(() => _index = 1),
+                        ),
+                        const SizedBox(width: 10),
+                        GestureDetector(
+                          onTap: _createPost,
+                          child: Container(
+                            width: 60,
+                            height: 60,
+                            decoration: BoxDecoration(
+                              gradient: AppTheme.voltGradient,
+                              borderRadius: BorderRadius.circular(22),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppTheme.volt.withValues(alpha: 0.45),
+                                  blurRadius: 22,
+                                  offset: const Offset(0, 8),
+                                ),
+                              ],
+                            ),
+                            child: const Icon(
+                              Icons.add_rounded,
+                              size: 32,
+                              color: AppTheme.ink,
+                            ),
                           ),
-                          _NavItem(
-                            icon: Icons.play_circle_outline_rounded,
-                            activeIcon: Icons.play_circle_rounded,
-                            label: 'Clips',
-                            selected: _index == 2,
-                            onTap: () => setState(() => _index = 2),
-                          ),
-                          _NavItem(
-                            icon: Icons.person_outline_rounded,
-                            activeIcon: Icons.person_rounded,
-                            label: 'Me',
-                            selected: _index == 3,
-                            onTap: () => setState(() => _index = 3),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  GestureDetector(
-                    onTap: _createPost,
-                    child: Container(
-                      width: 60,
-                      height: 60,
-                      decoration: BoxDecoration(
-                        gradient: AppTheme.voltGradient,
-                        borderRadius: BorderRadius.circular(22),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.volt.withValues(alpha: 0.45),
-                            blurRadius: 22,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: const Icon(Icons.add_rounded,
-                          size: 32, color: AppTheme.ink),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -163,7 +179,9 @@ class _NavItem extends StatelessWidget {
               size: 26,
               color: selected
                   ? AppTheme.ink
-                  : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                  : Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.7),
             ),
             AnimatedSize(
               duration: const Duration(milliseconds: 260),
@@ -171,11 +189,14 @@ class _NavItem extends StatelessWidget {
               child: selected
                   ? Padding(
                       padding: const EdgeInsets.only(left: 6),
-                      child: Text(label,
-                          style: const TextStyle(
-                              color: AppTheme.ink,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 14)),
+                      child: Text(
+                        label,
+                        style: const TextStyle(
+                          color: AppTheme.ink,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                        ),
+                      ),
                     )
                   : const SizedBox.shrink(),
             ),

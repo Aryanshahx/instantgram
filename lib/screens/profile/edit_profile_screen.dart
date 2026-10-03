@@ -5,9 +5,10 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../core/errors.dart';
 import '../../core/theme.dart';
+import '../../core/responsive.dart';
 import '../../core/ui.dart';
 import '../../models/app_user.dart';
-import '../../services/storage_service.dart';
+import '../../services/media_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
 
@@ -61,74 +62,90 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Edit profile')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-        children: [
-          Center(
-            child: GestureDetector(
-              onTap: _saving ? null : _pickPhoto,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  _photo != null
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(36),
-                          child: Image.file(_photo!,
-                              width: 104, height: 104, fit: BoxFit.cover),
-                        )
-                      : UserAvatar(
-                          url: widget.user.photoUrl,
-                          name: widget.user.username,
-                          radius: 52),
-                  Positioned(
-                    right: -6,
-                    bottom: -6,
-                    child: Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: AppTheme.volt,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: context.bg, width: 3),
+      body: ContentWidth(
+        maxWidth: 560,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          children: [
+            Center(
+              child: GestureDetector(
+                onTap: _saving ? null : _pickPhoto,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    _photo != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(36),
+                            child: Image.file(
+                              _photo!,
+                              width: 104,
+                              height: 104,
+                              fit: BoxFit.cover,
+                            ),
+                          )
+                        : UserAvatar(
+                            url: widget.user.photoUrl,
+                            name: widget.user.username,
+                            radius: 52,
+                          ),
+                    Positioned(
+                      right: -6,
+                      bottom: -6,
+                      child: Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: AppTheme.volt,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: context.bg, width: 3),
+                        ),
+                        child: const Icon(
+                          Icons.photo_camera_rounded,
+                          size: 18,
+                          color: AppTheme.ink,
+                        ),
                       ),
-                      child: const Icon(Icons.photo_camera_rounded,
-                          size: 18, color: AppTheme.ink),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 28),
-          TextField(
-            controller: _name,
-            enabled: !_saving,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(labelText: 'Name'),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _bio,
-            enabled: !_saving,
-            maxLength: 150,
-            maxLines: 4,
-            minLines: 3,
-            decoration: const InputDecoration(labelText: 'Bio'),
-          ),
-          Text('Username  @${widget.user.username}',
-              style: TextStyle(color: context.muted)),
-          const SizedBox(height: 26),
-          FilledButton(
-            onPressed: _saving ? null : _save,
-            child: _saving
-                ? const SizedBox(
-                    height: 22,
-                    width: 22,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2.5, color: AppTheme.ink))
-                : const Text('Save changes'),
-          ),
-        ],
+            const SizedBox(height: 28),
+            TextField(
+              controller: _name,
+              enabled: !_saving,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Name'),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _bio,
+              enabled: !_saving,
+              maxLength: 150,
+              maxLines: 4,
+              minLines: 3,
+              decoration: const InputDecoration(labelText: 'Bio'),
+            ),
+            Text(
+              'Username  @${widget.user.username}',
+              style: TextStyle(color: context.muted),
+            ),
+            const SizedBox(height: 26),
+            FilledButton(
+              onPressed: _saving ? null : _save,
+              child: _saving
+                  ? const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: AppTheme.ink,
+                      ),
+                    )
+                  : const Text('Save changes'),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../core/responsive.dart';
 import '../../core/ui.dart';
 import '../../models/app_user.dart';
 import '../../services/post_pager.dart';
@@ -23,8 +24,10 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
   final _scroll = ScrollController();
-  late final PostPager _explore =
-      PostPager(PostService.instance.latestQuery, pageSize: 24);
+  late final PostPager _explore = PostPager(
+    PostService.instance.latestQuery,
+    pageSize: 24,
+  );
   Timer? _debounce;
 
   String _query = '';
@@ -88,39 +91,47 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget build(BuildContext context) {
     return SafeArea(
       bottom: false,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 14, 20, 12),
-            child: Text('Explore',
+      child: ContentWidth(
+        maxWidth: 860,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 14, 20, 12),
+              child: Text(
+                'Explore',
                 style: TextStyle(
-                    fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: -1.2)),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: TextField(
-              controller: _controller,
-              onChanged: _onChanged,
-              textInputAction: TextInputAction.search,
-              autocorrect: false,
-              decoration: InputDecoration(
-                hintText: 'Find people by username',
-                prefixIcon: const Icon(Icons.search_rounded),
-                suffixIcon: _query.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: () {
-                          _controller.clear();
-                          _onChanged('');
-                        },
-                      ),
+                  fontSize: 32,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -1.2,
+                ),
               ),
             ),
-          ),
-          Expanded(child: _query.isEmpty ? _exploreGrid() : _userResults()),
-        ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: TextField(
+                controller: _controller,
+                onChanged: _onChanged,
+                textInputAction: TextInputAction.search,
+                autocorrect: false,
+                decoration: InputDecoration(
+                  hintText: 'Find people by username',
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  suffixIcon: _query.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          onPressed: () {
+                            _controller.clear();
+                            _onChanged('');
+                          },
+                        ),
+                ),
+              ),
+            ),
+            Expanded(child: _query.isEmpty ? _exploreGrid() : _userResults()),
+          ],
+        ),
       ),
     );
   }
@@ -128,7 +139,10 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget _userResults() {
     if (_searching && _results.isEmpty) return const CenteredLoader();
     if (_searchError != null) {
-      return ErrorState(error: _searchError!, onRetry: () => _onChanged(_query));
+      return ErrorState(
+        error: _searchError!,
+        onRetry: () => _onChanged(_query),
+      );
     }
     if (_results.isEmpty) {
       return EmptyState(
@@ -150,14 +164,21 @@ class _SearchScreenState extends State<SearchScreen> {
             border: Border.all(color: context.hairline.withValues(alpha: 0.7)),
           ),
           child: ListTile(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+            ),
             contentPadding: const EdgeInsets.all(10),
             leading: UserAvatar(url: u.photoUrl, name: u.username, radius: 25),
-            title: Text(u.username,
-                style: const TextStyle(fontWeight: FontWeight.w800)),
+            title: Text(
+              u.username,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
             subtitle: u.fullName.isEmpty ? null : Text(u.fullName),
-            trailing: Icon(Icons.arrow_forward_ios_rounded,
-                size: 16, color: context.muted),
+            trailing: Icon(
+              Icons.arrow_forward_ios_rounded,
+              size: 16,
+              color: context.muted,
+            ),
             onTap: () => openScreen(context, ProfileScreen(uid: u.uid)),
           ),
         );
@@ -192,7 +213,8 @@ class _SearchScreenState extends State<SearchScreen> {
                   child: Padding(
                     padding: EdgeInsets.all(20),
                     child: Center(
-                        child: CircularProgressIndicator(strokeWidth: 3)),
+                      child: CircularProgressIndicator(strokeWidth: 3),
+                    ),
                   ),
                 ),
               const SliverToBoxAdapter(child: SizedBox(height: kNavSpace)),

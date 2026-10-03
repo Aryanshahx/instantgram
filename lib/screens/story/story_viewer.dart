@@ -11,7 +11,11 @@ import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
 
 class StoryViewer extends StatefulWidget {
-  const StoryViewer({super.key, required this.groups, required this.initialIndex});
+  const StoryViewer({
+    super.key,
+    required this.groups,
+    required this.initialIndex,
+  });
 
   final List<StoryGroup> groups;
   final int initialIndex;
@@ -21,8 +25,9 @@ class StoryViewer extends StatefulWidget {
 }
 
 class _StoryViewerState extends State<StoryViewer> {
-  late final PageController _pc =
-      PageController(initialPage: widget.initialIndex);
+  late final PageController _pc = PageController(
+    initialPage: widget.initialIndex,
+  );
 
   @override
   void dispose() {
@@ -34,7 +39,9 @@ class _StoryViewerState extends State<StoryViewer> {
     final page = (_pc.page ?? 0).round();
     if (page < widget.groups.length - 1) {
       _pc.nextPage(
-          duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
     } else {
       Navigator.of(context).pop();
     }
@@ -44,7 +51,9 @@ class _StoryViewerState extends State<StoryViewer> {
     final page = (_pc.page ?? 0).round();
     if (page > 0) {
       _pc.previousPage(
-          duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
     }
   }
 
@@ -150,7 +159,9 @@ class _GroupPlayerState extends State<_GroupPlayer>
         widget.onClose();
         return;
       }
-      if (_i >= widget.group.stories.length) _i = widget.group.stories.length - 1;
+      if (_i >= widget.group.stories.length) {
+        _i = widget.group.stories.length - 1;
+      }
       if (mounted) {
         setState(() {});
         _anim.forward(from: 0);
@@ -191,8 +202,11 @@ class _GroupPlayerState extends State<_GroupPlayer>
             placeholder: (_, _) =>
                 const Center(child: CircularProgressIndicator(strokeWidth: 2)),
             errorWidget: (_, _, _) => const Center(
-              child: Icon(Icons.broken_image_outlined,
-                  color: Colors.white54, size: 48),
+              child: Icon(
+                Icons.broken_image_outlined,
+                color: Colors.white54,
+                size: 48,
+              ),
             ),
           ),
           SafeArea(
@@ -214,23 +228,25 @@ class _GroupPlayerState extends State<_GroupPlayer>
                                       value: 1,
                                       minHeight: 3,
                                       color: Colors.white,
-                                      backgroundColor: Colors.white24)
+                                      backgroundColor: Colors.white24,
+                                    )
                                   : k == _i
-                                      ? AnimatedBuilder(
-                                          animation: _anim,
-                                          builder: (_, _) =>
-                                              LinearProgressIndicator(
-                                                value: _anim.value,
-                                                minHeight: 3,
-                                                color: Colors.white,
-                                                backgroundColor: Colors.white24,
-                                              ),
-                                        )
-                                      : const LinearProgressIndicator(
-                                          value: 0,
-                                          minHeight: 3,
-                                          color: Colors.white,
-                                          backgroundColor: Colors.white24),
+                                  ? AnimatedBuilder(
+                                      animation: _anim,
+                                      builder: (_, _) =>
+                                          LinearProgressIndicator(
+                                            value: _anim.value,
+                                            minHeight: 3,
+                                            color: Colors.white,
+                                            backgroundColor: Colors.white24,
+                                          ),
+                                    )
+                                  : const LinearProgressIndicator(
+                                      value: 0,
+                                      minHeight: 3,
+                                      color: Colors.white,
+                                      backgroundColor: Colors.white24,
+                                    ),
                             ),
                           ),
                         ),
@@ -239,20 +255,32 @@ class _GroupPlayerState extends State<_GroupPlayer>
                   const SizedBox(height: 10),
                   Row(
                     children: [
-                      UserAvatar(url: widget.group.photoUrl, name: widget.group.username, radius: 16),
+                      UserAvatar(
+                        url: widget.group.photoUrl,
+                        name: widget.group.username,
+                        radius: 16,
+                      ),
                       const SizedBox(width: 10),
-                      Text(widget.group.username,
-                          style: const TextStyle(
-                              color: Colors.white, fontWeight: FontWeight.w700)),
+                      Text(
+                        widget.group.username,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                       const SizedBox(width: 8),
-                      Text(timeago.format(story.createdAt, locale: 'en_short'),
-                          style: const TextStyle(color: Colors.white70)),
+                      Text(
+                        timeago.format(story.createdAt, locale: 'en_short'),
+                        style: const TextStyle(color: Colors.white70),
+                      ),
                       const Spacer(),
                       if (_mine)
                         IconButton(
                           onPressed: _delete,
-                          icon: const Icon(Icons.delete_outline,
-                              color: Colors.white),
+                          icon: const Icon(
+                            Icons.delete_outline,
+                            color: Colors.white,
+                          ),
                         ),
                       IconButton(
                         onPressed: widget.onClose,

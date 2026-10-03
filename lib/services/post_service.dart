@@ -6,8 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/post.dart';
-import '../models/video_link.dart';
-import 'storage_service.dart';
+import 'media_server.dart';
 import 'user_service.dart';
 
 typedef PostQuery = Query<Map<String, dynamic>>;
@@ -17,7 +16,8 @@ class PostService {
   static final PostService instance = PostService._();
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  CollectionReference<Map<String, dynamic>> get _posts => _db.collection('posts');
+  CollectionReference<Map<String, dynamic>> get _posts =>
+      _db.collection('posts');
   String get _uid => FirebaseAuth.instance.currentUser!.uid;
 
   // ----------------------------------------------------------------- queries
@@ -52,11 +52,13 @@ class PostService {
     return me;
   }
 
-  Future<void> createImagePost({required File image, required String caption}) async {
+  Future<void> createImagePost({
+    required File image,
+    required String caption,
+  }) async {
     final me = await _me();
+    final uploaded = await MediaServer.instance.uploadImage(image);
     final ref = _posts.doc();
-    final path = 'posts/${me.uid}/${ref.id}.jpg';
-    final url = await StorageService.uploadImage(path, image);
 
     final batch = _db.batch();
     batch.set(ref, {
@@ -65,20 +67,24 @@ class PostService {
       'authorPhotoUrl': me.photoUrl,
       'type': 'image',
       'caption': caption.trim(),
-      'imageUrl': url,
-      'imagePath': path,
+      'imageUrl': uploaded.ref,
       'likeCount': 0,
       'commentCount': 0,
       'createdAt': FieldValue.serverTimestamp(),
     });
-    batch.update(_db.collection('users').doc(me.uid),
-        {'postsCount': FieldValue.increment(1)});
+    batch.update(_db.collection('users').doc(me.uid), {
+      'postsCount': FieldValue.increment(1),
+    });
     await batch.commit();
   }
 
+  /// [media] comes from MediaServer.uploadVideo.
   Future<void> createVideoPost({
-    required ResolvedVideo video,
+    required UploadedMedia media,
     required String caption,
+    required int duration,
+    required int width,
+    required int height,
   }) async {
     final me = await _me();
     final ref = _posts.doc();
@@ -89,27 +95,69 @@ class PostService {
       'authorPhotoUrl': me.photoUrl,
       'type': 'video',
       'caption': caption.trim(),
-      // Only TEXT is stored for videos: the link + a thumbnail URL.
-      'videoUrl': video.link.url,
-      'videoPlatform': video.link.platform.name,
-      'videoId': video.link.id ?? '',
-      'thumbnailUrl': video.thumbnailUrl,
+      'videoUrl': media.ref,
+      'thumbnailUrl': media.thumbRef,
+      'videoDuration': duration,
+      'videoWidth': width,
+      'videoHeight': height,
       'likeCount': 0,
       'commentCount': 0,
       'createdAt': FieldValue.serverTimestamp(),
     });
-    batch.update(_db.collection('users').doc(me.uid),
-        {'postsCount': FieldValue.increment(1)});
+    batch.update(_db.collection('users').doc(me.uid), {
+      'postsCount': FieldValue.increment(1),
+    });
     await batch.commit();
   }
 
   Future<void> deletePost(Post p) async {
     final batch = _db.batch();
     batch.delete(_posts.doc(p.id));
-    batch.update(_db.collection('users').doc(p.authorId),
-        {'postsCount': FieldValue.increment(-1)});
+    batch.update(_db.collection('users').doc(p.authorId), {
+      'postsCount': FieldValue.increment(-1),
+    });
     await batch.commit();
-    await StorageService.deleteQuietly(p.imagePath);
+    // Free the space in the Telegram channel (best effort).
+    await MediaServer.instance.deleteQuietly(
+      p.isVideo ? p.videoRef : p.imageRef,
+    );
+  }
+
+  // ------------------------------------------------------------------- saved
+
+  CollectionReference<Map<String, dynamic>> get _saved =>
+      _db.collection('users').doc(_uid).collection('saved');
+
+  Future<bool> isSaved(String postId) async =>
+      (await _saved.doc(postId).get()).exists;
+
+  Future<void> setSaved(String postId, bool saved) async {
+    if (saved) {
+      await _saved.doc(postId).set({'savedAt': FieldValue.serverTimestamp()});
+    } else {
+      await _saved.doc(postId).delete();
+    }
+  }
+
+  /// Newest-first posts the current user saved (max 30).
+  Future<List<Post>> savedPosts() async {
+    final snap = await _saved
+        .orderBy('savedAt', descending: true)
+        .limit(30)
+        .get();
+    final ids = snap.docs.map((d) => d.id).toList();
+    final byId = <String, Post>{};
+    for (var i = 0; i < ids.length; i += 10) {
+      final chunk = ids.sublist(i, i + 10 > ids.length ? ids.length : i + 10);
+      final q = await _posts.where(FieldPath.documentId, whereIn: chunk).get();
+      for (final d in q.docs) {
+        byId[d.id] = Post.fromDoc(d);
+      }
+    }
+    return [
+      for (final id in ids)
+        if (byId[id] != null) byId[id]!,
+    ];
   }
 
   // ------------------------------------------------------------------- likes

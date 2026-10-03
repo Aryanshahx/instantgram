@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/app_events.dart';
 import '../../core/theme.dart';
+import '../../core/responsive.dart';
 import '../../core/ui.dart';
 import '../../models/app_user.dart';
 import '../../services/auth_service.dart';
@@ -14,6 +15,7 @@ import '../../widgets/glass.dart';
 import '../../widgets/post_grid.dart';
 import '../../widgets/state_views.dart';
 import 'edit_profile_screen.dart';
+import 'saved_posts_screen.dart';
 import 'follow_list_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -33,8 +35,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     () => PostService.instance.userPostsQuery(widget.uid),
     pageSize: 18,
   );
-  late final Stream<AppUser?> _user =
-      UserService.instance.watchUser(widget.uid);
+  late final Stream<AppUser?> _user = UserService.instance.watchUser(
+    widget.uid,
+  );
   final ScrollController _scroll = ScrollController();
 
   bool get _isMe => widget.uid == UserService.instance.myUid;
@@ -82,16 +85,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
             appBar: widget.isTab ? null : AppBar(),
             body: SafeArea(
               child: snap.hasError
-                  ? ErrorState(error: snap.error!, onRetry: () => setState(() {}))
+                  ? ErrorState(
+                      error: snap.error!,
+                      onRetry: () => setState(() {}),
+                    )
                   : snap.connectionState == ConnectionState.waiting
-                      ? const CenteredLoader()
-                      : const EmptyState(
-                          icon: Icons.person_off_outlined,
-                          title: 'User not found'),
+                  ? const CenteredLoader()
+                  : const EmptyState(
+                      icon: Icons.person_off_outlined,
+                      title: 'User not found',
+                    ),
             ),
           );
         }
-        return Scaffold(body: _body(context, user));
+        return Scaffold(
+          body: ContentWidth(maxWidth: 860, child: _body(context, user)),
+        );
       },
     );
   }
@@ -112,23 +121,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   padding: const EdgeInsets.fromLTRB(22, 22, 22, 12),
                   child: Row(
                     children: [
-                      const Text('Posts',
-                          style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.5)),
+                      const Text(
+                        'Posts',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
                       const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 9, vertical: 3),
+                          horizontal: 9,
+                          vertical: 3,
+                        ),
                         decoration: BoxDecoration(
                           color: context.card,
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: context.hairline),
                         ),
-                        child: Text('${user.postsCount}',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w800, fontSize: 12)),
+                        child: Text(
+                          '${user.postsCount}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -143,7 +161,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 )
               else if (_pager.error != null && _pager.posts.isEmpty)
                 SliverToBoxAdapter(
-                  child: ErrorState(error: _pager.error!, onRetry: _pager.retry),
+                  child: ErrorState(
+                    error: _pager.error!,
+                    onRetry: _pager.retry,
+                  ),
                 )
               else if (_pager.posts.isEmpty)
                 SliverToBoxAdapter(
@@ -165,7 +186,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Padding(
                     padding: EdgeInsets.all(20),
                     child: Center(
-                        child: CircularProgressIndicator(strokeWidth: 3)),
+                      child: CircularProgressIndicator(strokeWidth: 3),
+                    ),
                   ),
                 ),
               const SliverToBoxAdapter(child: SizedBox(height: kNavSpace)),
@@ -189,8 +211,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               height: 150 + top,
               margin: const EdgeInsets.fromLTRB(12, 0, 12, 0),
               decoration: BoxDecoration(
-                borderRadius:
-                    const BorderRadius.vertical(bottom: Radius.circular(36)),
+                borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(36),
+                ),
                 gradient: AppTheme.auroraGradient,
                 boxShadow: [
                   BoxShadow(
@@ -234,7 +257,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   borderRadius: BorderRadius.circular(38),
                 ),
                 child: UserAvatar(
-                    url: user.photoUrl, name: user.username, radius: 42),
+                  url: user.photoUrl,
+                  name: user.username,
+                  radius: 42,
+                ),
               ),
             ),
           ],
@@ -248,13 +274,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Text(
                 user.fullName.isNotEmpty ? user.fullName : user.username,
                 style: const TextStyle(
-                    fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -1),
+                  fontSize: 28,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -1,
+                ),
               ),
               const SizedBox(height: 2),
               Text('@${user.username}', style: TextStyle(color: context.muted)),
               if (user.bio.isNotEmpty) ...[
                 const SizedBox(height: 10),
-                Text(user.bio, style: const TextStyle(fontSize: 15, height: 1.35)),
+                Text(
+                  user.bio,
+                  style: const TextStyle(fontSize: 15, height: 1.35),
+                ),
               ],
               const SizedBox(height: 18),
               Row(
@@ -264,25 +296,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _Stat(
                     label: 'Followers',
                     value: user.followersCount,
-                    onTap: () => openScreen(context,
-                        FollowListScreen(uid: user.uid, followers: true)),
+                    onTap: () => openScreen(
+                      context,
+                      FollowListScreen(uid: user.uid, followers: true),
+                    ),
                   ),
                   const SizedBox(width: 10),
                   _Stat(
                     label: 'Following',
                     value: user.followingCount,
-                    onTap: () => openScreen(context,
-                        FollowListScreen(uid: user.uid, followers: false)),
+                    onTap: () => openScreen(
+                      context,
+                      FollowListScreen(uid: user.uid, followers: false),
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 16),
               if (_isMe)
-                FilledButton.icon(
-                  onPressed: () =>
-                      openScreen(context, EditProfileScreen(user: user)),
-                  icon: const Icon(Icons.edit_rounded, size: 18),
-                  label: const Text('Edit profile'),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () =>
+                            openScreen(context, EditProfileScreen(user: user)),
+                        icon: const Icon(Icons.edit_rounded, size: 18),
+                        label: const Text('Edit profile'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    SizedBox(
+                      width: 56,
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          minimumSize: const Size(56, 56),
+                        ),
+                        onPressed: () =>
+                            openScreen(context, const SavedPostsScreen()),
+                        child: const Icon(Icons.bookmark_rounded),
+                      ),
+                    ),
+                  ],
                 )
               else
                 FollowButton(uid: user.uid),
@@ -314,11 +369,19 @@ class _Stat extends StatelessWidget {
           ),
           child: Column(
             children: [
-              Text('$value',
-                  style: const TextStyle(
-                      fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+              Text(
+                '$value',
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                ),
+              ),
               const SizedBox(height: 2),
-              Text(label, style: TextStyle(color: context.muted, fontSize: 12.5)),
+              Text(
+                label,
+                style: TextStyle(color: context.muted, fontSize: 12.5),
+              ),
             ],
           ),
         ),

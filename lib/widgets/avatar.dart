@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../core/media_url.dart';
 import '../core/theme.dart';
 
 /// Squircle avatar (rounded square) with an optional lime "moment" ring.
@@ -27,19 +28,19 @@ class UserAvatar extends StatelessWidget {
     final corner = size * 0.34;
 
     Widget initial() => Container(
-          width: size,
-          height: size,
-          alignment: Alignment.center,
-          decoration: const BoxDecoration(gradient: AppTheme.auroraGradient),
-          child: Text(
-            name.isEmpty ? '?' : name.characters.first.toUpperCase(),
-            style: TextStyle(
-              fontSize: size * 0.42,
-              fontWeight: FontWeight.w900,
-              color: AppTheme.ink,
-            ),
-          ),
-        );
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: const BoxDecoration(gradient: AppTheme.auroraGradient),
+      child: Text(
+        name.isEmpty ? '?' : name.characters.first.toUpperCase(),
+        style: TextStyle(
+          fontSize: size * 0.42,
+          fontWeight: FontWeight.w900,
+          color: AppTheme.ink,
+        ),
+      ),
+    );
 
     final inner = ClipRRect(
       borderRadius: BorderRadius.circular(corner),
@@ -49,7 +50,7 @@ class UserAvatar extends StatelessWidget {
         child: url.isEmpty
             ? initial()
             : CachedNetworkImage(
-                imageUrl: url,
+                imageUrl: resolveMediaUrl(url),
                 fit: BoxFit.cover,
                 placeholder: (_, _) => ColoredBox(color: context.cardHigh),
                 errorWidget: (_, _, _) => initial(),

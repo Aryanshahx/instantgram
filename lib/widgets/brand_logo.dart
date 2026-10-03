@@ -21,7 +21,11 @@ class BrandLogo extends StatelessWidget {
             gradient: AppTheme.voltGradient,
             borderRadius: BorderRadius.circular(badge * 0.34),
           ),
-          child: Icon(Icons.bolt_rounded, color: AppTheme.ink, size: badge * 0.72),
+          child: Icon(
+            Icons.bolt_rounded,
+            color: AppTheme.ink,
+            size: badge * 0.72,
+          ),
         ),
         if (showText) ...[
           SizedBox(width: size * 0.3),

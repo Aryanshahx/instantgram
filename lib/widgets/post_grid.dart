@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 
+import '../core/responsive.dart';
 import '../core/theme.dart';
 import '../core/ui.dart';
 import '../models/post.dart';
@@ -19,13 +20,15 @@ class PostGridSliver extends StatelessWidget {
   Widget build(BuildContext context) {
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      sliver: SliverMasonryGrid.count(
-        crossAxisCount: 2,
-        mainAxisSpacing: 10,
-        crossAxisSpacing: 10,
-        childCount: posts.length,
-        itemBuilder: (context, i) =>
-            _Tile(post: posts[i], ratio: _ratios[i % _ratios.length]),
+      sliver: SliverLayoutBuilder(
+        builder: (context, c) => SliverMasonryGrid.count(
+          crossAxisCount: gridColumnsFor(c.crossAxisExtent),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childCount: posts.length,
+          itemBuilder: (context, i) =>
+              _Tile(post: posts[i], ratio: _ratios[i % _ratios.length]),
+        ),
       ),
     );
   }
@@ -70,8 +73,10 @@ class _Tile extends StatelessWidget {
                 left: 8,
                 bottom: 8,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.45),
                     borderRadius: BorderRadius.circular(14),
@@ -79,14 +84,20 @@ class _Tile extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.bolt_rounded,
-                          size: 14, color: AppTheme.volt),
+                      const Icon(
+                        Icons.bolt_rounded,
+                        size: 14,
+                        color: AppTheme.volt,
+                      ),
                       const SizedBox(width: 2),
-                      Text('${post.likeCount}',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w800)),
+                      Text(
+                        '${post.likeCount}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                     ],
                   ),
                 ),

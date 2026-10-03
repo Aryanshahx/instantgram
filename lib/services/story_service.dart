@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/story.dart';
-import 'storage_service.dart';
+import 'media_server.dart';
 import 'user_service.dart';
 
 class StoryService {
@@ -12,7 +12,8 @@ class StoryService {
   static final StoryService instance = StoryService._();
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  CollectionReference<Map<String, dynamic>> get _stories => _db.collection('stories');
+  CollectionReference<Map<String, dynamic>> get _stories =>
+      _db.collection('stories');
   String get _uid => FirebaseAuth.instance.currentUser!.uid;
 
   /// Stories from me + the people I follow that are still within 24 hours.
@@ -34,7 +35,8 @@ class StoryService {
     }
 
     final groups = byAuthor.entries.map((e) {
-      final list = [...e.value]..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      final list = [...e.value]
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
       return StoryGroup(
         authorId: e.key,
         username: list.last.username,
@@ -55,22 +57,21 @@ class StoryService {
     final me = await UserService.instance.getUser(_uid);
     if (me == null) throw StateError('Profile not found');
     final ref = _stories.doc();
-    final path = 'stories/$_uid/${ref.id}.jpg';
-    final url = await StorageService.uploadImage(path, image);
+    final uploaded = await MediaServer.instance.uploadImage(image);
     await ref.set({
       'authorId': _uid,
       'authorUsername': me.username,
       'authorPhotoUrl': me.photoUrl,
-      'imageUrl': url,
-      'imagePath': path,
+      'imageUrl': uploaded.ref,
       'createdAt': FieldValue.serverTimestamp(),
-      'expiresAt':
-          Timestamp.fromDate(DateTime.now().add(const Duration(hours: 24))),
+      'expiresAt': Timestamp.fromDate(
+        DateTime.now().add(const Duration(hours: 24)),
+      ),
     });
   }
 
   Future<void> deleteStory(Story s) async {
     await _stories.doc(s.id).delete();
-    await StorageService.deleteQuietly(s.imagePath);
+    await MediaServer.instance.deleteQuietly(s.imageRef);
   }
 }

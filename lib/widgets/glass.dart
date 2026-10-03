@@ -32,7 +32,9 @@ class Glass extends StatelessWidget {
       decoration: BoxDecoration(
         color: base.withValues(alpha: opacity),
         borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: Colors.white.withValues(alpha: dark ? 0.08 : 0.5)),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: dark ? 0.08 : 0.5),
+        ),
       ),
       child: child,
     );

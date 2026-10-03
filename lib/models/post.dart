@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import 'video_link.dart';
+import '../core/media_url.dart';
 
 int _int(Object? v) => v is num ? v.toInt() : 0;
 String _str(Object? v) => v is String ? v : '';
@@ -14,12 +14,12 @@ class Post {
     required this.type,
     required this.caption,
     required this.createdAt,
-    this.imageUrl = '',
-    this.imagePath = '',
-    this.videoUrl = '',
-    this.videoPlatform,
-    this.videoId,
-    this.thumbnailUrl = '',
+    this.imageRef = '',
+    this.videoRef = '',
+    this.thumbRef = '',
+    this.videoDuration = 0,
+    this.videoWidth = 0,
+    this.videoHeight = 0,
     this.likeCount = 0,
     this.commentCount = 0,
   });
@@ -34,23 +34,34 @@ class Post {
   final String caption;
   final DateTime createdAt;
 
-  final String imageUrl;
-  final String imagePath;
+  /// Stored references (`tg:<handle>`), see core/media_url.dart.
+  final String imageRef;
+  final String videoRef;
+  final String thumbRef;
 
-  final String videoUrl;
-  final VideoPlatform? videoPlatform;
-  final String? videoId;
-  final String thumbnailUrl;
+  final int videoDuration;
+  final int videoWidth;
+  final int videoHeight;
 
   final int likeCount;
   final int commentCount;
 
   bool get isVideo => type == 'video';
 
+  /// Posts made by the old "paste a link" feature have no playable file.
+  bool get isLegacyLink => isVideo && !videoRef.startsWith('tg:');
+
+  String get imageUrl => resolveMediaUrl(imageRef);
+  String get videoUrl => resolveMediaUrl(videoRef);
+  String get thumbnailUrl => resolveMediaUrl(thumbRef);
+
+  /// width / height of the video (0 if unknown).
+  double get videoAspect =>
+      (videoWidth > 0 && videoHeight > 0) ? videoWidth / videoHeight : 0;
+
   factory Post.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? const <String, dynamic>{};
     final ts = m['createdAt'];
-    final vid = _str(m['videoId']);
     return Post(
       id: d.id,
       authorId: _str(m['authorId']),
@@ -59,12 +70,12 @@ class Post {
       type: _str(m['type']).isEmpty ? 'image' : _str(m['type']),
       caption: _str(m['caption']),
       createdAt: ts is Timestamp ? ts.toDate() : DateTime.now(),
-      imageUrl: _str(m['imageUrl']),
-      imagePath: _str(m['imagePath']),
-      videoUrl: _str(m['videoUrl']),
-      videoPlatform: VideoPlatformX.fromName(m['videoPlatform'] as String?),
-      videoId: vid.isEmpty ? null : vid,
-      thumbnailUrl: _str(m['thumbnailUrl']),
+      imageRef: _str(m['imageUrl']),
+      videoRef: _str(m['videoUrl']),
+      thumbRef: _str(m['thumbnailUrl']),
+      videoDuration: _int(m['videoDuration']),
+      videoWidth: _int(m['videoWidth']),
+      videoHeight: _int(m['videoHeight']),
       likeCount: _int(m['likeCount']),
       commentCount: _int(m['commentCount']),
     );

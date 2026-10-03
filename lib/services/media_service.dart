@@ -1,10 +1,9 @@
 import 'dart:io';
 
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 
 /// Client-side compression happens here: images are resized + re-encoded as
-/// JPEG by the picker BEFORE they are uploaded, so Storage only holds small files.
+/// JPEG by the picker BEFORE they are uploaded, so the media server only stores small files.
 class MediaService {
   static final ImagePicker _picker = ImagePicker();
 
@@ -33,23 +32,5 @@ class MediaService {
       imageQuality: quality,
     );
     return x == null ? null : File(x.path);
-  }
-}
-
-class StorageService {
-  /// Uploads [file] to [path] and returns its public download URL.
-  static Future<String> uploadImage(String path, File file) async {
-    final ref = FirebaseStorage.instance.ref(path);
-    await ref.putFile(file, SettableMetadata(contentType: 'image/jpeg'));
-    return ref.getDownloadURL();
-  }
-
-  static Future<void> deleteQuietly(String? path) async {
-    if (path == null || path.isEmpty) return;
-    try {
-      await FirebaseStorage.instance.ref(path).delete();
-    } catch (_) {
-      // already gone / no permission: ignore
-    }
   }
 }

@@ -4,14 +4,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/app_user.dart';
-import 'storage_service.dart';
+import 'media_server.dart';
 
 class UserService {
   UserService._();
   static final UserService instance = UserService._();
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  CollectionReference<Map<String, dynamic>> get _users => _db.collection('users');
+  CollectionReference<Map<String, dynamic>> get _users =>
+      _db.collection('users');
 
   String get myUid => FirebaseAuth.instance.currentUser!.uid;
 
@@ -43,15 +44,21 @@ class UserService {
   }
 
   Future<List<AppUser>> suggestedUsers() async {
-    final snap =
-        await _users.orderBy('createdAt', descending: true).limit(20).get();
+    final snap = await _users
+        .orderBy('createdAt', descending: true)
+        .limit(20)
+        .get();
     return snap.docs.map(AppUser.fromDoc).where((u) => u.uid != myUid).toList();
   }
 
   // ---------------------------------------------------------------- follows
 
   Future<bool> isFollowing(String targetUid) async {
-    final d = await _users.doc(myUid).collection('following').doc(targetUid).get();
+    final d = await _users
+        .doc(myUid)
+        .collection('following')
+        .doc(targetUid)
+        .get();
     return d.exists;
   }
 
@@ -59,13 +66,16 @@ class UserService {
     final me = myUid;
     if (me == targetUid) return;
     final batch = _db.batch();
-    batch.set(_users.doc(me).collection('following').doc(targetUid),
-        {'createdAt': FieldValue.serverTimestamp()});
-    batch.set(_users.doc(targetUid).collection('followers').doc(me),
-        {'createdAt': FieldValue.serverTimestamp()});
+    batch.set(_users.doc(me).collection('following').doc(targetUid), {
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    batch.set(_users.doc(targetUid).collection('followers').doc(me), {
+      'createdAt': FieldValue.serverTimestamp(),
+    });
     batch.update(_users.doc(me), {'followingCount': FieldValue.increment(1)});
-    batch.update(
-        _users.doc(targetUid), {'followersCount': FieldValue.increment(1)});
+    batch.update(_users.doc(targetUid), {
+      'followersCount': FieldValue.increment(1),
+    });
     await batch.commit();
   }
 
@@ -75,13 +85,15 @@ class UserService {
     batch.delete(_users.doc(me).collection('following').doc(targetUid));
     batch.delete(_users.doc(targetUid).collection('followers').doc(me));
     batch.update(_users.doc(me), {'followingCount': FieldValue.increment(-1)});
-    batch.update(
-        _users.doc(targetUid), {'followersCount': FieldValue.increment(-1)});
+    batch.update(_users.doc(targetUid), {
+      'followersCount': FieldValue.increment(-1),
+    });
     await batch.commit();
   }
 
   /// ids of the people [uid] follows (max 100)
-  Future<List<String>> followingIds([String? uid]) => _subIds(uid ?? myUid, 'following');
+  Future<List<String>> followingIds([String? uid]) =>
+      _subIds(uid ?? myUid, 'following');
 
   Future<List<String>> followerIds(String uid) => _subIds(uid, 'followers');
 
@@ -107,14 +119,12 @@ class UserService {
       'fullName': fullName.trim(),
       'bio': bio.trim(),
     };
-    String? oldPath;
+    String? oldRef;
     if (newPhoto != null) {
-      oldPath = (await getUser(uid))?.photoPath;
-      final path = 'avatars/$uid/${DateTime.now().millisecondsSinceEpoch}.jpg';
-      data['photoUrl'] = await StorageService.uploadImage(path, newPhoto);
-      data['photoPath'] = path;
+      oldRef = (await getUser(uid))?.photoUrl;
+      data['photoUrl'] = (await MediaServer.instance.uploadImage(newPhoto)).ref;
     }
     await _users.doc(uid).update(data);
-    await StorageService.deleteQuietly(oldPath);
+    await MediaServer.instance.deleteQuietly(oldRef);
   }
 }

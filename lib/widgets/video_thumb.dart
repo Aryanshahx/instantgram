@@ -1,36 +1,11 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../core/media_url.dart';
+import '../core/theme.dart';
 import '../models/post.dart';
-import '../models/video_link.dart';
 
-IconData platformIcon(VideoPlatform? p) {
-  switch (p) {
-    case VideoPlatform.youtube:
-      return Icons.smart_display;
-    case VideoPlatform.tiktok:
-      return Icons.music_note;
-    case VideoPlatform.instagram:
-      return Icons.camera_alt_outlined;
-    case null:
-      return Icons.play_circle_outline;
-  }
-}
-
-List<Color> _platformColors(VideoPlatform? p) {
-  switch (p) {
-    case VideoPlatform.youtube:
-      return const [Color(0xFFFF0000), Color(0xFF7A0000)];
-    case VideoPlatform.tiktok:
-      return const [Color(0xFF25F4EE), Color(0xFFFE2C55)];
-    case VideoPlatform.instagram:
-      return const [Color(0xFFFA7E1E), Color(0xFF962FBF)];
-    case null:
-      return const [Colors.grey, Colors.black87];
-  }
-}
-
-/// Thumbnail of a video post (a cheap image - no WebView is created in lists).
+/// Thumbnail of a video post (a cheap image; no player is created in lists).
 class VideoThumb extends StatelessWidget {
   const VideoThumb({
     super.key,
@@ -41,21 +16,26 @@ class VideoThumb extends StatelessWidget {
 
   final Post post;
   final double playSize;
+
+  /// Shows the duration chip.
   final bool showBadge;
 
   @override
   Widget build(BuildContext context) {
     final placeholder = DecoratedBox(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: _platformColors(post.videoPlatform),
+          colors: [Color(0xFF1B1F2B), Color(0xFF3A3470)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
       ),
       child: Center(
-        child: Icon(platformIcon(post.videoPlatform),
-            color: Colors.white54, size: playSize * 1.4),
+        child: Icon(
+          Icons.movie_rounded,
+          color: Colors.white24,
+          size: playSize * 1.2,
+        ),
       ),
     );
 
@@ -79,32 +59,30 @@ class VideoThumb extends StatelessWidget {
               color: Colors.black45,
               shape: BoxShape.circle,
             ),
-            child: Icon(Icons.play_arrow_rounded,
-                color: Colors.white, size: playSize * 0.7),
+            child: Icon(
+              Icons.play_arrow_rounded,
+              color: Colors.white,
+              size: playSize * 0.7,
+            ),
           ),
         ),
-        if (showBadge && post.videoPlatform != null)
+        if (showBadge && post.videoDuration > 0)
           Positioned(
             top: 10,
             right: 10,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.black54,
+                color: AppTheme.volt,
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(platformIcon(post.videoPlatform),
-                      color: Colors.white, size: 14),
-                  const SizedBox(width: 4),
-                  Text(post.videoPlatform!.label,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600)),
-                ],
+              child: Text(
+                formatDuration(post.videoDuration),
+                style: const TextStyle(
+                  color: AppTheme.ink,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
           ),

@@ -40,15 +40,22 @@ class EmptyState extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 18),
-            Text(title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -0.4)),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.4,
+              ),
+            ),
             if (subtitle != null) ...[
               const SizedBox(height: 8),
-              Text(subtitle!,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: context.muted, height: 1.35)),
+              Text(
+                subtitle!,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: context.muted, height: 1.35),
+              ),
             ],
             if (action != null) ...[const SizedBox(height: 18), action!],
           ],
@@ -78,14 +85,22 @@ class ErrorState extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off_rounded, size: 40, color: AppTheme.coral),
+              const Icon(
+                Icons.cloud_off_rounded,
+                size: 40,
+                color: AppTheme.coral,
+              ),
               const SizedBox(height: 12),
-              Text(friendlyError(error),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: context.muted, height: 1.35)),
+              Text(
+                friendlyError(error),
+                textAlign: TextAlign.center,
+                style: TextStyle(color: context.muted, height: 1.35),
+              ),
               const SizedBox(height: 14),
               OutlinedButton(
-                style: OutlinedButton.styleFrom(minimumSize: const Size(130, 44)),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(130, 44),
+                ),
                 onPressed: onRetry,
                 child: const Text('Try again'),
               ),

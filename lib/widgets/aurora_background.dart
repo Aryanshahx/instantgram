@@ -8,15 +8,18 @@ class AuroraBackground extends StatelessWidget {
   final Widget child;
 
   Widget _blob(Color c, double size, double alpha) => Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [c.withValues(alpha: alpha), c.withValues(alpha: 0)],
-          ),
-        ),
-      );
+    width: size,
+    height: size,
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      gradient: RadialGradient(
+        colors: [
+          c.withValues(alpha: alpha),
+          c.withValues(alpha: 0),
+        ],
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {

@@ -35,21 +35,22 @@ class AppTheme {
     final outline = isDark ? const Color(0xFF2A2F3A) : const Color(0xFFDAD7CC);
     final text = isDark ? const Color(0xFFF2F4F8) : const Color(0xFF12141A);
 
-    final scheme = ColorScheme.fromSeed(seedColor: volt, brightness: b).copyWith(
-      primary: volt,
-      onPrimary: ink,
-      secondary: violet,
-      onSecondary: Colors.white,
-      error: coral,
-      surface: card,
-      onSurface: text,
-      outline: outline,
-    );
+    final scheme = ColorScheme.fromSeed(seedColor: volt, brightness: b)
+        .copyWith(
+          primary: volt,
+          onPrimary: ink,
+          secondary: violet,
+          onSecondary: Colors.white,
+          error: coral,
+          surface: card,
+          onSurface: text,
+          outline: outline,
+        );
 
     OutlineInputBorder border(Color c, [double w = 1]) => OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide(color: c, width: w),
-        );
+      borderRadius: BorderRadius.circular(18),
+      borderSide: BorderSide(color: c, width: w),
+    );
 
     return ThemeData(
       useMaterial3: true,
@@ -58,7 +59,11 @@ class AppTheme {
       scaffoldBackgroundColor: bg,
       canvasColor: bg,
       dividerColor: outline,
-      dividerTheme: DividerThemeData(color: outline, thickness: 0.6, space: 0.6),
+      dividerTheme: DividerThemeData(
+        color: outline,
+        thickness: 0.6,
+        space: 0.6,
+      ),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         foregroundColor: text,
@@ -75,7 +80,10 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: card,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 18,
+          vertical: 16,
+        ),
         hintStyle: TextStyle(color: text.withValues(alpha: 0.45)),
         border: border(outline),
         enabledBorder: border(outline),
@@ -90,9 +98,14 @@ class AppTheme {
           disabledBackgroundColor: volt.withValues(alpha: 0.35),
           disabledForegroundColor: ink.withValues(alpha: 0.5),
           minimumSize: const Size.fromHeight(54),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
           textStyle: const TextStyle(
-              fontWeight: FontWeight.w800, fontSize: 16, letterSpacing: -0.2),
+            fontWeight: FontWeight.w800,
+            fontSize: 16,
+            letterSpacing: -0.2,
+          ),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -100,7 +113,9 @@ class AppTheme {
           foregroundColor: text,
           minimumSize: const Size.fromHeight(48),
           side: BorderSide(color: outline),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
@@ -110,8 +125,9 @@ class AppTheme {
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
-      progressIndicatorTheme:
-          ProgressIndicatorThemeData(color: isDark ? volt : ink),
+      progressIndicatorTheme: ProgressIndicatorThemeData(
+        color: isDark ? volt : ink,
+      ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: isDark ? cardHigh : ink,
@@ -149,7 +165,8 @@ extension ThemeContext on BuildContext {
   Color get cardHigh =>
       isDark ? const Color(0xFF1D212B) : const Color(0xFFE9E7DE);
   Color get softFill => cardHigh;
-  Color get muted => Theme.of(this).colorScheme.onSurface.withValues(alpha: 0.58);
+  Color get muted =>
+      Theme.of(this).colorScheme.onSurface.withValues(alpha: 0.58);
   Color get hairline =>
       isDark ? const Color(0xFF2A2F3A) : const Color(0xFFDAD7CC);
 

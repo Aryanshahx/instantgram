@@ -45,9 +45,11 @@ class PillTabs extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       if (icons != null) ...[
-                        Icon(icons![i],
-                            size: 18,
-                            color: i == index ? AppTheme.ink : context.muted),
+                        Icon(
+                          icons![i],
+                          size: 18,
+                          color: i == index ? AppTheme.ink : context.muted,
+                        ),
                         const SizedBox(width: 6),
                       ],
                       Text(

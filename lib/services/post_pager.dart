@@ -53,7 +53,7 @@ class PostPager extends ChangeNotifier {
         posts.clear();
         _cursor = null;
       }
-      posts.addAll(snap.docs.map(Post.fromDoc));
+      posts.addAll(snap.docs.map(Post.fromDoc).where((p) => !p.isLegacyLink));
       if (snap.docs.isNotEmpty) _cursor = snap.docs.last;
       hasMore = snap.docs.length >= pageSize;
     } catch (e) {

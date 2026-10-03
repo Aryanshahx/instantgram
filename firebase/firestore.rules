@@ -28,6 +28,10 @@ service cloud.firestore {
         allow read: if signedIn();
         allow write: if signedIn() && request.auth.uid == followerId;
       }
+      // posts {uid} bookmarked: private to the owner
+      match /saved/{postId} {
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
       // people {uid} follows: only the owner writes
       match /following/{targetId} {
         allow read: if signedIn();

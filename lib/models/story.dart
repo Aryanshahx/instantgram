@@ -1,13 +1,14 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/media_url.dart';
+
 class Story {
   const Story({
     required this.id,
     required this.authorId,
     required this.username,
     required this.photoUrl,
-    required this.imageUrl,
-    required this.imagePath,
+    required this.imageRef,
     required this.createdAt,
   });
 
@@ -15,9 +16,10 @@ class Story {
   final String authorId;
   final String username;
   final String photoUrl;
-  final String imageUrl;
-  final String imagePath;
+  final String imageRef;
   final DateTime createdAt;
+
+  String get imageUrl => resolveMediaUrl(imageRef);
 
   factory Story.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? const <String, dynamic>{};
@@ -28,8 +30,7 @@ class Story {
       authorId: s(m['authorId']),
       username: s(m['authorUsername']),
       photoUrl: s(m['authorPhotoUrl']),
-      imageUrl: s(m['imageUrl']),
-      imagePath: s(m['imagePath']),
+      imageRef: s(m['imageUrl']),
       createdAt: ts is Timestamp ? ts.toDate() : DateTime.now(),
     );
   }

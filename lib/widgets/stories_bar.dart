@@ -8,7 +8,7 @@ import '../core/ui.dart';
 import '../models/app_user.dart';
 import '../models/story.dart';
 import '../screens/story/story_viewer.dart';
-import '../services/storage_service.dart';
+import '../services/media_service.dart';
 import '../services/story_service.dart';
 import '../services/user_service.dart';
 import 'avatar.dart';
@@ -101,10 +101,12 @@ class _StoriesBarState extends State<StoriesBar> {
 
   void _open(int index) {
     Navigator.of(context)
-        .push(MaterialPageRoute<void>(
-          fullscreenDialog: true,
-          builder: (_) => StoryViewer(groups: _groups, initialIndex: index),
-        ))
+        .push(
+          MaterialPageRoute<void>(
+            fullscreenDialog: true,
+            builder: (_) => StoryViewer(groups: _groups, initialIndex: index),
+          ),
+        )
         .then((_) => _load());
   }
 
@@ -186,7 +188,11 @@ class _StoriesBarState extends State<StoriesBar> {
                               width: 2,
                             ),
                           ),
-                          child: const Icon(Icons.add_rounded, color: AppTheme.ink, size: 16),
+                          child: const Icon(
+                            Icons.add_rounded,
+                            color: AppTheme.ink,
+                            size: 16,
+                          ),
                         ),
                       ),
                     ),
@@ -194,10 +200,12 @@ class _StoriesBarState extends State<StoriesBar> {
               ),
             ),
             const SizedBox(height: 4),
-            Text(label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
           ],
         ),
       ),

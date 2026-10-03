@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class UsernameTakenException implements Exception {
@@ -6,8 +7,8 @@ class UsernameTakenException implements Exception {
   String toString() => 'That username is already taken.';
 }
 
-class VideoLinkException implements Exception {
-  const VideoLinkException(this.message);
+class MediaException implements Exception {
+  const MediaException(this.message);
   final String message;
   @override
   String toString() => message;
@@ -15,8 +16,36 @@ class VideoLinkException implements Exception {
 
 /// Turns any error into a short, user-friendly message.
 String friendlyError(Object e) {
-  if (e is UsernameTakenException || e is VideoLinkException) {
+  if (e is UsernameTakenException || e is MediaException) {
     return e.toString();
+  }
+  if (e is DioException) {
+    final status = e.response?.statusCode;
+    final data = e.response?.data;
+    final detail = data is Map && data['detail'] is String
+        ? data['detail'] as String
+        : null;
+    switch (e.type) {
+      case DioExceptionType.connectionError:
+      case DioExceptionType.connectionTimeout:
+        return 'Cannot reach the media server. Check your internet, and that the server is running.';
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+        return 'The upload took too long. Try a shorter clip or a better connection.';
+      default:
+        break;
+    }
+    switch (status) {
+      case 401:
+        return 'Please log out and log in again.';
+      case 413:
+        return detail ?? 'That file is too large.';
+      case 429:
+        return detail ?? 'Too many uploads. Try again later.';
+      case 502:
+        return 'The media server could not reach Telegram. Try again in a minute.';
+    }
+    return detail ?? 'Upload failed${status == null ? '' : ' ($status)'}.';
   }
   if (e is FirebaseAuthException) {
     switch (e.code) {
@@ -55,18 +84,8 @@ String friendlyError(Object e) {
       case 'unavailable':
       case 'network-request-failed':
         return 'No internet connection.';
-      case 'unauthorized':
       case 'unauthenticated':
-        return 'Storage permission denied. Check your Storage rules.';
-      case 'object-not-found':
-        return 'File not found.';
-      case 'bucket-not-found':
-      case 'project-not-found':
-        return 'Firebase Storage is not set up yet (needs the Blaze plan).';
-      case 'quota-exceeded':
-        return 'Storage quota exceeded.';
-      case 'canceled':
-        return 'Upload cancelled.';
+        return 'Please log out and log in again.';
     }
     return e.message ?? 'Something went wrong (${e.code}).';
   }
