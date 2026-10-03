@@ -1,0 +1,7 @@
+{
+  "name": "instantgram-media-signer",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test test/" },
+  "engines": { "node": ">=18" }
+}

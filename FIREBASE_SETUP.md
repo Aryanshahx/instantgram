@@ -3,8 +3,8 @@
 Console: https://console.firebase.google.com  (project: instantgram)
 
 Firebase now only does two jobs: **Authentication** and **Firestore (text)**.
-Photos, avatars, moments and videos live in a private Telegram channel and go through your own
-media server (see `media-server/README.md`). Firebase Storage and the Blaze plan are NOT needed.
+Photos, avatars, moments and videos live in a Tigris bucket, uploaded through a small signer
+service on Vercel (see `signer/README.md`). Firebase Storage and the Blaze plan are NOT needed.
 
 ## 1. Authentication
 Build -> Authentication -> Sign-in method -> **Email/Password** -> Enable.
@@ -48,8 +48,9 @@ firebase deploy --only firestore
 |-------------------------------------------------------|----------------------------------------|
 | accounts (email + password)                           | Firebase Authentication                |
 | usernames, bios, captions, comments, likes, followers | Firestore (text only)                  |
-| photos, avatars, moments, videos, video thumbnails    | Private Telegram channel, via your media server. Firestore keeps only a short reference such as `tg:123-abc...` |
+| photos, avatars, moments, videos, video thumbnails    | Tigris bucket. Firestore keeps only a short reference such as `m:image/<uid>/<id>.jpg` |
 
 ## Old data
 Posts made with the old video-link system are hidden automatically (they have no uploaded video).
-Photos that were stored in Firebase Storage keep working only if they were ever uploaded there.
+Posts, avatars and moments that were stored in Telegram (`tg:` references) cannot be shown any more; the
+app hides those posts and falls back to the letter avatar. Photos that were stored in Firebase Storage keep working only if they were ever uploaded there.

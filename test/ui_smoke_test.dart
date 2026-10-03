@@ -33,7 +33,7 @@ void main() {
         );
     expect(
       friendlyError(dio(DioExceptionType.connectionError)),
-      contains('media server'),
+      contains('media service'),
     );
     expect(
       friendlyError(dio(DioExceptionType.badResponse, 401)),
@@ -46,6 +46,10 @@ void main() {
         }),
       ),
       'File is too large.',
+    );
+    expect(
+      friendlyError(dio(DioExceptionType.badResponse, 403)),
+      contains('refused'),
     );
     expect(
       friendlyError(dio(DioExceptionType.badResponse, 429)),
@@ -110,7 +114,7 @@ void main() {
                     type: 'video',
                     caption: '',
                     createdAt: DateTime(2026),
-                    videoRef: 'tg:1-aaaaaaaaaaaaaaaa',
+                    videoRef: 'm:video/u/aaaaaaaaaaaaaaaa.mp4',
                     videoDuration: 83,
                   ),
                 ),

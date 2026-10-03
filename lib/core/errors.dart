@@ -28,7 +28,7 @@ String friendlyError(Object e) {
     switch (e.type) {
       case DioExceptionType.connectionError:
       case DioExceptionType.connectionTimeout:
-        return 'Cannot reach the media server. Check your internet, and that the server is running.';
+        return 'Cannot reach the media service. Check your internet connection.';
       case DioExceptionType.sendTimeout:
       case DioExceptionType.receiveTimeout:
         return 'The upload took too long. Try a shorter clip or a better connection.';
@@ -38,12 +38,14 @@ String friendlyError(Object e) {
     switch (status) {
       case 401:
         return 'Please log out and log in again.';
+      case 403:
+        return 'The upload was refused. Please try again.';
       case 413:
         return detail ?? 'That file is too large.';
       case 429:
         return detail ?? 'Too many uploads. Try again later.';
-      case 502:
-        return 'The media server could not reach Telegram. Try again in a minute.';
+      case 500:
+        return detail ?? 'The media service is not set up correctly yet.';
     }
     return detail ?? 'Upload failed${status == null ? '' : ' ($status)'}.';
   }

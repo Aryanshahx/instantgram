@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../core/media_url.dart';
 import '../models/story.dart';
 import 'media_server.dart';
 import 'user_service.dart';
@@ -31,6 +32,7 @@ class StoryService {
     for (final d in snap.docs) {
       final s = Story.fromDoc(d);
       if (!allowed.contains(s.authorId)) continue;
+      if (isRemovedStorageRef(s.imageRef)) continue;
       byAuthor.putIfAbsent(s.authorId, () => []).add(s);
     }
 

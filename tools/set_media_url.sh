@@ -1,40 +1,51 @@
 #!/usr/bin/env bash
-# Puts your media server address into lib/core/config.dart.
-# Usage:  bash tools/set_media_url.sh            (asks for it)
-#         bash tools/set_media_url.sh https://name.tailnet.ts.net
+# Puts your media addresses into lib/core/config.dart.
+# Usage:  bash tools/set_media_url.sh                      (asks for both)
+#         bash tools/set_media_url.sh <signer-url> <public-url>
+# signer/setup.sh runs this for you.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 FILE="lib/core/config.dart"
-[ -f "$FILE" ] || { echo "ERROR: $FILE not found. Run this from the project (v1.2.0 installed?)."; exit 1; }
+[ -f "$FILE" ] || { echo "ERROR: $FILE not found. Run this from the project (v1.4.0 installed?)."; exit 1; }
 
-URL="${1:-}"
-if [ -z "$URL" ]; then
-  read -r -p "Paste your media server address (starts with https://): " URL || URL=""
+API="${1:-}"
+PUB="${2:-}"
+if [ -z "$API" ]; then
+  read -r -p "Signer address (https://<name>.vercel.app/api): " API || API=""
 fi
-URL="${URL//[[:space:]]/}"
-URL="${URL%/}"
-case "$URL" in
-  https://*) ;;
-  *) echo "ERROR: the address must start with https:// (Android blocks plain http)."; exit 1 ;;
-esac
+if [ -z "$PUB" ]; then
+  read -r -p "Public bucket address (https://<bucket>.t3.tigrisfiles.io): " PUB || PUB=""
+fi
+clean() { local v="${1//[[:space:]]/}"; printf '%s' "${v%/}"; }
+API="$(clean "$API")"
+PUB="$(clean "$PUB")"
+for v in "$API" "$PUB"; do
+  case "$v" in
+    https://*) ;;
+    *) echo "ERROR: both addresses must start with https:// (Android blocks plain http)."; exit 1 ;;
+  esac
+done
 
-python3 - "$FILE" "$URL" <<'PY'
+python3 - "$FILE" "$API" "$PUB" <<'PY'
 import re, sys
-path, url = sys.argv[1], sys.argv[2]
+path, api, pub = sys.argv[1], sys.argv[2].replace("'", ""), sys.argv[3].replace("'", "")
 s = open(path).read()
-s, n = re.subn(r"const String kMediaServerUrl = '[^']*';",
-               "const String kMediaServerUrl = '" + url.replace("'", "") + "';", s)
-if n != 1:
-    sys.exit("ERROR: could not find kMediaServerUrl in " + path)
+for name, val in (("kMediaApiUrl", api), ("kMediaPublicUrl", pub)):
+    s, n = re.subn(r"const String " + name + r" = '[^']*';",
+                   lambda m, name=name, val=val: "const String " + name + " = '" + val + "';", s)
+    if n != 1:
+        sys.exit("ERROR: could not find " + name + " in " + path)
 open(path, "w").write(s)
 PY
-echo "Saved: $URL"
+echo "Saved:"
+echo "  uploads : $API"
+echo "  files   : $PUB"
 
 if command -v curl >/dev/null; then
-  if OUT="$(curl -fsS --max-time 10 "$URL/health" 2>/dev/null)"; then
-    echo "Server answered: $OUT"
+  if OUT="$(curl -fsS --max-time 10 "$API/health" 2>/dev/null)"; then
+    echo "Signer answered: $OUT"
   else
-    echo "Note: the server did not answer at $URL/health yet. Check the service and the tailscale funnel."
+    echo "Note: the signer did not answer at $API/health yet."
   fi
 fi
 echo "Now commit and push so the next APK build uses it."

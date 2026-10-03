@@ -12,7 +12,7 @@ class ReelAudio {
 
 /// Our own video player UI on top of the native player (ExoPlayer):
 /// full-bleed video, tap to pause, loop, thin lime progress line, spinner.
-/// Streams from the media server, which supports seeking (HTTP Range).
+/// Streams from the bucket, which supports seeking (HTTP Range).
 class ReelVideo extends StatefulWidget {
   const ReelVideo({
     super.key,

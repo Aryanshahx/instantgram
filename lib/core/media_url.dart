@@ -1,19 +1,31 @@
 import 'config.dart';
 
-/// Media references are stored in Firestore as `tg:<handle>` (file) or
-/// `tgt:<handle>` (video thumbnail). The real address is built here, so moving
-/// the media server only needs a new [kMediaServerUrl].
-String get mediaBase => kMediaServerUrl.replaceAll(RegExp(r'/+$'), '');
+/// Media references are stored in Firestore as `m:<key>` (a file in your Tigris
+/// bucket). The real address is built here, so changing the public address (for example to
+/// your own domain) only needs a new [kMediaPublicUrl].
+String _trim(String s) => s.replaceAll(RegExp(r'/+$'), '');
 
-bool get mediaServerConfigured => !kMediaServerUrl.contains('CHANGE-ME');
+String get mediaApiBase => _trim(kMediaApiUrl);
+String get mediaPublicBase => _trim(kMediaPublicUrl);
 
+bool get mediaServerConfigured =>
+    !kMediaApiUrl.contains('CHANGE-ME') &&
+    !kMediaPublicUrl.contains('CHANGE-ME');
+
+/// Turns a stored reference into a URL that can be loaded. Plain http(s) links are returned
+/// as they are. References to the removed Telegram storage (`tg:` / `tgt:`) have no address.
 String resolveMediaUrl(String ref) {
-  if (ref.startsWith('tg:')) return '$mediaBase/m/${ref.substring(3)}';
-  if (ref.startsWith('tgt:')) return '$mediaBase/t/${ref.substring(4)}';
+  if (ref.isEmpty) return '';
+  if (ref.startsWith('m:')) return '$mediaPublicBase/${ref.substring(2)}';
+  if (ref.startsWith('tg:') || ref.startsWith('tgt:')) return '';
   return ref;
 }
 
-bool isMediaRef(String ref) => ref.startsWith('tg:') || ref.startsWith('tgt:');
+bool isMediaRef(String ref) => ref.startsWith('m:');
+
+/// Files that lived in the removed Telegram storage and can never be shown again.
+bool isRemovedStorageRef(String ref) =>
+    ref.startsWith('tg:') || ref.startsWith('tgt:');
 
 /// 83 -> "1:23"
 String formatDuration(int seconds) {

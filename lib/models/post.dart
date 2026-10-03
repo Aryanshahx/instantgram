@@ -34,7 +34,7 @@ class Post {
   final String caption;
   final DateTime createdAt;
 
-  /// Stored references (`tg:<handle>`), see core/media_url.dart.
+  /// Stored references (`m:<key>`), see core/media_url.dart.
   final String imageRef;
   final String videoRef;
   final String thumbRef;
@@ -48,8 +48,10 @@ class Post {
 
   bool get isVideo => type == 'video';
 
-  /// Posts made by the old "paste a link" feature have no playable file.
-  bool get isLegacyLink => isVideo && !videoRef.startsWith('tg:');
+  /// Posts that can no longer be shown: old "paste a link" videos, and anything that
+  /// lived in the removed Telegram storage.
+  bool get isLegacyLink =>
+      isVideo ? !videoRef.startsWith('m:') : isRemovedStorageRef(imageRef);
 
   String get imageUrl => resolveMediaUrl(imageRef);
   String get videoUrl => resolveMediaUrl(videoRef);

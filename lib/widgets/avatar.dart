@@ -47,7 +47,7 @@ class UserAvatar extends StatelessWidget {
       child: SizedBox(
         width: size,
         height: size,
-        child: url.isEmpty
+        child: resolveMediaUrl(url).isEmpty
             ? initial()
             : CachedNetworkImage(
                 imageUrl: resolveMediaUrl(url),

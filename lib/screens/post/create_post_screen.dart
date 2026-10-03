@@ -30,6 +30,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   File? _video;
   File? _videoThumb;
   int _videoSeconds = 0;
+  int _videoBytes = 0;
+  bool _original = true; // upload the clip exactly as recorded
   int _videoW = 0;
   int _videoH = 0;
 
@@ -77,7 +79,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
     if (source == null) return;
     try {
-      // Compressed on the phone before upload (1080px, JPEG q70).
+      // Uploaded exactly as taken; the bucket keeps the original.
       final file = await MediaService.pickPostImage(source);
       if (file == null) return;
       final bytes = await file.length();
@@ -87,7 +89,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         _imageKb = (bytes / 1024).round();
       });
     } catch (e) {
-      if (mounted) showToast(context, 'Could not open the picker.');
+      if (mounted) {
+        showToast(
+          context,
+          e is MediaException ? e.message : 'Could not open the picker.',
+        );
+      }
     }
   }
 
@@ -128,6 +135,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         maxDuration: const Duration(seconds: kMaxVideoSeconds),
       );
       if (picked == null) return;
+      final bytes = await File(picked.path).length();
       final info = await VideoCompress.getMediaInfo(picked.path);
       final seconds = ((info.duration ?? 0) / 1000).ceil();
       if (seconds > kMaxVideoSeconds + 1) {
@@ -157,6 +165,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         _video = File(picked.path);
         _videoThumb = thumb;
         _videoSeconds = seconds;
+        _videoBytes = bytes;
         _videoW = w;
         _videoH = h;
       });
@@ -175,7 +184,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     setState(() {
       _busy = true;
       _progress = null;
-      _stage = _mode == 0 ? 'Uploading...' : 'Optimising video...';
+      _stage = (_mode == 1 && _willShrink)
+          ? 'Optimising video...'
+          : 'Uploading...';
     });
     try {
       if (_mode == 0) {
@@ -195,30 +206,41 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
+  bool get _willShrink => !_original || _videoBytes > kMaxVideoMb * 1024 * 1024;
+
+  static String _mb(int bytes) => bytes >= 1024 * 1024
+      ? '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB'
+      : '${(bytes / 1024).round()} KB';
+
   Future<void> _publishVideo() async {
-    // 1) shrink to 720p on the phone (saves your data and the server's)
-    final sub = VideoCompress.compressProgress$.subscribe((p) {
-      if (mounted) setState(() => _progress = (p / 100).clamp(0.0, 1.0));
-    });
+    // 1) original quality: upload the file untouched. Only shrink to 720p when the user
+    //    switched "Original quality" off, or when the file is bigger than the server accepts.
+    File out = _video!;
     MediaInfo? info;
-    try {
-      info = await VideoCompress.compressVideo(
-        _video!.path,
-        quality: VideoQuality.Res1280x720Quality,
-        deleteOrigin: false,
-        includeAudio: true,
-      );
-    } finally {
-      sub.unsubscribe();
-    }
-    final out = info?.file;
-    if (out == null) {
-      throw const MediaException(
-        'Could not process that video. Try another one.',
-      );
+    if (_willShrink) {
+      final sub = VideoCompress.compressProgress$.subscribe((p) {
+        if (mounted) setState(() => _progress = (p / 100).clamp(0.0, 1.0));
+      });
+      try {
+        info = await VideoCompress.compressVideo(
+          _video!.path,
+          quality: VideoQuality.Res1280x720Quality,
+          deleteOrigin: false,
+          includeAudio: true,
+        );
+      } finally {
+        sub.unsubscribe();
+      }
+      final shrunk = info?.file;
+      if (shrunk == null) {
+        throw const MediaException(
+          'Could not process that video. Try another one.',
+        );
+      }
+      out = shrunk;
     }
 
-    // 2) upload to the media server (Telegram storage)
+    // 2) upload straight to the Tigris bucket
     if (mounted) {
       setState(() {
         _stage = 'Uploading...';
@@ -234,11 +256,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final media = await MediaServer.instance.uploadVideo(
       file: out,
       thumb: _videoThumb,
-      duration: _videoSeconds,
-      width: w,
-      height: h,
       onProgress: (p) {
-        if (mounted) setState(() => _progress = p);
+        if (!mounted) return;
+        setState(() => _progress = p);
       },
     );
     if (mounted) setState(() => _stage = 'Publishing...');
@@ -286,8 +306,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     const SizedBox(height: 18),
                     if (_mode == 0)
                       _photoPicker(context)
-                    else
+                    else ...[
                       _videoPicker(context),
+                      const SizedBox(height: 12),
+                      _qualityTile(context),
+                    ],
                     const SizedBox(height: 16),
                     TextField(
                       controller: _caption,
@@ -387,7 +410,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Image.file(_image!, fit: BoxFit.cover),
+            Image.file(_image!, fit: BoxFit.cover, cacheWidth: 1200),
             Positioned(
               left: 12,
               bottom: 12,
@@ -404,13 +427,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Icon(
-                      Icons.compress_rounded,
+                      Icons.high_quality_rounded,
                       size: 16,
                       color: AppTheme.volt,
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      '${_imageKb ?? 0} KB after compression',
+                      'Original  \u00b7  ${_mb((_imageKb ?? 0) * 1024)}',
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w700,
@@ -446,6 +469,34 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _qualityTile(BuildContext context) {
+    final big = _videoBytes > kMaxVideoMb * 1024 * 1024;
+    return Container(
+      decoration: BoxDecoration(
+        color: context.card,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: SwitchListTile(
+        value: _original,
+        onChanged: _busy ? null : (v) => setState(() => _original = v),
+        activeTrackColor: AppTheme.volt,
+        contentPadding: const EdgeInsets.fromLTRB(18, 4, 12, 4),
+        title: const Text(
+          'Original quality',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        subtitle: Text(
+          big && _original
+              ? 'This file is over $kMaxVideoMb MB, so it will be shrunk to fit.'
+              : _original
+              ? 'Uploaded exactly as recorded. Big files take longer to upload and to load for viewers.'
+              : 'Shrunk to 720p on your phone first. Smaller, so it uploads and plays faster.',
+          style: TextStyle(color: context.muted, fontSize: 12.5, height: 1.3),
         ),
       ),
     );
@@ -553,7 +604,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      formatDuration(_videoSeconds),
+                      '${formatDuration(_videoSeconds)}  \u00b7  ${_mb(_videoBytes)}',
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w700,

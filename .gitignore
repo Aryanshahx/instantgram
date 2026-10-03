@@ -43,8 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
-media-server/.env
-media-server/.venv/
-media-server/*.session*
 __pycache__/
 .pytest_cache/
+signer/node_modules/
+signer/.vercel/
+signer/.env*

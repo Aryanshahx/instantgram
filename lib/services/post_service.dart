@@ -117,9 +117,10 @@ class PostService {
       'postsCount': FieldValue.increment(-1),
     });
     await batch.commit();
-    // Free the space in the Telegram channel (best effort).
+    // Free the space in the bucket (best effort).
     await MediaServer.instance.deleteQuietly(
       p.isVideo ? p.videoRef : p.imageRef,
+      p.thumbRef,
     );
   }
 
