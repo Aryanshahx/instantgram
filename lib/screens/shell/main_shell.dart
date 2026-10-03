@@ -38,7 +38,10 @@ class _MainShellState extends State<MainShell> {
     final tabs = <Widget>[
       const FeedScreen(),
       const SearchScreen(),
-      ReelsScreen(active: _index == 2),
+      ReelsScreen(
+        active: _index == 2,
+        onBack: () => setState(() => _index = 0),
+      ),
       ProfileScreen(uid: UserService.instance.myUid, isTab: true),
     ];
     final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
@@ -54,7 +57,8 @@ class _MainShellState extends State<MainShell> {
         body: Stack(
           children: [
             IndexedStack(index: _index, children: tabs),
-            if (!keyboardOpen)
+            // Clips is full screen: no bottom bar there (it has its own back button).
+            if (!keyboardOpen && _index != 2)
               Positioned(
                 left: 16,
                 right: 16,

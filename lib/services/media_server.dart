@@ -73,8 +73,10 @@ class MediaServer {
     return kind == 'video' ? 'mp4' : 'jpg';
   }
 
-  Future<UploadedMedia> uploadImage(File file) =>
-      _upload(file: file, kind: 'image');
+  Future<UploadedMedia> uploadImage(
+    File file, {
+    void Function(double progress)? onProgress,
+  }) => _upload(file: file, kind: 'image', onProgress: onProgress);
 
   Future<UploadedMedia> uploadVideo({
     required File file,
@@ -114,23 +116,29 @@ class MediaServer {
         ? s['type'] as String
         : 'application/octet-stream';
 
-    // The thumbnail is small and optional: a failure here must not lose the video.
-    var thumbRef = '';
+    // The thumbnail is small and optional: it goes up at the same time as the video, and a
+    // failure here must not lose the video.
     final thumbKey = s['thumbKey'];
     final thumbUrl = s['thumbUrl'];
-    if (hasThumb && thumbKey is String && thumbUrl is String) {
-      try {
-        await _putFile(thumbUrl, thumb, 'image/jpeg');
-        await _confirm(thumbKey);
-        thumbRef = 'm:$thumbKey';
-      } catch (_) {
-        thumbRef = '';
-      }
-    }
+    final Future<String> thumbTask =
+        (hasThumb && thumbKey is String && thumbUrl is String)
+        ? _uploadThumb(thumb, thumbKey, thumbUrl)
+        : Future<String>.value('');
 
     await _putFile(url, file, type, onProgress: onProgress);
     await _confirm(key);
-    return UploadedMedia(ref: 'm:$key', thumbRef: thumbRef);
+    return UploadedMedia(ref: 'm:$key', thumbRef: await thumbTask);
+  }
+
+  /// Returns `m:<key>`, or '' when the thumbnail could not be saved. Never throws.
+  Future<String> _uploadThumb(File thumb, String key, String url) async {
+    try {
+      await _putFile(url, thumb, 'image/jpeg');
+      await _confirm(key);
+      return 'm:$key';
+    } catch (_) {
+      return '';
+    }
   }
 
   Future<void> _putFile(

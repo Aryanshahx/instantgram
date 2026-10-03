@@ -177,18 +177,11 @@ class _ReelVideoState extends State<ReelVideo> {
             child: AnimatedOpacity(
               opacity: (_flash || (_userPaused && _ready)) ? 1 : 0,
               duration: const Duration(milliseconds: 160),
-              child: Container(
-                width: 76,
-                height: 76,
-                decoration: const BoxDecoration(
-                  color: Colors.black54,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  _userPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                  color: Colors.white,
-                  size: 46,
-                ),
+              child: Icon(
+                _userPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                color: Colors.white,
+                size: 72,
+                shadows: const [Shadow(blurRadius: 14, color: Colors.black54)],
               ),
             ),
           ),

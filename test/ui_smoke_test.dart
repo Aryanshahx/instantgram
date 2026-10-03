@@ -1,5 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:instantgram/screens/post/create_post_screen.dart';
+import 'package:instantgram/services/post_pager.dart';
+import 'package:instantgram/widgets/reel_actions.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:instantgram/core/errors.dart';
 import 'package:instantgram/core/responsive.dart';
@@ -70,6 +73,95 @@ void main() {
     await t.pumpWidget(_app(const LoginScreen(), AppTheme.dark));
     await t.pump(const Duration(milliseconds: 300));
     expect(t.takeException(), isNull);
+  });
+
+  group('Create screen', () {
+    for (final size in const [
+      Size(720, 1280), // small phone
+      Size(1080, 2400), // tall phone
+      Size(2560, 1600), // tablet, landscape
+    ]) {
+      testWidgets('preview is a clean 9:16 frame at ${size.width.toInt()}', (
+        t,
+      ) async {
+        t.view.physicalSize = size;
+        t.view.devicePixelRatio = 2;
+        addTearDown(t.view.reset);
+        await t.pumpWidget(_app(const CreatePostScreen(), AppTheme.dark));
+        await t.pump(const Duration(milliseconds: 300));
+
+        final frame = find.byKey(const ValueKey('previewFrame'));
+        expect(frame, findsOneWidget);
+        final box = t.getSize(frame);
+        expect(box.width / box.height, closeTo(9 / 16, 0.01));
+        // nothing (no text, no button) is drawn inside the preview
+        expect(
+          find.descendant(of: frame, matching: find.byType(Text)),
+          findsNothing,
+        );
+        expect(
+          find.descendant(of: frame, matching: find.byType(FilledButton)),
+          findsNothing,
+        );
+        // the buttons are outside, under it
+        expect(find.text('Choose a photo'), findsOneWidget);
+        await t.tap(find.text('Clips'));
+        await t.pump(const Duration(milliseconds: 300));
+        expect(find.text('Choose a clip'), findsOneWidget);
+        expect(t.takeException(), isNull);
+      });
+    }
+  });
+
+  group('Clips screen pieces', () {
+    testWidgets('action buttons are plain icons without a background', (
+      t,
+    ) async {
+      var taps = 0;
+      await t.pumpWidget(
+        _app(
+          Scaffold(
+            backgroundColor: Colors.black,
+            body: Center(
+              child: ReelIconButton(
+                icon: Icons.favorite_rounded,
+                label: '12',
+                onTap: () => taps++,
+              ),
+            ),
+          ),
+          AppTheme.dark,
+        ),
+      );
+      expect(find.text('12'), findsOneWidget);
+      expect(find.byIcon(Icons.favorite_rounded), findsOneWidget);
+      final decorated = find.descendant(
+        of: find.byType(ReelIconButton),
+        matching: find.byType(DecoratedBox),
+      );
+      expect(decorated, findsNothing);
+      await t.tap(find.byType(ReelIconButton));
+      expect(taps, 1);
+    });
+
+    test('a tapped clip is placed first in the Clips list', () {
+      final clip = Post(
+        id: 'tapped',
+        authorId: 'u',
+        authorUsername: 'n',
+        authorPhotoUrl: '',
+        type: 'video',
+        caption: '',
+        createdAt: DateTime(2026),
+        videoRef: 'm:video/u/aaaaaaaaaaaaaaaa.mp4',
+      );
+      final pager = PostPager(
+        () => throw StateError('not loaded in this test'),
+        first: clip,
+      );
+      expect(pager.posts.map((p) => p.id), ['tapped']);
+      expect(pager.initialLoading, isFalse);
+    });
   });
 
   for (final entry in {

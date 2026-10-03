@@ -9,7 +9,7 @@ import '../core/ui.dart';
 import '../models/post.dart';
 import '../screens/post/comments_screen.dart';
 import '../screens/profile/profile_screen.dart';
-import '../screens/video/video_player_screen.dart';
+import '../screens/reels/reels_screen.dart';
 import '../services/post_service.dart';
 import '../services/user_service.dart';
 import 'avatar.dart';
@@ -53,7 +53,7 @@ class _PostCardState extends State<PostCard> {
   void _openProfile() => openScreen(context, ProfileScreen(uid: post.authorId));
 
   void _openMedia() {
-    if (post.isVideo) openScreen(context, VideoPlayerScreen(post: post));
+    if (post.isVideo) openClips(context, post);
   }
 
   Future<void> _doubleTapLike() async {

@@ -7,6 +7,7 @@ import '../core/theme.dart';
 import '../core/ui.dart';
 import '../models/post.dart';
 import '../screens/post/post_detail_screen.dart';
+import '../screens/reels/reels_screen.dart';
 import 'video_thumb.dart';
 
 /// Two-column masonry of posts (tiles have varied heights).
@@ -42,7 +43,9 @@ class _Tile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => openScreen(context, PostDetailScreen(post: post)),
+      onTap: () => post.isVideo
+          ? openClips(context, post)
+          : openScreen(context, PostDetailScreen(post: post)),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(24),
         child: AspectRatio(

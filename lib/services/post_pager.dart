@@ -5,10 +5,15 @@ import '../models/post.dart';
 
 /// Cursor-based pagination (keeps Firestore reads low on the free tier).
 class PostPager extends ChangeNotifier {
-  PostPager(this._build, {this.pageSize = 10});
+  PostPager(this._build, {this.pageSize = 10, this.first}) {
+    if (first != null) posts.add(first!);
+  }
 
   final Query<Map<String, dynamic>> Function() _build;
   final int pageSize;
+
+  /// Shown at the top of the list (a clip the user tapped); the loaded pages skip it.
+  final Post? first;
 
   final List<Post> posts = [];
   DocumentSnapshot<Map<String, dynamic>>? _cursor;
@@ -51,9 +56,14 @@ class PostPager extends ChangeNotifier {
       final snap = await q.get();
       if (reset) {
         posts.clear();
+        if (first != null) posts.add(first!);
         _cursor = null;
       }
-      posts.addAll(snap.docs.map(Post.fromDoc).where((p) => !p.isLegacyLink));
+      posts.addAll(
+        snap.docs
+            .map(Post.fromDoc)
+            .where((p) => !p.isLegacyLink && p.id != first?.id),
+      );
       if (snap.docs.isNotEmpty) _cursor = snap.docs.last;
       hasMore = snap.docs.length >= pageSize;
     } catch (e) {

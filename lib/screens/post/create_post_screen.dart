@@ -1,20 +1,26 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_compress/video_compress.dart';
+import 'package:video_player/video_player.dart';
 
 import '../../core/config.dart';
 import '../../core/errors.dart';
 import '../../core/media_url.dart';
-import '../../core/theme.dart';
 import '../../core/responsive.dart';
+import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../services/media_server.dart';
-import '../../services/post_service.dart';
 import '../../services/media_service.dart';
+import '../../services/post_service.dart';
 import '../../widgets/pill_tabs.dart';
 
+/// Two steps:
+///  1. Preview: a clean 9:16 frame that only shows your photo or clip (never stretched or
+///     cropped: it is fitted inside the frame). The pick / change / next buttons sit below it.
+///  2. Details: caption, quality switch and the Publish button.
 class CreatePostScreen extends StatefulWidget {
   const CreatePostScreen({super.key});
 
@@ -24,8 +30,10 @@ class CreatePostScreen extends StatefulWidget {
 
 class _CreatePostScreenState extends State<CreatePostScreen> {
   int _mode = 0; // 0 = post (photo), 1 = clips (video)
+  int _step = 0; // 0 = preview, 1 = details
+
   File? _image;
-  int? _imageKb;
+  int _imageBytes = 0;
 
   File? _video;
   File? _videoThumb;
@@ -35,20 +43,35 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   int _videoW = 0;
   int _videoH = 0;
 
+  /// Live preview of the picked clip (silent until the user taps the frame to pause).
+  VideoPlayerController? _preview;
+  bool _previewPaused = false;
+
   final _caption = TextEditingController();
   bool _busy = false;
   String _stage = '';
   double? _progress;
+  int _totalBytes = 0;
+  final Stopwatch _clock = Stopwatch();
+  DateTime _lastTick = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   void dispose() {
     _caption.dispose();
+    _preview?.dispose();
     if (_busy) VideoCompress.cancelCompression();
     super.dispose();
   }
 
-  Future<void> _pickImage() async {
-    final source = await showModalBottomSheet<ImageSource>(
+  // ------------------------------------------------------------------ picking
+
+  Future<ImageSource?> _askSource({
+    required IconData galleryIcon,
+    required String galleryText,
+    required IconData cameraIcon,
+    required String cameraText,
+  }) {
+    return showModalBottomSheet<ImageSource>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Padding(
@@ -57,18 +80,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading: const Icon(Icons.photo_library_rounded),
-                title: const Text(
-                  'Choose from gallery',
-                  style: TextStyle(fontWeight: FontWeight.w700),
+                leading: Icon(galleryIcon),
+                title: Text(
+                  galleryText,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
                 onTap: () => Navigator.pop(ctx, ImageSource.gallery),
               ),
               ListTile(
-                leading: const Icon(Icons.photo_camera_rounded),
-                title: const Text(
-                  'Take a photo',
-                  style: TextStyle(fontWeight: FontWeight.w700),
+                leading: Icon(cameraIcon),
+                title: Text(
+                  cameraText,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
                 onTap: () => Navigator.pop(ctx, ImageSource.camera),
               ),
@@ -76,6 +99,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Future<void> _pickImage() async {
+    final source = await _askSource(
+      galleryIcon: Icons.photo_library_rounded,
+      galleryText: 'Choose from gallery',
+      cameraIcon: Icons.photo_camera_rounded,
+      cameraText: 'Take a photo',
     );
     if (source == null) return;
     try {
@@ -86,7 +118,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       if (!mounted) return;
       setState(() {
         _image = file;
-        _imageKb = (bytes / 1024).round();
+        _imageBytes = bytes;
       });
     } catch (e) {
       if (mounted) {
@@ -99,34 +131,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   Future<void> _pickVideo() async {
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.video_library_rounded),
-                title: const Text(
-                  'Choose a video',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-              ),
-              ListTile(
-                leading: const Icon(Icons.videocam_rounded),
-                title: const Text(
-                  'Record a video',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-                onTap: () => Navigator.pop(ctx, ImageSource.camera),
-              ),
-            ],
-          ),
-        ),
-      ),
+    final source = await _askSource(
+      galleryIcon: Icons.video_library_rounded,
+      galleryText: 'Choose a video',
+      cameraIcon: Icons.videocam_rounded,
+      cameraText: 'Record a video',
     );
     if (source == null) return;
     try {
@@ -158,7 +167,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       try {
         thumb = await VideoCompress.getFileThumbnail(picked.path, quality: 70);
       } catch (_) {
-        // a thumbnail is nice to have; the server can make one too
+        // a thumbnail is nice to have; the clip works without one
       }
       if (!mounted) return;
       setState(() {
@@ -168,15 +177,77 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         _videoBytes = bytes;
         _videoW = w;
         _videoH = h;
+        _previewPaused = false;
       });
+      await _startPreview(File(picked.path));
     } catch (e) {
       if (mounted) showToast(context, 'Could not open that video.');
     }
   }
 
-  bool get _canShare {
-    if (_busy) return false;
-    return _mode == 0 ? _image != null : _video != null;
+  // ------------------------------------------------------------ video preview
+
+  Future<void> _startPreview(File file) async {
+    final old = _preview;
+    if (mounted) setState(() => _preview = null);
+    await old?.dispose();
+    final c = VideoPlayerController.file(file);
+    try {
+      await c.initialize();
+      await c.setLooping(true);
+      if (!mounted || _video?.path != file.path) {
+        await c.dispose();
+        return;
+      }
+      setState(() => _preview = c);
+      _syncPreview();
+    } catch (_) {
+      await c.dispose(); // the frame then shows the thumbnail instead
+    }
+  }
+
+  void _syncPreview() {
+    final c = _preview;
+    if (c == null) return;
+    final show = _mode == 1 && _step == 0 && !_busy && !_previewPaused;
+    if (show) {
+      c.play();
+    } else {
+      c.pause();
+    }
+  }
+
+  void _togglePreview() {
+    if (_mode != 1 || _preview == null) return;
+    setState(() => _previewPaused = !_previewPaused);
+    _syncPreview();
+  }
+
+  // --------------------------------------------------------------- publishing
+
+  bool get _hasMedia => _mode == 0 ? _image != null : _video != null;
+
+  bool get _canShare => !_busy && _hasMedia;
+
+  void _go(int step) {
+    setState(() => _step = step);
+    _syncPreview();
+  }
+
+  void _onProgress(double p) {
+    if (!mounted) return;
+    final now = DateTime.now();
+    if (p < 0.999 && now.difference(_lastTick).inMilliseconds < 120) return;
+    _lastTick = now;
+    setState(() {
+      if (p >= 0.999) {
+        // the file is on its way to the bucket; only the quick check is left
+        _stage = 'Finishing...';
+        _progress = null;
+      } else {
+        _progress = p;
+      }
+    });
   }
 
   Future<void> _share() async {
@@ -184,15 +255,23 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     setState(() {
       _busy = true;
       _progress = null;
+      _totalBytes = 0;
       _stage = (_mode == 1 && _willShrink)
           ? 'Optimising video...'
           : 'Uploading...';
     });
+    _syncPreview();
     try {
       if (_mode == 0) {
+        _totalBytes = _imageBytes;
+        _clock
+          ..reset()
+          ..start();
+        setState(() => _progress = 0);
         await PostService.instance.createImagePost(
           image: _image!,
           caption: _caption.text,
+          onProgress: _onProgress,
         );
       } else {
         await _publishVideo();
@@ -202,6 +281,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     } catch (e) {
       if (mounted) showToast(context, friendlyError(e));
     } finally {
+      _clock.stop();
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -214,7 +294,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   Future<void> _publishVideo() async {
     // 1) original quality: upload the file untouched. Only shrink to 720p when the user
-    //    switched "Original quality" off, or when the file is bigger than the server accepts.
+    //    switched "Original quality" off, or when the file is bigger than the service accepts.
     File out = _video!;
     MediaInfo? info;
     if (_willShrink) {
@@ -241,6 +321,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
 
     // 2) upload straight to the Tigris bucket
+    _totalBytes = await out.length();
+    _clock
+      ..reset()
+      ..start();
     if (mounted) {
       setState(() {
         _stage = 'Uploading...';
@@ -256,10 +340,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final media = await MediaServer.instance.uploadVideo(
       file: out,
       thumb: _videoThumb,
-      onProgress: (p) {
-        if (!mounted) return;
-        setState(() => _progress = p);
-      },
+      onProgress: _onProgress,
     );
     if (mounted) setState(() => _stage = 'Publishing...');
     await PostService.instance.createVideoPost(
@@ -272,64 +353,305 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     VideoCompress.deleteAllCache();
   }
 
+  /// "31.2 of 74.0 MB  ·  2.8 MB/s"
+  String get _uploadDetail {
+    final p = _progress;
+    if (p == null || _totalBytes <= 0 || _stage != 'Uploading...') return '';
+    final sent = (p * _totalBytes).round();
+    final secs = _clock.elapsedMilliseconds / 1000;
+    final speed = (secs >= 1 && sent > 0)
+        ? '  \u00b7  ${(sent / secs / (1024 * 1024)).toStringAsFixed(1)} MB/s'
+        : '';
+    return '${_mb(sent)} of ${_mb(_totalBytes)}$speed';
+  }
+
+  // --------------------------------------------------------------------- build
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: !_busy,
+      canPop: !_busy && _step == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && !_busy && _step == 1) _go(0);
+      },
       child: Scaffold(
         appBar: AppBar(
           leading: IconButton(
-            icon: const Icon(Icons.close_rounded),
-            onPressed: _busy ? null : () => Navigator.of(context).pop(false),
+            icon: Icon(
+              _step == 0 ? Icons.close_rounded : Icons.arrow_back_rounded,
+            ),
+            onPressed: _busy
+                ? null
+                : () => _step == 0 ? Navigator.of(context).pop(false) : _go(0),
           ),
-          title: const Text('Create'),
+          title: Text(_step == 0 ? 'Create' : 'Details'),
         ),
         body: ContentWidth(
           maxWidth: 640,
-          child: Column(
-            children: [
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-                  children: [
-                    PillTabs(
-                      labels: const ['Post', 'Clips'],
-                      icons: const [
-                        Icons.image_rounded,
-                        Icons.smart_display_rounded,
-                      ],
-                      index: _mode,
-                      onChanged: (i) {
-                        if (!_busy) setState(() => _mode = i);
-                      },
-                    ),
-                    const SizedBox(height: 18),
-                    if (_mode == 0)
-                      _photoPicker(context)
-                    else ...[
-                      _videoPicker(context),
-                      const SizedBox(height: 12),
-                      _qualityTile(context),
+          child: _step == 0 ? _previewStep(context) : _detailsStep(context),
+        ),
+      ),
+    );
+  }
+
+  // ---- step 1: preview ----
+
+  Widget _previewStep(BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+          child: PillTabs(
+            labels: const ['Post', 'Clips'],
+            icons: const [Icons.image_rounded, Icons.smart_display_rounded],
+            index: _mode,
+            onChanged: (i) {
+              setState(() => _mode = i);
+              _syncPreview();
+            },
+          ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _hasMedia
+                  ? _togglePreview
+                  : (_mode == 0 ? _pickImage : _pickVideo),
+              child: _frame(context, _previewContent(context)),
+            ),
+          ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+            child: _hasMedia
+                ? Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _mode == 0 ? _pickImage : _pickVideo,
+                          icon: const Icon(Icons.swap_horiz_rounded),
+                          label: const Text('Change'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: FilledButton.icon(
+                          onPressed: () => _go(1),
+                          icon: const Icon(Icons.arrow_forward_rounded),
+                          label: const Text('Next'),
+                        ),
+                      ),
                     ],
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _caption,
-                      enabled: !_busy,
-                      maxLines: 4,
-                      minLines: 3,
-                      maxLength: 500,
-                      textCapitalization: TextCapitalization.sentences,
-                      decoration: const InputDecoration(
-                        hintText: 'Say something about it...',
+                  )
+                : SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _mode == 0 ? _pickImage : _pickVideo,
+                      icon: Icon(
+                        _mode == 0
+                            ? Icons.add_photo_alternate_rounded
+                            : Icons.video_call_rounded,
+                      ),
+                      label: Text(
+                        _mode == 0 ? 'Choose a photo' : 'Choose a clip',
                       ),
                     ),
-                  ],
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The biggest 9:16 frame that fits the space. Nothing is drawn on top of the media.
+  Widget _frame(BuildContext context, Widget child, {double? maxWidth}) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final w = math.min(
+          math.min(c.maxWidth, maxWidth ?? double.infinity),
+          c.maxHeight * 9 / 16,
+        );
+        return Center(
+          child: SizedBox(
+            key: const ValueKey('previewFrame'),
+            width: w,
+            height: w * 16 / 9,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(w < 150 ? 14 : 26),
+              child: ColoredBox(color: const Color(0xFF0A0A0A), child: child),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _previewContent(BuildContext context) {
+    if (!_hasMedia) {
+      return Center(
+        child: Icon(
+          _mode == 0 ? Icons.image_outlined : Icons.smart_display_outlined,
+          size: 64,
+          color: Colors.white24,
+        ),
+      );
+    }
+    if (_mode == 0) {
+      return SizedBox.expand(
+        child: Image.file(
+          _image!,
+          fit: BoxFit.contain,
+          cacheWidth: 1600,
+          filterQuality: FilterQuality.medium,
+        ),
+      );
+    }
+    return _videoContent();
+  }
+
+  /// The clip, fitted inside the frame (never stretched or cropped).
+  Widget _videoContent() {
+    final c = _preview;
+    if (c != null && c.value.isInitialized) {
+      return SizedBox.expand(
+        child: FittedBox(
+          fit: BoxFit.contain,
+          child: SizedBox(
+            width: c.value.size.width,
+            height: c.value.size.height,
+            child: VideoPlayer(c),
+          ),
+        ),
+      );
+    }
+    final t = _videoThumb;
+    return t == null
+        ? const SizedBox.shrink()
+        : SizedBox.expand(child: Image.file(t, fit: BoxFit.contain));
+  }
+
+  // ---- step 2: details ----
+
+  Widget _detailsStep(BuildContext context) {
+    final isVideo = _mode == 1;
+    final thumb = isVideo
+        ? (_videoThumb == null
+              ? const SizedBox.shrink()
+              : SizedBox.expand(
+                  child: Image.file(_videoThumb!, fit: BoxFit.contain),
+                ))
+        : SizedBox.expand(
+            child: Image.file(_image!, fit: BoxFit.contain, cacheWidth: 400),
+          );
+
+    return Column(
+      children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 96,
+                    height: 96 * 16 / 9,
+                    child: _frame(context, thumb, maxWidth: 96),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isVideo ? 'Clip' : 'Photo',
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.high_quality_rounded,
+                              size: 16,
+                              color: AppTheme.volt,
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                isVideo
+                                    ? '${formatDuration(_videoSeconds)}  \u00b7  ${_mb(_videoBytes)}'
+                                    : 'Original  \u00b7  ${_mb(_imageBytes)}',
+                                style: TextStyle(
+                                  color: context.muted,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              TextField(
+                controller: _caption,
+                enabled: !_busy,
+                maxLines: 4,
+                minLines: 3,
+                maxLength: 500,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  hintText: 'Say something about it...',
                 ),
               ),
-              SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
+              if (isVideo) ...[
+                const SizedBox(height: 4),
+                _qualityTile(context),
+              ],
+            ],
+          ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_busy) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: _progress,
+                      minHeight: 6,
+                      color: AppTheme.volt,
+                      backgroundColor: context.cardHigh,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_uploadDetail.isNotEmpty)
+                    Text(
+                      _uploadDetail,
+                      style: TextStyle(
+                        color: context.muted,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                ],
+                SizedBox(
+                  width: double.infinity,
                   child: FilledButton.icon(
                     onPressed: _canShare ? _share : null,
                     icon: _busy
@@ -351,126 +673,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _photoPicker(BuildContext context) {
-    if (_image == null) {
-      return GestureDetector(
-        onTap: _busy ? null : _pickImage,
-        child: AspectRatio(
-          aspectRatio: 4 / 4.6,
-          child: Container(
-            decoration: BoxDecoration(
-              color: context.card,
-              borderRadius: BorderRadius.circular(32),
-              border: Border.all(color: context.hairline, width: 1.5),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 76,
-                  height: 76,
-                  decoration: BoxDecoration(
-                    gradient: AppTheme.voltGradient,
-                    borderRadius: BorderRadius.circular(26),
-                  ),
-                  child: const Icon(
-                    Icons.add_photo_alternate_rounded,
-                    size: 38,
-                    color: AppTheme.ink,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Pick a photo for your post',
-                  style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Shrunk on your phone first to save space',
-                  style: TextStyle(color: context.muted),
-                ),
               ],
             ),
           ),
         ),
-      );
-    }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(32),
-      child: AspectRatio(
-        aspectRatio: 4 / 5,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.file(_image!, fit: BoxFit.cover, cacheWidth: 1200),
-            Positioned(
-              left: 12,
-              bottom: 12,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.high_quality_rounded,
-                      size: 16,
-                      color: AppTheme.volt,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Original  \u00b7  ${_mb((_imageKb ?? 0) * 1024)}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Positioned(
-              right: 12,
-              top: 12,
-              child: GestureDetector(
-                onTap: _busy ? null : _pickImage,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 9,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppTheme.volt,
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: const Text(
-                    'Change',
-                    style: TextStyle(
-                      color: AppTheme.ink,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+      ],
     );
   }
 
@@ -497,162 +704,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               ? 'Uploaded exactly as recorded. Big files take longer to upload and to load for viewers.'
               : 'Shrunk to 720p on your phone first. Smaller, so it uploads and plays faster.',
           style: TextStyle(color: context.muted, fontSize: 12.5, height: 1.3),
-        ),
-      ),
-    );
-  }
-
-  Widget _videoPicker(BuildContext context) {
-    if (_video == null) {
-      return GestureDetector(
-        onTap: _busy ? null : _pickVideo,
-        child: AspectRatio(
-          aspectRatio: 4 / 4.6,
-          child: Container(
-            decoration: BoxDecoration(
-              color: context.card,
-              borderRadius: BorderRadius.circular(32),
-              border: Border.all(color: context.hairline, width: 1.5),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 76,
-                  height: 76,
-                  decoration: BoxDecoration(
-                    gradient: AppTheme.voltGradient,
-                    borderRadius: BorderRadius.circular(26),
-                  ),
-                  child: const Icon(
-                    Icons.video_call_rounded,
-                    size: 40,
-                    color: AppTheme.ink,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Upload a clip',
-                  style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Up to $kMaxVideoSeconds seconds. Vertical looks best.',
-                  style: TextStyle(color: context.muted),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(32),
-      child: AspectRatio(
-        aspectRatio: 4 / 5,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (_videoThumb != null)
-              Image.file(_videoThumb!, fit: BoxFit.cover)
-            else
-              ColoredBox(color: context.cardHigh),
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Colors.black45],
-                  stops: [0.6, 1],
-                ),
-              ),
-            ),
-            Center(
-              child: Container(
-                width: 64,
-                height: 64,
-                decoration: const BoxDecoration(
-                  color: Colors.black45,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.play_arrow_rounded,
-                  color: Colors.white,
-                  size: 44,
-                ),
-              ),
-            ),
-            Positioned(
-              left: 12,
-              bottom: 12,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.timer_outlined,
-                      size: 16,
-                      color: AppTheme.volt,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '${formatDuration(_videoSeconds)}  \u00b7  ${_mb(_videoBytes)}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            if (!_busy)
-              Positioned(
-                right: 12,
-                top: 12,
-                child: GestureDetector(
-                  onTap: _pickVideo,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 9,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.volt,
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: const Text(
-                      'Change',
-                      style: TextStyle(
-                        color: AppTheme.ink,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            if (_busy && _progress != null)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: LinearProgressIndicator(
-                  value: _progress,
-                  minHeight: 6,
-                  color: AppTheme.volt,
-                  backgroundColor: Colors.white24,
-                ),
-              ),
-          ],
         ),
       ),
     );

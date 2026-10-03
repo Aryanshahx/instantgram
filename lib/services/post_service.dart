@@ -55,9 +55,16 @@ class PostService {
   Future<void> createImagePost({
     required File image,
     required String caption,
+    void Function(double progress)? onProgress,
   }) async {
-    final me = await _me();
-    final uploaded = await MediaServer.instance.uploadImage(image);
+    // Look up the profile while the photo is uploading (saves a round trip).
+    final meFuture = _me();
+    meFuture.ignore(); // an error is reported below, once the upload is done
+    final uploaded = await MediaServer.instance.uploadImage(
+      image,
+      onProgress: onProgress,
+    );
+    final me = await meFuture;
     final ref = _posts.doc();
 
     final batch = _db.batch();
