@@ -21,9 +21,17 @@ import 'save_controller.dart';
 /// A post in Discover: author on top, the photo or clip in its real proportions (square
 /// corners, nothing drawn over it), then like and comment under it.
 class PostCard extends StatefulWidget {
-  const PostCard({super.key, required this.post, this.onDeleted});
+  const PostCard({
+    super.key,
+    required this.post,
+    this.onDeleted,
+    this.inline = false,
+  });
 
   final Post post;
+
+  /// Clips play by themselves while they are on screen (only in the Discover feed).
+  final bool inline;
   final VoidCallback? onDeleted;
 
   @override
@@ -141,7 +149,11 @@ class _PostCardState extends State<PostCard> {
             onDoubleTap: _doubleTapLike,
             child: Stack(
               children: [
-                PostMedia(post: post, maxHeight: maxMediaHeight, inline: true),
+                PostMedia(
+                  post: post,
+                  maxHeight: maxMediaHeight,
+                  inline: widget.inline,
+                ),
                 if (post.hasMusic)
                   Positioned(
                     left: 10,

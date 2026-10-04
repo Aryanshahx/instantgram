@@ -17,6 +17,7 @@ import '../../services/media_server.dart';
 import '../../services/media_service.dart';
 import '../../services/mp4_faststart.dart';
 import '../../services/photo_edit.dart';
+import '../../services/music_player.dart';
 import '../../services/post_service.dart';
 import '../../widgets/music_widgets.dart';
 import '../../widgets/pill_tabs.dart';
@@ -31,7 +32,10 @@ import 'video_editor_screen.dart';
 const double kSmoothMbps = 8;
 
 class CreatePostScreen extends StatefulWidget {
-  const CreatePostScreen({super.key});
+  const CreatePostScreen({super.key, @visibleForTesting this.debugImage});
+
+  /// Tests only: starts with this photo already picked.
+  final File? debugImage;
 
   @override
   State<CreatePostScreen> createState() => _CreatePostScreenState();
@@ -73,9 +77,28 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final Stopwatch _clock = Stopwatch();
   DateTime _lastTick = DateTime.fromMillisecondsSinceEpoch(0);
 
+  MusicPlayer?
+  _previewMusic; // the chosen track, heard while you look at the preview
+
+  @override
+  void initState() {
+    super.initState();
+    final dbg = widget.debugImage;
+    if (dbg != null) {
+      _image = dbg;
+      _imageOriginal = dbg;
+      _imageBytes = dbg.lengthSync();
+    }
+    // the Publish button needs a title
+    _caption.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
+
   @override
   void dispose() {
     _caption.dispose();
+    _previewMusic?.dispose();
     _preview?.dispose();
     _dropEditedCopy();
     if (_busy) VideoCompress.cancelCompression();
@@ -126,6 +149,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
+  /// Post: photo. Clips: one picker for photos and videos (see [_pickClip]).
+  VoidCallback get _pickMedia => _mode == 0 ? _pickImage : _pickClip;
+
   Future<void> _pickImage() async {
     final source = await _askSource(
       galleryIcon: Icons.photo_library_rounded,
@@ -135,20 +161,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
     if (source == null) return;
     try {
-      // Uploaded exactly as taken; the bucket keeps the original.
-      final file = _photoClip
+      // Posts are uploaded exactly as taken; the bucket keeps the original.
+      final file = _mode == 1
           ? await MediaService.pickClipImage(source)
           : await MediaService.pickPostImage(source);
       if (file == null) return;
-      final bytes = await file.length();
-      if (!mounted) return;
-      _dropEditedCopy();
-      setState(() {
-        _image = file;
-        _imageOriginal = file;
-        _imageEdits = null;
-        _imageBytes = bytes;
-      });
+      await _useImage(file);
     } catch (e) {
       if (mounted) {
         showToast(
@@ -159,22 +177,108 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  Future<void> _pickVideo() async {
-    final source = await _askSource(
-      galleryIcon: Icons.video_library_rounded,
-      galleryText: 'Choose a video',
-      cameraIcon: Icons.videocam_rounded,
-      cameraText: 'Record a video',
+  /// Clips: the user picks any photo or video, then adds audio in the preview.
+  Future<void> _pickClip() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final o in const [
+                (
+                  'gallery',
+                  Icons.perm_media_rounded,
+                  'Photo or video from gallery',
+                ),
+                ('photo', Icons.photo_camera_rounded, 'Take a photo'),
+                ('video', Icons.videocam_rounded, 'Record a video'),
+              ])
+                ListTile(
+                  leading: Icon(o.$2),
+                  title: Text(
+                    o.$3,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  onTap: () => Navigator.pop(ctx, o.$1),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
-    if (source == null) return;
+    if (choice == null) return;
     try {
-      final picked = await ImagePicker().pickVideo(
-        source: source,
-        maxDuration: const Duration(seconds: kMaxVideoSeconds),
-      );
-      if (picked == null) return;
-      final bytes = await File(picked.path).length();
-      final info = await VideoCompress.getMediaInfo(picked.path);
+      if (choice == 'photo') {
+        final f = await MediaService.pickClipImage(ImageSource.camera);
+        if (f != null) await _useImage(f);
+      } else if (choice == 'video') {
+        final v = await ImagePicker().pickVideo(
+          source: ImageSource.camera,
+          maxDuration: const Duration(seconds: kMaxVideoSeconds),
+        );
+        if (v != null) await _useVideo(v.path);
+      } else {
+        final x = await ImagePicker().pickMedia(
+          maxWidth: 1600,
+          maxHeight: 2400,
+          imageQuality: 90,
+        );
+        if (x == null) return;
+        final f = File(x.path);
+        if (await MediaService.isSupportedImage(f)) {
+          await _useImage(f);
+        } else {
+          await _useVideo(x.path);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        showToast(
+          context,
+          e is MediaException ? e.message : 'Could not open the picker.',
+        );
+      }
+    }
+  }
+
+  Future<void> _useImage(File file) async {
+    final bytes = await file.length();
+    if (!mounted) return;
+    _dropEditedCopy();
+    if (_mode == 1) await _dropVideo();
+    if (!mounted) return;
+    setState(() {
+      _image = file;
+      _imageOriginal = file;
+      _imageEdits = null;
+      _imageBytes = bytes;
+      if (_mode == 1) _clipPhoto = true;
+      _previewPaused = false;
+    });
+    _syncPreview();
+  }
+
+  /// Forgets the picked video (a clip is either a video or a photo).
+  Future<void> _dropVideo() async {
+    final old = _preview;
+    old?.removeListener(_previewTick);
+    _preview = null;
+    _video = null;
+    _videoThumb = null;
+    _videoEdits = null;
+    _videoSeconds = 0;
+    _videoSecondsFull = 0;
+    _videoBytes = 0;
+    await old?.dispose();
+  }
+
+  Future<void> _useVideo(String path) async {
+    try {
+      final bytes = await File(path).length();
+      final info = await VideoCompress.getMediaInfo(path);
       final seconds = ((info.duration ?? 0) / 1000).ceil();
       if (seconds > kMaxVideoSeconds + 1) {
         if (mounted) {
@@ -194,13 +298,19 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       }
       File? thumb;
       try {
-        thumb = await VideoCompress.getFileThumbnail(picked.path, quality: 70);
+        thumb = await VideoCompress.getFileThumbnail(path, quality: 70);
       } catch (_) {
         // a thumbnail is nice to have; the clip works without one
       }
       if (!mounted) return;
+      _dropEditedCopy();
       setState(() {
-        _video = File(picked.path);
+        _image = null;
+        _imageOriginal = null;
+        _imageEdits = null;
+        _imageBytes = 0;
+        _clipPhoto = false;
+        _video = File(path);
         _videoThumb = thumb;
         _videoSeconds = seconds;
         _videoSecondsFull = seconds;
@@ -213,7 +323,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         // lighter 720p copy by default. "Original quality" is one tap away.
         _original = !(seconds > 0 && bytes * 8 / seconds / 1e6 > kSmoothMbps);
       });
-      await _startPreview(File(picked.path));
+      await _startPreview(File(path));
     } catch (e) {
       if (mounted) showToast(context, 'Could not open that video.');
     }
@@ -229,7 +339,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     try {
       await c.initialize();
       await c.setLooping(true);
-      await c.setVolume(_videoEdits?.mute == true ? 0 : 1);
+      await c.setVolume(_videoPreviewVolume);
       c.addListener(_previewTick);
       if (!mounted || _video?.path != file.path) {
         await c.dispose();
@@ -300,7 +410,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         });
         final c = _preview;
         if (c != null) {
-          await c.setVolume(r.mute ? 0 : 1);
+          await c.setVolume(_videoPreviewVolume);
           await c.seekTo(Duration(seconds: r.trimmed ? r.start : 0));
         }
       }
@@ -308,21 +418,55 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
+  /// Sound of the clip in the preview: off when it was muted, or when the audio you added
+  /// should replace it.
+  double get _videoPreviewVolume =>
+      (_videoEdits?.mute == true || (_music != null && !_keepSound)) ? 0 : 1;
+
   void _syncPreview() {
+    final showing = _step == 0 && !_busy && !_previewPaused && _hasMedia;
     final c = _preview;
-    if (c == null) return;
-    final show =
-        _mode == 1 && !_clipPhoto && _step == 0 && !_busy && !_previewPaused;
-    if (show) {
-      c.play();
-    } else {
-      c.pause();
+    if (c != null) {
+      if (showing && _mode == 1 && !_clipPhoto) {
+        c.setVolume(_videoPreviewVolume);
+        c.play();
+      } else {
+        c.pause();
+      }
+    }
+    final m = _previewMusic;
+    if (m != null) {
+      m.setVolume(_musicVol);
+      showing ? m.play() : m.pause();
     }
   }
 
   void _togglePreview() {
-    if (_mode != 1 || _clipPhoto || _preview == null) return;
+    final canToggle =
+        (_mode == 1 && !_clipPhoto && _preview != null) ||
+        _previewMusic != null;
+    if (!canToggle) return;
     setState(() => _previewPaused = !_previewPaused);
+    _syncPreview();
+  }
+
+  /// Chooses (or removes) the audio and starts playing it in the preview.
+  Future<void> _setMusic(MusicTrack? t) async {
+    final old = _previewMusic;
+    _previewMusic = null;
+    setState(() => _music = t);
+    await old?.dispose();
+    if (t == null) {
+      _syncPreview();
+      return;
+    }
+    final p = MusicPlayer(t);
+    await p.init(volume: _musicVol);
+    if (!mounted || _music?.id != t.id) {
+      await p.dispose();
+      return;
+    }
+    _previewMusic = p;
     _syncPreview();
   }
 
@@ -330,8 +474,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   bool get _hasMedia => _isImageMode ? _image != null : _video != null;
 
-  /// A photo clip needs music (that is what makes it a clip).
-  bool get _canShare => !_busy && _hasMedia && (!_photoClip || _music != null);
+  /// A title is required; a photo clip also needs audio (that is what makes it a clip).
+  bool get _canShare =>
+      !_busy &&
+      _hasMedia &&
+      _caption.text.trim().isNotEmpty &&
+      (!_photoClip || _music != null);
 
   void _go(int step) {
     setState(() => _step = step);
@@ -375,7 +523,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         final dims = await PhotoEditor.probeSize(_image!);
         await PostService.instance.createImagePost(
           image: _image!,
-          caption: _caption.text,
+          caption: _caption.text.trim(),
           onProgress: _onProgress,
           width: dims?.width.round() ?? 0,
           height: dims?.height.round() ?? 0,
@@ -480,7 +628,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       if (mounted) setState(() => _stage = 'Publishing...');
       await PostService.instance.createVideoPost(
         media: media,
-        caption: _caption.text,
+        caption: _caption.text.trim(),
         duration: _videoSeconds,
         width: w,
         height: h,
@@ -547,52 +695,21 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             icons: const [Icons.image_rounded, Icons.smart_display_rounded],
             index: _mode,
             onChanged: (i) {
-              setState(() => _mode = i);
+              setState(() {
+                _mode = i;
+                // a photo picked in Post becomes a photo clip in Clips
+                if (i == 1) _clipPhoto = _image != null;
+              });
               _syncPreview();
             },
           ),
         ),
-        if (_mode == 1)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                ChoiceChip(
-                  label: const Text('Video'),
-                  avatar: const Icon(Icons.videocam_rounded, size: 18),
-                  selected: !_clipPhoto,
-                  onSelected: _busy
-                      ? null
-                      : (_) {
-                          setState(() => _clipPhoto = false);
-                          _syncPreview();
-                        },
-                ),
-
-                ChoiceChip(
-                  label: const Text('Photo + music'),
-                  avatar: const Icon(Icons.music_note_rounded, size: 18),
-                  selected: _clipPhoto,
-                  onSelected: _busy
-                      ? null
-                      : (_) {
-                          setState(() => _clipPhoto = true);
-                          _syncPreview();
-                        },
-                ),
-              ],
-            ),
-          ),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: _hasMedia
-                  ? _togglePreview
-                  : (_isImageMode ? _pickImage : _pickVideo),
+              onTap: _hasMedia ? _togglePreview : (_pickMedia),
               child: _frame(context, _previewContent(context)),
             ),
           ),
@@ -605,11 +722,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ? Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      _audioBar(context),
+                      const SizedBox(height: 10),
                       Row(
                         children: [
                           Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: _isImageMode ? _pickImage : _pickVideo,
+                              onPressed: _pickMedia,
                               icon: const Icon(Icons.swap_horiz_rounded),
                               label: const Text('Change'),
                             ),
@@ -628,7 +747,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton.icon(
-                          onPressed: () => _go(1),
+                          onPressed: () {
+                            if (_photoClip && _music == null) {
+                              showToast(
+                                context,
+                                'Add audio to make a clip from a photo.',
+                              );
+                              _audioSheet();
+                              return;
+                            }
+                            _go(1);
+                          },
                           icon: const Icon(Icons.arrow_forward_rounded),
                           label: const Text('Next'),
                         ),
@@ -638,14 +767,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 : SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
-                      onPressed: _isImageMode ? _pickImage : _pickVideo,
+                      onPressed: _pickMedia,
                       icon: Icon(
-                        _isImageMode
+                        _mode == 0
                             ? Icons.add_photo_alternate_rounded
                             : Icons.video_call_rounded,
                       ),
                       label: Text(
-                        _isImageMode ? 'Choose a photo' : 'Choose a clip',
+                        _mode == 0
+                            ? 'Choose a photo'
+                            : 'Choose a video or photo',
                       ),
                     ),
                   ),
@@ -681,7 +812,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (!_hasMedia) {
       return Center(
         child: Icon(
-          _isImageMode ? Icons.image_outlined : Icons.smart_display_outlined,
+          _mode == 0 ? Icons.image_outlined : Icons.smart_display_outlined,
           size: 64,
           color: Colors.white24,
         ),
@@ -781,6 +912,30 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             ),
                           ],
                         ),
+                        if (_music != null) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.music_note_rounded,
+                                size: 16,
+                                color: AppTheme.volt,
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  _music!.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: context.muted,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -790,15 +945,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               TextField(
                 controller: _caption,
                 enabled: !_busy,
-                maxLines: 4,
-                minLines: 3,
-                maxLength: 500,
+                maxLines: 3,
+                minLines: 2,
+                maxLength: 200,
                 textCapitalization: TextCapitalization.sentences,
                 decoration: const InputDecoration(
-                  hintText: 'Say something about it...',
+                  labelText: 'Title',
+                  hintText: 'Give it a title',
+                  helperText: 'Required',
                 ),
               ),
-              _musicTile(context),
               if (isVideo) ...[
                 const SizedBox(height: 12),
                 _qualityTile(context),
@@ -882,123 +1038,234 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     return tags.join('  \u00b7  ');
   }
 
-  Widget _musicTile(BuildContext context) {
+  /// The audio row under the preview: tap it to choose music, set the volume and more.
+  Widget _audioBar(BuildContext context) {
     final m = _music;
-    return Container(
-      margin: const EdgeInsets.only(top: 12),
-      decoration: BoxDecoration(
-        color: context.card,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        children: [
-          ListTile(
-            contentPadding: const EdgeInsets.fromLTRB(18, 4, 8, 4),
-            onTap: _busy
-                ? null
-                : () async {
-                    final t = await pickMusic(context, currentId: m?.id);
-                    if (t != null && mounted) setState(() => _music = t);
-                  },
-            leading: Container(
-              width: 42,
-              height: 42,
-              decoration: const BoxDecoration(
-                color: AppTheme.volt,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.music_note_rounded, color: AppTheme.ink),
-            ),
-            title: Text(
-              m == null ? 'Add music' : m.title,
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-            subtitle: Text(
-              m == null
-                  ? (_photoClip
-                        ? 'Photo clips need music'
-                        : 'Pick a track from InstantGram music')
-                  : '${m.mood}  \u00b7  ${m.bpm} BPM  \u00b7  tap to change',
-              style: TextStyle(color: context.muted, fontSize: 12.5),
-            ),
-            trailing: m == null
-                ? const Icon(Icons.chevron_right_rounded)
-                : IconButton(
-                    tooltip: 'Remove music',
-                    icon: const Icon(Icons.close_rounded),
-                    onPressed: _busy
-                        ? null
-                        : () => setState(() => _music = null),
-                  ),
-          ),
-          if (m != null) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
-              child: Row(
-                children: [
-                  Icon(Icons.volume_up_rounded, size: 20, color: context.muted),
-                  Expanded(
-                    child: Slider(
-                      value: _musicVol,
-                      min: 0.1,
-                      onChanged: _busy
-                          ? null
-                          : (v) => setState(() => _musicVol = v),
-                    ),
-                  ),
-                  Text(
-                    '${(_musicVol * 100).round()}%',
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ],
-              ),
-            ),
-            if (!_isImageMode)
-              SwitchListTile(
-                value: _keepSound,
-                onChanged: _busy ? null : (v) => setState(() => _keepSound = v),
-                activeTrackColor: AppTheme.volt,
-                contentPadding: const EdgeInsets.fromLTRB(18, 0, 12, 4),
-                title: const Text(
-                  "Keep the clip's own sound",
-                  style: TextStyle(fontWeight: FontWeight.w700),
+    final needed = _photoClip && m == null;
+    return Material(
+      color: context.card,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        key: const ValueKey('audioBar'),
+        borderRadius: BorderRadius.circular(18),
+        onTap: _busy ? null : _audioSheet,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: const BoxDecoration(
+                  color: AppTheme.volt,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.music_note_rounded,
+                  size: 18,
+                  color: AppTheme.ink,
                 ),
               ),
-          ],
-          if (_photoClip)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 4, 18, 16),
-              child: Row(
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  m == null
+                      ? (needed ? 'Add audio to make this a clip' : 'Add audio')
+                      : '${m.title}  \u00b7  ${(_musicVol * 100).round()}%',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              Icon(
+                m == null ? Icons.add_rounded : Icons.tune_rounded,
+                color: context.muted,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _audioSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final m = _music;
+          void both(VoidCallback f) {
+            setState(f);
+            setSheet(() {});
+          }
+
+          return SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Length',
-                    style: TextStyle(
-                      color: context.muted,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  const Text(
+                    'Audio',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Wrap(
-                      spacing: 6,
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: const BoxDecoration(
+                          color: AppTheme.volt,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.music_note_rounded,
+                          color: AppTheme.ink,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              m == null ? 'No audio yet' : m.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                              ),
+                            ),
+                            Text(
+                              m == null
+                                  ? (_photoClip
+                                        ? 'A photo clip needs audio'
+                                        : 'Pick a track from InstantGram music')
+                                  : '${m.mood}  \u00b7  ${m.bpm} BPM',
+                              style: TextStyle(
+                                color: context.muted,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      FilledButton.tonal(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, 44),
+                          padding: const EdgeInsets.symmetric(horizontal: 18),
+                        ),
+                        onPressed: () async {
+                          _previewMusic?.pause();
+                          final t = await pickMusic(ctx, currentId: m?.id);
+                          if (t != null && mounted) {
+                            await _setMusic(t);
+                            setSheet(() {});
+                          } else {
+                            _syncPreview();
+                          }
+                        },
+                        child: Text(m == null ? 'Choose' : 'Change'),
+                      ),
+                    ],
+                  ),
+                  if (m != null) ...[
+                    Row(
                       children: [
-                        for (final s in const [5, 10, 15, 20, 30])
+                        Icon(
+                          Icons.volume_up_rounded,
+                          size: 20,
+                          color: context.muted,
+                        ),
+                        Expanded(
+                          child: Slider(
+                            value: _musicVol,
+                            min: 0.1,
+                            onChanged: (v) {
+                              both(() => _musicVol = v);
+                              _previewMusic?.setVolume(v);
+                            },
+                          ),
+                        ),
+                        Text(
+                          '${(_musicVol * 100).round()}%',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ],
+                    ),
+                    if (!_isImageMode)
+                      SwitchListTile(
+                        value: _keepSound,
+                        onChanged: (v) {
+                          both(() => _keepSound = v);
+                          _preview?.setVolume(_videoPreviewVolume);
+                        },
+                        activeTrackColor: AppTheme.volt,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text(
+                          "Keep the clip's own sound",
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                  ],
+                  if (_photoClip) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Length',
+                      style: TextStyle(
+                        color: context.muted,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final sec in const [5, 10, 15, 20, 30])
                           ChoiceChip(
-                            label: Text('${s}s'),
-                            selected: _clipSeconds == s,
-                            onSelected: _busy
-                                ? null
-                                : (_) => setState(() => _clipSeconds = s),
+                            label: Text('${sec}s'),
+                            selected: _clipSeconds == sec,
+                            onSelected: (_) => both(() => _clipSeconds = sec),
                           ),
                       ],
                     ),
+                  ],
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      if (m != null)
+                        TextButton.icon(
+                          onPressed: () async {
+                            await _setMusic(null);
+                            setSheet(() {});
+                          },
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          label: const Text('Remove audio'),
+                        ),
+                      const Spacer(),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(110, 50),
+                        ),
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Done'),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-        ],
+          );
+        },
       ),
     );
+    _syncPreview();
   }
 
   String _qualityText(bool big) {

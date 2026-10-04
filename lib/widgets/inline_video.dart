@@ -307,17 +307,14 @@ class _InlineVideoLayerState extends State<InlineVideoLayer>
             builder: (_, muted, _) => GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () => InlineAudio.muted.value = !muted,
-              child: Container(
-                width: 34,
-                height: 34,
-                decoration: const BoxDecoration(
-                  color: Colors.black54,
-                  shape: BoxShape.circle,
-                ),
+              child: SizedBox(
+                width: 40,
+                height: 40,
                 child: Icon(
                   muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
                   color: Colors.white,
-                  size: 19,
+                  size: 24,
+                  shadows: const [Shadow(blurRadius: 8, color: Colors.black87)],
                 ),
               ),
             ),

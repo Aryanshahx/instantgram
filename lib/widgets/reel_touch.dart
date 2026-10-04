@@ -1,4 +1,7 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+
+import 'reel_actions.dart' show kReelShadow;
 
 /// App-wide sound settings for clips.
 class ReelAudio {
@@ -37,7 +40,11 @@ class ReelTouch extends StatefulWidget {
 
 class _ReelTouchState extends State<ReelTouch> {
   /// How far the finger has to slide before it counts as "volume" (not "2x").
-  static const double _slop = 22;
+  static const double _slop = 14;
+
+  /// How long a finger has to rest before it counts as a "hold". Short on purpose: if the
+  /// finger starts sliding before this, the page scrolls instead.
+  static const Duration _holdTime = Duration(milliseconds: 220);
 
   Offset _tapAt = Offset.zero;
   Offset? _burstAt;
@@ -78,7 +85,7 @@ class _ReelTouchState extends State<ReelTouch> {
     }
     if (_sliding) {
       // sliding up raises the volume; the full height of the screen is about 100%
-      final delta = -(dy - (dy.isNegative ? -_slop : _slop)) / (height * 0.55);
+      final delta = -(dy - (dy.isNegative ? -_slop : _slop)) / (height * 0.4);
       final v = (_startVolume + delta).clamp(0.0, 1.0);
       ReelAudio.volume.value = v;
       if (v > 0 && ReelAudio.muted.value) ReelAudio.muted.value = false;
@@ -99,15 +106,33 @@ class _ReelTouchState extends State<ReelTouch> {
   @override
   Widget build(BuildContext context) {
     final height = MediaQuery.sizeOf(context).height;
-    return GestureDetector(
+    return RawGestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: widget.onTap,
-      onDoubleTapDown: (d) => _tapAt = d.localPosition,
-      onDoubleTap: widget.onDoubleTap == null ? null : _doubleTap,
-      onLongPressStart: (_) => _holdStart(),
-      onLongPressMoveUpdate: (d) => _holdMove(d, height),
-      onLongPressEnd: (_) => _holdEnd(),
-      onLongPressCancel: _holdEnd,
+      gestures: <Type, GestureRecognizerFactory>{
+        TapGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+              TapGestureRecognizer.new,
+              (g) => g.onTap = widget.onTap,
+            ),
+        DoubleTapGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<DoubleTapGestureRecognizer>(
+              DoubleTapGestureRecognizer.new,
+              (g) {
+                g.onDoubleTapDown = (d) => _tapAt = d.localPosition;
+                g.onDoubleTap = widget.onDoubleTap == null ? null : _doubleTap;
+              },
+            ),
+        LongPressGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
+              () => LongPressGestureRecognizer(duration: _holdTime),
+              (g) {
+                g.onLongPressStart = (_) => _holdStart();
+                g.onLongPressMoveUpdate = (d) => _holdMove(d, height);
+                g.onLongPressEnd = (_) => _holdEnd();
+                g.onLongPressCancel = _holdEnd;
+              },
+            ),
+      },
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -169,34 +194,35 @@ class _ReelTouchState extends State<ReelTouch> {
   }
 }
 
+/// "2x" while holding: plain white text and icon, no background.
 class _SpeedChip extends StatelessWidget {
   const _SpeedChip();
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-    decoration: BoxDecoration(
-      color: Colors.black54,
-      borderRadius: BorderRadius.circular(20),
-    ),
-    child: const Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          '2x',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w900,
-            fontSize: 15,
-          ),
+  Widget build(BuildContext context) => const Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(
+        '2x',
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          fontSize: 20,
+          shadows: kReelShadow,
         ),
-        SizedBox(width: 4),
-        Icon(Icons.fast_forward_rounded, color: Colors.white, size: 20),
-      ],
-    ),
+      ),
+      SizedBox(width: 4),
+      Icon(
+        Icons.fast_forward_rounded,
+        color: Colors.white,
+        size: 26,
+        shadows: kReelShadow,
+      ),
+    ],
   );
 }
 
+/// Volume while sliding: speaker icon, a thin level line and the number. No background.
 class _VolumeBar extends StatelessWidget {
   const _VolumeBar({required this.value});
   final double value;
@@ -208,33 +234,36 @@ class _VolumeBar extends StatelessWidget {
         : value < 0.5
         ? Icons.volume_down_rounded
         : Icons.volume_up_rounded;
-    return Container(
+    return SizedBox(
       key: const ValueKey('volumeBar'),
       width: 46,
-      height: 190,
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.black54,
-        borderRadius: BorderRadius.circular(24),
-      ),
+      height: 200,
       child: Column(
         children: [
-          Icon(icon, color: Colors.white, size: 22),
+          Icon(icon, color: Colors.white, size: 28, shadows: kReelShadow),
           const SizedBox(height: 8),
           Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: SizedBox(
-                width: 7,
-                child: Stack(
-                  alignment: Alignment.bottomCenter,
-                  children: [
-                    const ColoredBox(color: Colors.white24),
-                    FractionallySizedBox(
-                      heightFactor: value.clamp(0.0, 1.0),
-                      child: const ColoredBox(color: Colors.white),
-                    ),
-                  ],
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(3),
+                boxShadow: const [
+                  BoxShadow(blurRadius: 6, color: Colors.black38),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(3),
+                child: SizedBox(
+                  width: 5,
+                  child: Stack(
+                    alignment: Alignment.bottomCenter,
+                    children: [
+                      const ColoredBox(color: Colors.white38),
+                      FractionallySizedBox(
+                        heightFactor: value.clamp(0.0, 1.0),
+                        child: const ColoredBox(color: Colors.white),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -244,8 +273,9 @@ class _VolumeBar extends StatelessWidget {
             '${(value * 100).round()}',
             style: const TextStyle(
               color: Colors.white,
-              fontWeight: FontWeight.w800,
-              fontSize: 12,
+              fontWeight: FontWeight.w900,
+              fontSize: 14,
+              shadows: kReelShadow,
             ),
           ),
         ],

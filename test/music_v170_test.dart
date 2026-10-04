@@ -207,5 +207,42 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       expect(ReelAudio.volume.value, 0.3);
     });
+
+    testWidgets('inside the Clips page list: hold + slide is volume, a quick '
+        'swipe still changes clip', (tester) async {
+      final pages = PageController();
+      addTearDown(pages.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PageView(
+            controller: pages,
+            scrollDirection: Axis.vertical,
+            children: [
+              for (var i = 0; i < 3; i++)
+                ReelTouch(
+                  onTap: () {},
+                  child: const ColoredBox(color: Colors.black),
+                ),
+            ],
+          ),
+        ),
+      );
+      // hold for about a third of a second, then slide up
+      final g = await tester.startGesture(const Offset(400, 400));
+      await tester.pump(const Duration(milliseconds: 300));
+      await g.moveBy(const Offset(0, -60));
+      await tester.pump(const Duration(milliseconds: 50));
+      await g.moveBy(const Offset(0, -120));
+      await tester.pump(const Duration(milliseconds: 50));
+      await g.up();
+      await tester.pumpAndSettle();
+      expect(ReelAudio.volume.value, greaterThan(0.5));
+      expect(pages.page, 0); // the page did not move
+
+      // a quick swipe (no hold) moves to the next clip
+      await tester.fling(find.byType(PageView), const Offset(0, -300), 1500);
+      await tester.pumpAndSettle();
+      expect(pages.page, 1);
+    });
   });
 }

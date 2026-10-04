@@ -20,6 +20,7 @@ the old starter rules are still live. Which screen shows it tells you what is mi
 * Sign up fails -> `users` / `usernames` rules.
 * Save button fails ("Firestore blocked this request") -> publish the rules again (the private `saved` list was added in v1.1.1).
 * Changing your username fails -> publish the rules again (v1.6.0 lets you release your old name).
+* Chats show an error, or a message will not send -> publish the rules again (v1.8.0 adds the `chats` rules).
 
 ## 3. Firestore composite indexes (REQUIRED, one-time)
 Build -> Firestore Database -> **Indexes** -> Composite -> **Add index**.

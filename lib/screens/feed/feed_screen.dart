@@ -189,6 +189,7 @@ class _PagedPostListState extends State<PagedPostList> {
                 return PostCard(
                   key: ValueKey(post.id),
                   post: post,
+                  inline: true,
                   onDeleted: () => pager.removeById(post.id),
                 );
               }

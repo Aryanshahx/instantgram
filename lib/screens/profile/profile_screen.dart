@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../chat/chat_screen.dart';
 import '../../core/app_events.dart';
 import '../../core/media_url.dart';
 import '../../core/theme.dart';
@@ -366,7 +367,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                 )
               else
-                FollowButton(uid: user.uid),
+                Row(
+                  children: [
+                    Expanded(child: FollowButton(uid: user.uid)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        key: const ValueKey('messageButton'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 40),
+                        ),
+                        onPressed: () => openScreen(
+                          context,
+                          ChatScreen(otherUid: user.uid, user: user),
+                        ),
+                        icon: const Icon(
+                          Icons.chat_bubble_outline_rounded,
+                          size: 18,
+                        ),
+                        label: const Text('Message'),
+                      ),
+                    ),
+                  ],
+                ),
             ],
           ),
         ),

@@ -112,15 +112,9 @@ void main() {
         expect(find.text('Choose a photo'), findsOneWidget);
         await t.tap(find.text('Clips'));
         await t.pump(const Duration(milliseconds: 300));
-        expect(find.text('Choose a clip'), findsOneWidget);
-        // a clip can also be made from a photo with music
-        expect(find.text('Photo + music'), findsOneWidget);
-        await t.tap(find.text('Photo + music'));
-        await t.pump(const Duration(milliseconds: 300));
-        expect(find.text('Choose a photo'), findsOneWidget);
-        await t.tap(find.text('Video'));
-        await t.pump(const Duration(milliseconds: 300));
-        expect(find.text('Choose a clip'), findsOneWidget);
+        expect(find.text('Choose a video or photo'), findsOneWidget);
+        // no separate Video / Photo switch: one picker handles both
+        expect(find.text('Photo + music'), findsNothing);
         expect(t.takeException(), isNull);
       });
     }
