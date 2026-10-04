@@ -44,6 +44,9 @@ class ClipCache {
   );
 
   final Map<String, _Job> _jobs = {};
+
+  /// Clips the player decided to stream directly (so they are not downloaded in parallel).
+  final Set<String> _streaming = {};
   final Queue<String> _queue = Queue<String>();
   int _running = 0;
 
@@ -81,11 +84,21 @@ class ClipCache {
     for (final e in _jobs.entries.toList()) {
       if (!keep.contains(e.key)) cancel(e.key);
     }
-    _queue.removeWhere((u) => !keep.contains(u));
+    _streaming.removeWhere((u) => !keep.contains(u));
     for (final u in urls) {
-      if (u.isEmpty || cached(u) != null || _live(u) != null) continue;
+      if (u.isEmpty ||
+          cached(u) != null ||
+          _live(u) != null ||
+          _streaming.contains(u)) {
+        continue;
+      }
       _enqueue(u);
     }
+    // the waiting ones are started in the order given (most important first)
+    final order = urls.where((u) => _queue.contains(u)).toList();
+    _queue
+      ..clear()
+      ..addAll(order);
     _pump();
   }
 
@@ -111,8 +124,24 @@ class ClipCache {
     return job;
   }
 
-  /// Stops the download of [url] (a half-downloaded file is deleted).
-  void cancel(String url) {
+  /// How far the download of [url] is (null when nothing is running for it).
+  ClipProgress? progress(String url) {
+    final j = _live(url);
+    if (j == null) return null;
+    return ClipProgress(
+      started: j.started,
+      received: j.received,
+      total: j.total,
+      elapsed: j.started
+          ? DateTime.now().difference(j.startedAt)
+          : Duration.zero,
+    );
+  }
+
+  /// Stops the download of [url] (a half-downloaded file is deleted). With [streaming] the
+  /// clip is being played straight from the internet and is not downloaded again meanwhile.
+  void cancel(String url, {bool streaming = false}) {
+    if (streaming) _streaming.add(url);
     final job = _jobs[url];
     if (job == null) return;
     _queue.remove(url);
@@ -129,6 +158,7 @@ class ClipCache {
       final job = _jobs[url];
       if (job == null || job.token.isCancelled) continue;
       job.started = true;
+      job.startedAt = DateTime.now();
       _running++;
       _run(job).whenComplete(() {
         _running--;
@@ -181,6 +211,7 @@ class ClipCache {
         return null;
       }
       if (total != null && total > maxClipBytes) return null;
+      job.total = total ?? 0;
 
       raf = await part.open(mode: FileMode.write);
       var written = 0;
@@ -196,6 +227,7 @@ class ClipCache {
         await for (final chunk in resp.data!.stream) {
           await raf.writeFrom(chunk);
           written += chunk.length;
+          job.received = written;
           if (written > maxClipBytes) throw StateError('too big');
         }
       } else {
@@ -228,6 +260,7 @@ class ClipCache {
             if (next >= pieces.length) return;
             final p = pieces[next++];
             var attempt = 0;
+            var got = 0;
             while (true) {
               try {
                 final resp = await _dio.get<ResponseBody>(
@@ -240,13 +273,17 @@ class ClipCache {
                 );
                 if (resp.statusCode != 206) throw StateError('no range');
                 var pos = p.start;
+                got = 0;
                 await for (final chunk in resp.data!.stream) {
                   await writeAt(pos, chunk);
                   pos += chunk.length;
+                  job.received += chunk.length;
+                  got += chunk.length;
                 }
                 if (pos != p.end + 1) throw StateError('short piece');
                 break;
               } catch (e) {
+                job.received -= got; // that piece starts again
                 if (job.token.isCancelled || attempt >= 2) rethrow;
                 attempt++;
               }
@@ -321,10 +358,42 @@ class _Job {
   final CancelToken token = CancelToken();
   final Completer<File?> done = Completer<File?>();
   bool started = false;
+  DateTime startedAt = DateTime.now();
+  int received = 0;
+  int total = 0;
 }
 
 class _Piece {
   _Piece(this.start, this.end);
   final int start;
   final int end;
+}
+
+/// Progress of a running download.
+class ClipProgress {
+  const ClipProgress({
+    required this.started,
+    required this.received,
+    required this.total,
+    required this.elapsed,
+  });
+
+  final bool started;
+  final int received;
+
+  /// 0 when the size is not known.
+  final int total;
+  final Duration elapsed;
+
+  /// bytes per second so far (0 until something arrived)
+  double get rate {
+    final s = elapsed.inMilliseconds / 1000;
+    return s <= 0 ? 0 : received / s;
+  }
+
+  /// How long the rest will take at the current speed (null = unknown).
+  Duration? get eta {
+    if (total <= 0 || received <= 0 || rate <= 0) return null;
+    return Duration(milliseconds: ((total - received) / rate * 1000).round());
+  }
 }

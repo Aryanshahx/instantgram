@@ -14,6 +14,8 @@ service cloud.firestore {
     match /usernames/{name} {
       allow get: if true;
       allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      // changing your username releases the old name
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
     }
 
     match /users/{uid} {

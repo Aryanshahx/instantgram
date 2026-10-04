@@ -23,6 +23,7 @@ class ReelVideo extends StatefulWidget {
     required this.play,
     this.fit,
     this.progressBottom = 0,
+    this.onDoubleTap,
   });
 
   final Post post;
@@ -36,6 +37,9 @@ class ReelVideo extends StatefulWidget {
   /// Space under the progress line (to stay above the floating nav bar).
   final double progressBottom;
 
+  /// Double tap (the clips screen uses it for "like"). A heart pops up under the finger.
+  final VoidCallback? onDoubleTap;
+
   @override
   State<ReelVideo> createState() => _ReelVideoState();
 }
@@ -46,6 +50,10 @@ class _ReelVideoState extends State<ReelVideo> {
   bool _failed = false;
   bool _userPaused = false;
   bool _flash = false;
+  bool _fast = false; // finger held down: 2x speed
+  Offset _tapAt = Offset.zero;
+  Offset? _burstAt;
+  int _burstId = 0;
   int _gen = 0; // bumped whenever a newer start replaces an older one
   DateTime? _playingSince;
 
@@ -85,15 +93,25 @@ class _ReelVideoState extends State<ReelVideo> {
       final f = cache.cached(url);
       if (f != null) return f;
       if (finished) return null;
-      if (widget.play) {
-        final since = _playingSince ?? DateTime.now();
-        if (DateTime.now().difference(since) >
-            const Duration(milliseconds: 2500)) {
-          cache.cancel(url);
-          return null;
-        }
+      if (widget.play && _giveUp(cache, url)) {
+        cache.cancel(url, streaming: true);
+        return null;
       }
     }
+  }
+
+  /// A clip that is on screen waits for its download only while that is quicker than
+  /// starting to stream it.
+  bool _giveUp(ClipCache cache, String url) {
+    final waited = DateTime.now().difference(_playingSince ?? DateTime.now());
+    final p = cache.progress(url);
+    if (p == null) return true; // nothing is coming
+    if (waited > const Duration(seconds: 14)) return true;
+    if (!p.started) return waited > const Duration(milliseconds: 1500);
+    final eta = p.eta;
+    if (eta == null) return waited > const Duration(seconds: 3);
+    return waited > const Duration(milliseconds: 1200) &&
+        eta > const Duration(seconds: 7);
   }
 
   Future<VideoPlayerController> _open(File? local) async {
@@ -175,6 +193,9 @@ class _ReelVideoState extends State<ReelVideo> {
         _userPaused = false;
         _playingSince = DateTime.now();
         _c?.seekTo(Duration.zero);
+      } else if (_fast) {
+        _fast = false;
+        _c?.setPlaybackSpeed(1.0);
       }
       _sync();
     }
@@ -200,6 +221,21 @@ class _ReelVideoState extends State<ReelVideo> {
     });
   }
 
+  void _setFast(bool v) {
+    if (_fast == v) return;
+    setState(() => _fast = v);
+    _c?.setPlaybackSpeed(v ? 2.0 : 1.0);
+  }
+
+  void _doubleTap() {
+    final id = ++_burstId;
+    setState(() => _burstAt = _tapAt);
+    widget.onDoubleTap?.call();
+    Future<void>.delayed(const Duration(milliseconds: 800), () {
+      if (mounted && _burstId == id) setState(() => _burstAt = null);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = _c;
@@ -208,6 +244,11 @@ class _ReelVideoState extends State<ReelVideo> {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: _toggle,
+      onDoubleTapDown: (d) => _tapAt = d.localPosition,
+      onDoubleTap: widget.onDoubleTap == null ? null : _doubleTap,
+      onLongPressStart: (_) => _setFast(true),
+      onLongPressEnd: (_) => _setFast(false),
+      onLongPressCancel: () => _setFast(false),
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -253,6 +294,73 @@ class _ReelVideoState extends State<ReelVideo> {
               ),
             ),
           ),
+          if (_burstAt != null)
+            Positioned(
+              left: _burstAt!.dx - 56,
+              top: _burstAt!.dy - 56,
+              child: IgnorePointer(
+                child: TweenAnimationBuilder<double>(
+                  key: ValueKey(_burstId),
+                  tween: Tween(begin: 0, end: 1),
+                  duration: const Duration(milliseconds: 750),
+                  builder: (_, t, _) => Opacity(
+                    opacity: (t < 0.6 ? 1.0 : (1 - t) / 0.4).clamp(0.0, 1.0),
+                    child: Transform.scale(
+                      scale:
+                          0.5 +
+                          Curves.elasticOut.transform(t.clamp(0, 1)) * 0.7,
+                      child: const Icon(
+                        Icons.favorite_rounded,
+                        size: 112,
+                        color: Color(0xFFFF3B5C),
+                        shadows: [
+                          Shadow(blurRadius: 18, color: Colors.black45),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (_fast)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 62,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '2x',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 15,
+                          ),
+                        ),
+                        SizedBox(width: 4),
+                        Icon(
+                          Icons.fast_forward_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           if (_failed)
             Center(
               child: Column(

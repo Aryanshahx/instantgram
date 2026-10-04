@@ -18,7 +18,8 @@ Fix for "Permission denied. Check your Firestore rules.": the new rules were nev
 the old starter rules are still live. Which screen shows it tells you what is missing:
 * Feed / Discover / Clips empty with the error -> `posts` rules, or the Rules tab was not published.
 * Sign up fails -> `users` / `usernames` rules.
-* Save button fails -> publish the rules again (the private `saved` list was added in v1.1.1).
+* Save button fails ("Firestore blocked this request") -> publish the rules again (the private `saved` list was added in v1.1.1).
+* Changing your username fails -> publish the rules again (v1.6.0 lets you release your old name).
 
 ## 3. Firestore composite indexes (REQUIRED, one-time)
 Build -> Firestore Database -> **Indexes** -> Composite -> **Add index**.
@@ -53,4 +54,4 @@ firebase deploy --only firestore
 ## Old data
 Posts made with the old video-link system are hidden automatically (they have no uploaded video).
 Posts, avatars and moments that were stored in Telegram (`tg:` references) cannot be shown any more; the
-app hides those posts and falls back to the letter avatar. Photos that were stored in Firebase Storage keep working only if they were ever uploaded there.
+app hides those posts and falls back to the default silhouette picture. Photos that were stored in Firebase Storage keep working only if they were ever uploaded there.

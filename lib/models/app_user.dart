@@ -10,6 +10,8 @@ class AppUser {
     this.fullName = '',
     this.bio = '',
     this.photoUrl = '',
+    this.bannerUrl = '',
+    this.links = const [],
     this.followersCount = 0,
     this.followingCount = 0,
     this.postsCount = 0,
@@ -20,6 +22,12 @@ class AppUser {
   final String fullName;
   final String bio;
   final String photoUrl;
+
+  /// Cover picture of the profile page (a stored reference like photoUrl; '' = none).
+  final String bannerUrl;
+
+  /// Web links shown on the profile (up to 3).
+  final List<String> links;
   final int followersCount;
   final int followingCount;
   final int postsCount;
@@ -32,6 +40,13 @@ class AppUser {
       fullName: _str(m['fullName']),
       bio: _str(m['bio']),
       photoUrl: _str(m['photoUrl']),
+      bannerUrl: _str(m['bannerUrl']),
+      links: m['links'] is List
+          ? [
+              for (final l in m['links'] as List)
+                if (l is String && l.trim().isNotEmpty) l.trim(),
+            ]
+          : const [],
       followersCount: _int(m['followersCount']),
       followingCount: _int(m['followingCount']),
       postsCount: _int(m['postsCount']),

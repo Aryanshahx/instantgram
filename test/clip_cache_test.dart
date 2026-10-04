@@ -84,6 +84,7 @@ Uint8List _bytes(int n) {
 }
 
 void main() {
+  progressTests();
   late Directory dir;
   setUp(() => dir = Directory.systemTemp.createTempSync('clipcache'));
   tearDown(() => dir.deleteSync(recursive: true));
@@ -176,5 +177,65 @@ void main() {
     );
     // 2 clips x 3 connections at most
     expect(s.maxActive, lessThanOrEqualTo(2 * 3 + 2));
+  });
+}
+
+void progressTests() {
+  late Directory dir;
+  setUp(() => dir = Directory.systemTemp.createTempSync('clipcache3'));
+  tearDown(() => dir.deleteSync(recursive: true));
+
+  test('progress and eta are reported while a clip downloads', () async {
+    final data = _bytes(6 * 1024 * 1024);
+    final s = _Server(data, chunkDelay: const Duration(milliseconds: 80));
+    await s.start();
+    addTearDown(s.stop);
+    final cache = ClipCache(dir: dir);
+    expect(cache.progress(s.url), isNull);
+    final done = cache.prefetch(s.url);
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+    final p = cache.progress(s.url)!;
+    expect(p.started, isTrue);
+    expect(p.total, data.length);
+    expect(p.received, greaterThan(0));
+    expect(p.received, lessThanOrEqualTo(data.length));
+    expect(p.eta, isNotNull);
+    expect((await done)!.lengthSync(), data.length);
+    expect(cache.progress(s.url), isNull);
+  });
+
+  test('a clip that is streamed is not downloaded again by want()', () async {
+    final data = _bytes(6 * 1024 * 1024);
+    final s = _Server(data, chunkDelay: const Duration(milliseconds: 30));
+    await s.start();
+    addTearDown(s.stop);
+    final cache = ClipCache(dir: dir);
+    cache.want([s.url]);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    cache.cancel(s.url, streaming: true);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    cache.want([s.url]);
+    expect(cache.isDownloading(s.url), isFalse);
+    // once it is no longer wanted and wanted again later, it may download
+    cache.want(const []);
+    cache.want([s.url]);
+    expect(cache.isDownloading(s.url), isTrue);
+    cache.want(const []);
+  });
+
+  test('want() starts the most important clip first', () async {
+    final data = _bytes(2 * 1024 * 1024);
+    final s = _Server(data, chunkDelay: const Duration(milliseconds: 20));
+    await s.start();
+    addTearDown(s.stop);
+    final cache = ClipCache(dir: dir, parallelClips: 1);
+    final a = s.url.replaceFirst('clip.mp4', 'a.mp4');
+    final b = s.url.replaceFirst('clip.mp4', 'b.mp4');
+    final c = s.url.replaceFirst('clip.mp4', 'c.mp4');
+    cache.want([a, b]);
+    cache.want([c, b]); // the user scrolled: c matters most now, a is dropped
+    expect(cache.isDownloading(c) || cache.isDownloading(b), isTrue);
+    expect(cache.isDownloading(a), isFalse);
+    cache.want(const []);
   });
 }

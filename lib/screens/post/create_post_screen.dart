@@ -25,6 +25,9 @@ import 'video_editor_screen.dart';
 ///  1. Preview: a clean 9:16 frame that only shows your photo or clip (never stretched or
 ///     cropped: it is fitted inside the frame). The pick / change / next buttons sit below it.
 ///  2. Details: caption, quality switch and the Publish button.
+/// Clips above this bitrate are saved as a lighter copy by default.
+const double kSmoothMbps = 8;
+
 class CreatePostScreen extends StatefulWidget {
   const CreatePostScreen({super.key});
 
@@ -192,6 +195,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         _videoH = h;
         _videoEdits = null;
         _previewPaused = false;
+        // Heavy files (high bitrate) buffer for viewers on mobile data, so they are saved as a
+        // lighter 720p copy by default. "Original quality" is one tap away.
+        _original = !(seconds > 0 && bytes * 8 / seconds / 1e6 > kSmoothMbps);
       });
       await _startPreview(File(picked.path));
     } catch (e) {
@@ -822,7 +828,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       return 'This file is over $kMaxVideoMb MB, so it will be shrunk to fit.';
     }
     if (!_original) {
-      return 'Saved at 720p on your phone first. Smaller, so it uploads and plays faster.';
+      final heavy =
+          _videoSecondsFull > 0 &&
+          _videoBytes * 8 / _videoSecondsFull / 1e6 > kSmoothMbps;
+      return heavy
+          ? 'This clip is very heavy (${(_videoBytes * 8 / _videoSecondsFull / 1e6).round()} Mbps) and would buffer for viewers, so it is saved as a smooth 720p copy first. Turn on Original quality to upload it as recorded.'
+          : 'Saved at 720p on your phone first. Smaller, so it uploads and plays faster.';
     }
     final mbps = _videoSecondsFull > 0
         ? _videoBytes * 8 / _videoSecondsFull / 1e6

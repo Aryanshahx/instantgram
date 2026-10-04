@@ -5,7 +5,7 @@ import '../core/media_url.dart';
 import '../core/theme.dart';
 
 /// Round profile picture with an optional lime "moment" ring.
-/// Falls back to a gradient circle with the user's initial.
+/// Without a photo it shows a default silhouette picture.
 class UserAvatar extends StatelessWidget {
   const UserAvatar({
     super.key,
@@ -26,17 +26,40 @@ class UserAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final size = radius * 2;
 
-    Widget initial() => Container(
+    // The default picture: a soft person silhouette (never a letter).
+    Widget initial() => SizedBox(
       width: size,
       height: size,
-      alignment: Alignment.center,
-      decoration: const BoxDecoration(gradient: AppTheme.auroraGradient),
-      child: Text(
-        name.isEmpty ? '?' : name.characters.first.toUpperCase(),
-        style: TextStyle(
-          fontSize: size * 0.42,
-          fontWeight: FontWeight.w900,
-          color: AppTheme.ink,
+      child: DecoratedBox(
+        decoration: const BoxDecoration(gradient: AppTheme.auroraGradient),
+        child: Stack(
+          alignment: Alignment.bottomCenter,
+          children: [
+            Positioned(
+              top: size * 0.2,
+              child: Container(
+                width: size * 0.34,
+                height: size * 0.34,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.92),
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: -size * 0.28,
+              child: Container(
+                width: size * 0.78,
+                height: size * 0.66,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.92),
+                  borderRadius: BorderRadius.all(
+                    Radius.elliptical(size * 0.39, size * 0.33),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

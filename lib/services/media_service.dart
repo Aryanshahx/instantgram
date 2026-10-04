@@ -30,6 +30,17 @@ class MediaService {
     return x == null ? null : File(x.path);
   }
 
+  /// Profile cover: max 1600 px wide, JPEG quality 85.
+  static Future<File?> pickBanner(ImageSource source) async {
+    final x = await _picker.pickImage(
+      source: source,
+      maxWidth: 1600,
+      maxHeight: 1600,
+      imageQuality: 85,
+    );
+    return x == null ? null : File(x.path);
+  }
+
   static Future<File?> _pickOriginal(ImageSource source) async {
     final x = await _picker.pickImage(source: source);
     if (x == null) return null;

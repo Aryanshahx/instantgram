@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -75,7 +77,16 @@ class _ReelsScreenState extends State<ReelsScreen> {
     super.initState();
     AppEvents.feedRefresh.addListener(_refresh);
     _pager.addListener(_preload);
+    // Warm-up: shortly after the app opens, the first clips are fetched quietly so the Clips
+    // tab starts at once the first time.
+    _warm = Timer(const Duration(seconds: 3), () {
+      if (!mounted || _started || widget.active) return;
+      _started = true;
+      _pager.loadMore();
+    });
   }
+
+  Timer? _warm;
 
   @override
   void didUpdateWidget(ReelsScreen old) {
@@ -86,18 +97,27 @@ class _ReelsScreenState extends State<ReelsScreen> {
   /// Background preloading: while a clip plays, the next three are downloaded to the phone
   /// (several connections at once). When the user scrolls to them they start instantly.
   void _preload() {
-    if (!_started || !widget.active) {
+    if (!_started) return;
+    final posts = _pager.posts;
+    final urls = <String>[];
+    if (widget.active) {
+      // the clip on screen first, then the next three
+      for (var i = _page; i <= _page + 3 && i < posts.length; i++) {
+        if (posts[i].isVideo) urls.add(posts[i].videoUrl);
+      }
+    } else if (_page == 0) {
+      // warm-up while another tab is open: only the first two clips
+      for (var i = 0; i < 2 && i < posts.length; i++) {
+        if (posts[i].isVideo) urls.add(posts[i].videoUrl);
+      }
+      if (urls.isEmpty) return;
+    } else {
       if (_wanting) {
         _wanting = false;
         ClipCache.instance.want(const []);
       }
       return;
     }
-    final posts = _pager.posts;
-    final urls = <String>[
-      for (var i = _page + 1; i <= _page + 3 && i < posts.length; i++)
-        if (posts[i].isVideo) posts[i].videoUrl,
-    ];
     _wanting = true;
     ClipCache.instance.want(urls);
   }
@@ -108,6 +128,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
 
   @override
   void dispose() {
+    _warm?.cancel();
     AppEvents.feedRefresh.removeListener(_refresh);
     _pager.removeListener(_preload);
     if (_wanting) ClipCache.instance.want(const []);
@@ -283,6 +304,7 @@ class _ReelPageState extends State<_ReelPage> {
             post: post,
             play: widget.playing,
             progressBottom: bottom - 14,
+            onDoubleTap: () => _like.setLiked(true),
           )
         else
           const ColoredBox(color: Colors.black),
@@ -366,80 +388,92 @@ class _ReelPageState extends State<_ReelPage> {
           ),
         ),
 
-        // bottom-left: author + caption
+        // bottom: the action rail sits right above the author line, caption underneath
         Positioned(
-          left: 16,
-          right: 84,
+          left: 0,
+          right: 0,
           bottom: bottom,
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () =>
-                    openScreen(context, ProfileScreen(uid: post.authorId)),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    UserAvatar(
-                      url: post.authorPhotoUrl,
-                      name: post.authorUsername,
-                      radius: 17,
-                    ),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Text(
-                        post.authorUsername,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                          shadows: kReelShadow,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (post.caption.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                GestureDetector(
-                  onTap: () => setState(() => _caption = !_caption),
-                  child: Text(
-                    post.caption,
-                    maxLines: _caption ? 8 : 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      height: 1.3,
-                      shadows: kReelShadow,
+              Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: _Rail(
+                    like: _like,
+                    save: _save,
+                    comments: _comments,
+                    onLike: _toggleLike,
+                    onSave: _toggleSave,
+                    onShare: _share,
+                    onComments: () => showCommentsSheet(
+                      context,
+                      post: post,
+                      onCountChanged: (d) {
+                        if (mounted) setState(() => _comments += d);
+                      },
                     ),
                   ),
                 ),
-              ],
+              ),
+              const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.only(left: 16, right: 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => openScreen(
+                        context,
+                        ProfileScreen(uid: post.authorId),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          UserAvatar(
+                            url: post.authorPhotoUrl,
+                            name: post.authorUsername,
+                            radius: 17,
+                          ),
+                          const SizedBox(width: 10),
+                          Flexible(
+                            child: Text(
+                              post.authorUsername,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                                shadows: kReelShadow,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (post.caption.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      GestureDetector(
+                        onTap: () => setState(() => _caption = !_caption),
+                        child: Text(
+                          post.caption,
+                          maxLines: _caption ? 8 : 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            height: 1.3,
+                            shadows: kReelShadow,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ],
-          ),
-        ),
-
-        // right: action rail
-        Positioned(
-          right: 8,
-          bottom: bottom - 6,
-          child: _Rail(
-            like: _like,
-            save: _save,
-            comments: _comments,
-            onLike: _toggleLike,
-            onSave: _toggleSave,
-            onShare: _share,
-            onComments: () => showCommentsSheet(
-              context,
-              post: post,
-              onCountChanged: (d) {
-                if (mounted) setState(() => _comments += d);
-              },
-            ),
           ),
         ),
       ],
