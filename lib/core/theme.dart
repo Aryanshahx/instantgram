@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 /// Space reserved at the bottom of scrollable screens for the floating nav bar.
-const double kNavSpace = 104;
+const double kNavSpace = 72;
 
 /// "Volt" design system: ink-black / warm-cream surfaces, electric lime accent,
 /// big rounded cards, squircle avatars and a floating pill navigation.

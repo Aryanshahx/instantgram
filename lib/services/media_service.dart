@@ -16,8 +16,43 @@ class MediaService {
   static Future<File?> pickPostImage(ImageSource source) =>
       _pickOriginal(source);
 
-  static Future<File?> pickStoryImage(ImageSource source) =>
-      _pickOriginal(source);
+  /// Moments last 24 hours and are only ever shown full screen on a phone, so they are
+  /// saved at up to 1440 x 2560 (JPEG quality 88, usually a few hundred KB). That is why they
+  /// open instantly for everyone instead of downloading a multi-megabyte original.
+  static Future<File?> pickStoryImage(ImageSource source) async {
+    final x = await _picker.pickImage(
+      source: source,
+      maxWidth: 1440,
+      maxHeight: 2560,
+      imageQuality: 88,
+    );
+    if (x == null) return null;
+    final file = File(x.path);
+    if (!await isSupportedImage(file)) {
+      throw const MediaException(
+        'This photo format is not supported. Use a JPEG, PNG or WebP photo.',
+      );
+    }
+    return file;
+  }
+
+  /// Photo for a photo clip: up to 1600 px, JPEG quality 90 (loads fast in Clips).
+  static Future<File?> pickClipImage(ImageSource source) async {
+    final x = await _picker.pickImage(
+      source: source,
+      maxWidth: 1600,
+      maxHeight: 2400,
+      imageQuality: 90,
+    );
+    if (x == null) return null;
+    final file = File(x.path);
+    if (!await isSupportedImage(file)) {
+      throw const MediaException(
+        'This photo format is not supported. Use a JPEG, PNG or WebP photo.',
+      );
+    }
+    return file;
+  }
 
   /// Profile pictures: max 512 x 512, JPEG quality 75 (about 30-60 KB).
   static Future<File?> pickAvatar(ImageSource source) async {

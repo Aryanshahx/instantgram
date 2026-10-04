@@ -34,9 +34,9 @@ class PostService {
       .where('authorId', whereIn: authorIds)
       .orderBy('createdAt', descending: true);
 
-  /// needs composite index: type ASC + createdAt DESC
+  /// Videos and photo clips. Uses the composite index type ASC + createdAt DESC.
   PostQuery videoQuery() => _posts
-      .where('type', isEqualTo: 'video')
+      .where('type', whereIn: ['video', 'photoclip'])
       .orderBy('createdAt', descending: true);
 
   Future<Post?> getPost(String id) async {
@@ -58,6 +58,10 @@ class PostService {
     void Function(double progress)? onProgress,
     int width = 0,
     int height = 0,
+    String? musicId,
+    double musicVolume = 0.8,
+    bool clip = false,
+    int clipSeconds = 10,
   }) async {
     // Look up the profile while the photo is uploading (saves a round trip).
     final meFuture = _me();
@@ -74,9 +78,13 @@ class PostService {
       'authorId': me.uid,
       'authorUsername': me.username,
       'authorPhotoUrl': me.photoUrl,
-      'type': 'image',
+      // a photo clip is a photo that plays in Clips for a few seconds with its music
+      'type': clip ? 'photoclip' : 'image',
       'caption': caption.trim(),
       'imageUrl': uploaded.ref,
+      if (clip) 'videoDuration': clipSeconds,
+      if (musicId != null) 'musicId': musicId,
+      if (musicId != null) 'musicVolume': musicVolume,
       if (width > 0 && height > 0) 'imageWidth': width,
       if (width > 0 && height > 0) 'imageHeight': height,
       'likeCount': 0,
@@ -96,6 +104,9 @@ class PostService {
     required int duration,
     required int width,
     required int height,
+    String? musicId,
+    double musicVolume = 0.8,
+    bool keepSound = true,
   }) async {
     final me = await _me();
     final ref = _posts.doc();
@@ -111,6 +122,9 @@ class PostService {
       'videoDuration': duration,
       'videoWidth': width,
       'videoHeight': height,
+      if (musicId != null) 'musicId': musicId,
+      if (musicId != null) 'musicVolume': musicVolume,
+      if (musicId != null) 'keepSound': keepSound,
       'likeCount': 0,
       'commentCount': 0,
       'createdAt': FieldValue.serverTimestamp(),

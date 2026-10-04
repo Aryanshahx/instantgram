@@ -15,6 +15,8 @@ import '../../services/post_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/like_button.dart';
 import '../../widgets/reel_actions.dart';
+import '../../widgets/music_widgets.dart';
+import '../../widgets/reel_photo.dart';
 import '../../widgets/reel_video.dart';
 import '../../widgets/save_controller.dart';
 import '../../widgets/state_views.dart';
@@ -300,12 +302,19 @@ class _ReelPageState extends State<_ReelPage> {
       fit: StackFit.expand,
       children: [
         if (live)
-          ReelVideo(
-            post: post,
-            play: widget.playing,
-            progressBottom: bottom - 14,
-            onDoubleTap: () => _like.setLiked(true),
-          )
+          post.isPhotoClip
+              ? ReelPhoto(
+                  post: post,
+                  play: widget.playing,
+                  progressBottom: bottom - 14,
+                  onDoubleTap: () => _like.setLiked(true),
+                )
+              : ReelVideo(
+                  post: post,
+                  play: widget.playing,
+                  progressBottom: bottom - 14,
+                  onDoubleTap: () => _like.setLiked(true),
+                )
         else
           const ColoredBox(color: Colors.black),
 
@@ -454,6 +463,10 @@ class _ReelPageState extends State<_ReelPage> {
                         ],
                       ),
                     ),
+                    if (post.hasMusic) ...[
+                      const SizedBox(height: 10),
+                      MusicLabel(musicId: post.musicId),
+                    ],
                     if (post.caption.isNotEmpty) ...[
                       const SizedBox(height: 10),
                       GestureDetector(

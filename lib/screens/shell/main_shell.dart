@@ -62,7 +62,7 @@ class _MainShellState extends State<MainShell> {
               Positioned(
                 left: 16,
                 right: 16,
-                bottom: 12 + bottomInset,
+                bottom: 8 + bottomInset,
                 child: Center(
                   heightFactor: 1,
                   child: ConstrainedBox(
@@ -71,10 +71,10 @@ class _MainShellState extends State<MainShell> {
                       children: [
                         Expanded(
                           child: Glass(
-                            radius: 30,
+                            radius: 22,
                             blur: 22,
                             opacity: 0.78,
-                            padding: const EdgeInsets.all(6),
+                            padding: const EdgeInsets.all(3),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
@@ -110,26 +110,26 @@ class _MainShellState extends State<MainShell> {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: 8),
                         GestureDetector(
                           onTap: _createPost,
                           child: Container(
-                            width: 60,
-                            height: 60,
+                            width: 44,
+                            height: 44,
                             decoration: BoxDecoration(
                               gradient: AppTheme.voltGradient,
-                              borderRadius: BorderRadius.circular(22),
+                              borderRadius: BorderRadius.circular(16),
                               boxShadow: [
                                 BoxShadow(
-                                  color: AppTheme.volt.withValues(alpha: 0.45),
-                                  blurRadius: 22,
-                                  offset: const Offset(0, 8),
+                                  color: AppTheme.volt.withValues(alpha: 0.4),
+                                  blurRadius: 14,
+                                  offset: const Offset(0, 5),
                                 ),
                               ],
                             ),
                             child: const Icon(
                               Icons.add_rounded,
-                              size: 32,
+                              size: 26,
                               color: AppTheme.ink,
                             ),
                           ),
@@ -169,18 +169,18 @@ class _NavItem extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 260),
         curve: Curves.easeOutCubic,
-        height: 48,
-        padding: EdgeInsets.symmetric(horizontal: selected ? 14 : 11),
+        height: 38,
+        padding: EdgeInsets.symmetric(horizontal: selected ? 12 : 10),
         decoration: BoxDecoration(
           color: selected ? AppTheme.volt : Colors.transparent,
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(19),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               selected ? activeIcon : icon,
-              size: 26,
+              size: 22,
               color: selected
                   ? AppTheme.ink
                   : Theme.of(
@@ -198,7 +198,7 @@ class _NavItem extends StatelessWidget {
                         style: const TextStyle(
                           color: AppTheme.ink,
                           fontWeight: FontWeight.w800,
-                          fontSize: 14,
+                          fontSize: 13,
                         ),
                       ),
                     )

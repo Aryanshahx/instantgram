@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
 import '../models/post.dart';
+import 'inline_video.dart';
 import 'video_thumb.dart';
 
 /// Photos and clips in their real proportions (no fixed crop). Square corners.
@@ -13,6 +14,7 @@ class PostMedia extends StatefulWidget {
     required this.post,
     this.playSize = 64,
     this.maxHeight,
+    this.inline = false,
   });
 
   final Post post;
@@ -22,6 +24,9 @@ class PostMedia extends StatefulWidget {
 
   /// Very tall media is shrunk to this height (and centred) instead of filling the screen.
   final double? maxHeight;
+
+  /// Clips play by themselves while on screen (the Discover feed). Grids leave this off.
+  final bool inline;
 
   /// Keeps the extremes sane (panoramas, very tall screenshots).
   static const double minAspect = 0.5;
@@ -100,10 +105,18 @@ class _PostMediaState extends State<PostMedia> {
       // the whole frame, never cropped
       return ColoredBox(
         color: Colors.black,
-        child: VideoThumb(
-          post: post,
-          playSize: widget.playSize,
-          fit: BoxFit.contain,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            VideoThumb(
+              post: post,
+              playSize: widget.playSize,
+              fit: BoxFit.contain,
+              showPlay: !widget.inline,
+            ),
+            // in the feed the clip plays by itself while it is on screen
+            if (widget.inline) InlineVideoLayer(post: post),
+          ],
         ),
       );
     }

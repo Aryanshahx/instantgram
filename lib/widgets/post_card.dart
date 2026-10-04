@@ -13,6 +13,7 @@ import '../services/post_service.dart';
 import '../services/user_service.dart';
 import 'avatar.dart';
 import 'like_button.dart';
+import 'music_widgets.dart';
 import 'post_media.dart';
 import 'reel_actions.dart';
 import 'save_controller.dart';
@@ -57,7 +58,7 @@ class _PostCardState extends State<PostCard> {
   void _openProfile() => openScreen(context, ProfileScreen(uid: post.authorId));
 
   void _openMedia() {
-    if (post.isVideo) openClips(context, post);
+    if (post.isClip) openClips(context, post);
   }
 
   Future<void> _doubleTapLike() async {
@@ -140,7 +141,16 @@ class _PostCardState extends State<PostCard> {
             onDoubleTap: _doubleTapLike,
             child: Stack(
               children: [
-                PostMedia(post: post, maxHeight: maxMediaHeight),
+                PostMedia(post: post, maxHeight: maxMediaHeight, inline: true),
+                if (post.hasMusic)
+                  Positioned(
+                    left: 10,
+                    bottom: 10,
+                    child: MusicToggleChip(
+                      post: post,
+                      interactive: !post.isVideo,
+                    ),
+                  ),
                 Positioned.fill(
                   child: IgnorePointer(
                     child: Center(
@@ -308,18 +318,6 @@ class _PostCardState extends State<PostCard> {
                 style: const TextStyle(fontSize: 15, height: 1.35),
               ),
             ),
-          if (_comments > 0) ...[
-            const SizedBox(height: 6),
-            GestureDetector(
-              onTap: _openComments,
-              child: Text(
-                _comments == 1
-                    ? 'View 1 comment'
-                    : 'View all $_comments comments',
-                style: TextStyle(color: context.muted, fontSize: 14),
-              ),
-            ),
-          ],
           const SizedBox(height: 6),
           Text(
             timeago.format(post.createdAt),

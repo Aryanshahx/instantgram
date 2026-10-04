@@ -24,6 +24,9 @@ class Post {
     this.imageHeight = 0,
     this.likeCount = 0,
     this.commentCount = 0,
+    this.musicId = '',
+    this.musicVolume = 0.8,
+    this.keepSound = true,
   });
 
   final String id;
@@ -52,7 +55,21 @@ class Post {
   final int likeCount;
   final int commentCount;
 
+  /// Music chosen from the app's own library ('' = none), its volume (0-1) and, for videos,
+  /// whether the clip's own sound is kept underneath it.
+  final String musicId;
+  final double musicVolume;
+  final bool keepSound;
+
   bool get isVideo => type == 'video';
+
+  /// A photo shown as a clip: the picture for [videoDuration] seconds with music.
+  bool get isPhotoClip => type == 'photoclip';
+
+  /// Appears in Clips (a video or a photo clip).
+  bool get isClip => isVideo || isPhotoClip;
+
+  bool get hasMusic => musicId.isNotEmpty;
 
   /// Posts that can no longer be shown: old "paste a link" videos, and anything that
   /// lived in the removed Telegram storage.
@@ -92,6 +109,11 @@ class Post {
       imageHeight: _int(m['imageHeight']),
       likeCount: _int(m['likeCount']),
       commentCount: _int(m['commentCount']),
+      musicId: _str(m['musicId']),
+      musicVolume: m['musicVolume'] is num
+          ? (m['musicVolume'] as num).toDouble().clamp(0.0, 1.0)
+          : 0.8,
+      keepSound: m['keepSound'] is bool ? m['keepSound'] as bool : true,
     );
   }
 }

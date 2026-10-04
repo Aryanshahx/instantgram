@@ -117,7 +117,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       builder: (context, _) {
         final shown = <Post>[
           for (final p in _pager.posts)
-            if (p.isVideo == (_tab == 1)) p,
+            if (p.isClip == (_tab == 1)) p,
         ];
         // a tab with few items on the first pages: keep loading until it has some
         if (shown.length < 9 &&

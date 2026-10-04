@@ -38,12 +38,25 @@ class _Tile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => post.isVideo
+      onTap: () => post.isClip
           ? openClips(context, post)
           : openScreen(context, PostDetailScreen(post: post)),
       child: Stack(
         children: [
           PostMedia(post: post, playSize: 40),
+          if (post.hasMusic)
+            const Positioned(
+              right: 8,
+              top: 8,
+              child: IgnorePointer(
+                child: Icon(
+                  Icons.music_note_rounded,
+                  size: 18,
+                  color: Colors.white,
+                  shadows: kReelShadow,
+                ),
+              ),
+            ),
           Positioned(
             left: 8,
             bottom: 6,

@@ -2,13 +2,12 @@ import 'package:share_plus/share_plus.dart';
 
 import '../models/post.dart';
 
-/// Opens the system share sheet with the caption and a link to the post media.
+/// The link that is shared for a post: the video, or the photo.
+String shareLinkFor(Post post) => post.isVideo ? post.videoUrl : post.imageUrl;
+
+/// Opens the system share sheet with the link only (no caption, no extra text).
 Future<void> sharePost(Post post) async {
-  final link = post.isVideo ? post.videoUrl : post.imageUrl;
-  final parts = <String>[
-    if (post.caption.trim().isNotEmpty) post.caption.trim(),
-    if (link.isNotEmpty) link,
-    'Shared from Instantgram by @${post.authorUsername}',
-  ];
-  await Share.share(parts.join('\n\n'));
+  final link = shareLinkFor(post);
+  if (link.isEmpty) return;
+  await Share.share(link);
 }

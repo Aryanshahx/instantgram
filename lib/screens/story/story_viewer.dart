@@ -1,9 +1,9 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
 import '../../core/app_events.dart';
 import '../../core/errors.dart';
+import '../../core/story_images.dart';
 import '../../core/ui.dart';
 import '../../models/story.dart';
 import '../../services/story_service.dart';
@@ -67,6 +67,9 @@ class _StoryViewerState extends State<StoryViewer> {
         itemBuilder: (context, i) => _GroupPlayer(
           key: ValueKey(widget.groups[i].authorId),
           group: widget.groups[i],
+          nextFirstUrl: i + 1 < widget.groups.length
+              ? widget.groups[i + 1].stories.first.imageUrl
+              : null,
           onFinished: _nextGroup,
           onBackFromFirst: _previousGroup,
           onClose: () => Navigator.of(context).pop(),
@@ -80,12 +83,16 @@ class _GroupPlayer extends StatefulWidget {
   const _GroupPlayer({
     super.key,
     required this.group,
+    this.nextFirstUrl,
     required this.onFinished,
     required this.onBackFromFirst,
     required this.onClose,
   });
 
   final StoryGroup group;
+
+  /// First picture of the next person's moments (loaded in advance).
+  final String? nextFirstUrl;
   final VoidCallback onFinished;
   final VoidCallback onBackFromFirst;
   final VoidCallback onClose;
@@ -101,6 +108,10 @@ class _GroupPlayerState extends State<_GroupPlayer>
     duration: const Duration(seconds: 5),
   );
   int _i = 0;
+  bool _loaded = false; // the picture is ready: only then the 5 seconds start
+  bool _failed = false;
+  bool _holding = false;
+  bool _started = false;
 
   bool get _mine => widget.group.authorId == UserService.instance.myUid;
   Story get _story => widget.group.stories[_i];
@@ -111,7 +122,49 @@ class _GroupPlayerState extends State<_GroupPlayer>
     _anim.addStatusListener((s) {
       if (s == AnimationStatus.completed) _next();
     });
-    _anim.forward();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    _prepare();
+  }
+
+  /// Loads the current picture, then starts its timer. The next pictures load meanwhile.
+  Future<void> _prepare() async {
+    final index = _i;
+    final story = _story;
+    if (_loaded || _failed) {
+      setState(() {
+        _loaded = false;
+        _failed = false;
+      });
+    }
+    _anim.stop();
+    _anim.value = 0;
+    var failed = false;
+    try {
+      await precacheImage(storyImageProvider(context, story.imageUrl), context);
+    } catch (_) {
+      failed = true;
+    }
+    if (!mounted || index != _i) return;
+    setState(() {
+      _loaded = true;
+      _failed = failed;
+    });
+    if (!_holding) _anim.forward(from: 0);
+    // warm the next picture (this person's, or the next person's first)
+    if (_i + 1 < widget.group.stories.length) {
+      warmStoryImage(context, widget.group.stories[_i + 1].imageUrl);
+      if (_i + 2 < widget.group.stories.length) {
+        warmStoryImage(context, widget.group.stories[_i + 2].imageUrl);
+      }
+    } else if (widget.nextFirstUrl != null) {
+      warmStoryImage(context, widget.nextFirstUrl!);
+    }
   }
 
   @override
@@ -123,7 +176,7 @@ class _GroupPlayerState extends State<_GroupPlayer>
   void _next() {
     if (_i < widget.group.stories.length - 1) {
       setState(() => _i++);
-      _anim.forward(from: 0);
+      _prepare();
     } else {
       widget.onFinished();
     }
@@ -132,10 +185,10 @@ class _GroupPlayerState extends State<_GroupPlayer>
   void _previous() {
     if (_i > 0) {
       setState(() => _i--);
-      _anim.forward(from: 0);
+      _prepare();
     } else {
       widget.onBackFromFirst();
-      _anim.forward(from: 0);
+      _prepare();
     }
   }
 
@@ -148,7 +201,7 @@ class _GroupPlayerState extends State<_GroupPlayer>
       destructive: true,
     );
     if (!ok) {
-      if (mounted) _anim.forward();
+      if (mounted && _loaded) _anim.forward();
       return;
     }
     try {
@@ -162,14 +215,11 @@ class _GroupPlayerState extends State<_GroupPlayer>
       if (_i >= widget.group.stories.length) {
         _i = widget.group.stories.length - 1;
       }
-      if (mounted) {
-        setState(() {});
-        _anim.forward(from: 0);
-      }
+      if (mounted) _prepare();
     } catch (e) {
       if (mounted) {
         showToast(context, friendlyError(e));
-        _anim.forward();
+        if (_loaded) _anim.forward();
       }
     }
   }
@@ -187,28 +237,37 @@ class _GroupPlayerState extends State<_GroupPlayer>
           _next();
         }
       },
-      onLongPressStart: (_) => _anim.stop(),
-      onLongPressEnd: (_) => _anim.forward(),
+      onLongPressStart: (_) {
+        _holding = true;
+        _anim.stop();
+      },
+      onLongPressEnd: (_) {
+        _holding = false;
+        if (_loaded) _anim.forward();
+      },
       onVerticalDragEnd: (d) {
         if ((d.primaryVelocity ?? 0) > 300) widget.onClose();
       },
       child: Stack(
         fit: StackFit.expand,
         children: [
-          CachedNetworkImage(
-            key: ValueKey(story.id),
-            imageUrl: story.imageUrl,
-            fit: BoxFit.contain,
-            placeholder: (_, _) =>
-                const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-            errorWidget: (_, _, _) => const Center(
+          if (!_loaded)
+            const Center(child: CircularProgressIndicator(strokeWidth: 2))
+          else if (_failed)
+            const Center(
               child: Icon(
                 Icons.broken_image_outlined,
                 color: Colors.white54,
                 size: 48,
               ),
+            )
+          else
+            Image(
+              key: ValueKey(story.id),
+              image: storyImageProvider(context, story.imageUrl),
+              fit: BoxFit.contain,
+              gaplessPlayback: true,
             ),
-          ),
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),

@@ -3,16 +3,11 @@ import 'package:flutter/material.dart';
 import '../../core/app_events.dart';
 import '../../core/responsive.dart';
 import '../../core/theme.dart';
-import '../../core/ui.dart';
-import '../../models/app_user.dart';
 import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
-import '../../services/user_service.dart';
-import '../../widgets/avatar.dart';
 import '../../widgets/post_card.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/stories_bar.dart';
-import '../profile/profile_screen.dart';
 
 class FeedScreen extends StatefulWidget {
   const FeedScreen({super.key});
@@ -25,9 +20,6 @@ class _FeedScreenState extends State<FeedScreen> {
   late final PostPager _pager = PostPager(
     PostService.instance.latestQuery,
     pageSize: 8,
-  );
-  late final Stream<AppUser?> _me = UserService.instance.watchUser(
-    UserService.instance.myUid,
   );
 
   @override
@@ -54,7 +46,7 @@ class _FeedScreenState extends State<FeedScreen> {
         maxWidth: 680,
         child: PagedPostList(
           pager: _pager,
-          header: _FeedHeader(me: _me),
+          header: const _FeedHeader(),
           onRefresh: () async {
             // Reloads posts and moments together.
             AppEvents.refreshFeed();
@@ -74,49 +66,28 @@ class _FeedScreenState extends State<FeedScreen> {
 }
 
 class _FeedHeader extends StatelessWidget {
-  const _FeedHeader({required this.me});
-
-  final Stream<AppUser?> me;
+  const _FeedHeader();
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return const Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 6),
-          child: Row(
-            children: [
-              const Text(
-                'InstantGram',
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -1.2,
-                ),
+          padding: EdgeInsets.fromLTRB(20, 10, 20, 6),
+          child: Center(
+            child: Text(
+              'InstantGram',
+              style: TextStyle(
+                fontSize: 26,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -1.2,
               ),
-              const Spacer(),
-              StreamBuilder<AppUser?>(
-                stream: me,
-                builder: (context, snap) {
-                  final u = snap.data;
-                  return GestureDetector(
-                    onTap: u == null
-                        ? null
-                        : () => openScreen(context, ProfileScreen(uid: u.uid)),
-                    child: UserAvatar(
-                      url: u?.photoUrl ?? '',
-                      name: u?.username ?? '',
-                      radius: 19,
-                    ),
-                  );
-                },
-              ),
-            ],
+            ),
           ),
         ),
-        const StoriesBar(),
-        const SizedBox(height: 4),
+        StoriesBar(),
+        SizedBox(height: 4),
       ],
     );
   }

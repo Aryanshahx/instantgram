@@ -3,6 +3,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../core/app_events.dart';
 import '../core/errors.dart';
+import '../core/story_images.dart';
 import '../core/theme.dart';
 import '../core/ui.dart';
 import '../models/app_user.dart';
@@ -21,8 +22,12 @@ class StoriesBar extends StatefulWidget {
 }
 
 class _StoriesBarState extends State<StoriesBar> {
-  List<StoryGroup> _groups = [];
-  AppUser? _me;
+  /// The last result, so the bar shows at once when Discover is opened again.
+  static List<StoryGroup> _lastGroups = [];
+  static AppUser? _lastMe;
+
+  List<StoryGroup> _groups = _lastGroups;
+  AppUser? _me = _lastMe;
   bool _uploading = false;
 
   String get _myUid => UserService.instance.myUid;
@@ -47,10 +52,18 @@ class _StoriesBarState extends State<StoriesBar> {
         UserService.instance.getUser(_myUid),
       ]);
       if (!mounted) return;
+      _lastGroups = results[0] as List<StoryGroup>;
+      _lastMe = results[1] as AppUser?;
       setState(() {
-        _groups = results[0] as List<StoryGroup>;
-        _me = results[1] as AppUser?;
+        _groups = _lastGroups;
+        _me = _lastMe;
       });
+      // load the first picture of the first few people now, so a tap opens instantly
+      for (final g in _groups.take(5)) {
+        if (g.stories.isNotEmpty) {
+          warmStoryImage(context, g.stories.first.imageUrl);
+        }
+      }
     } catch (_) {
       // Stories are optional; the feed still works without them.
     }

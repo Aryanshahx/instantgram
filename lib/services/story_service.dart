@@ -19,14 +19,18 @@ class StoryService {
 
   /// Stories from me + the people I follow that are still within 24 hours.
   Future<List<StoryGroup>> load() async {
-    final following = await UserService.instance.followingIds();
+    // both lookups run at the same time (they do not depend on each other)
+    final results = await Future.wait<Object>([
+      UserService.instance.followingIds(),
+      _stories
+          .where('expiresAt', isGreaterThan: Timestamp.now())
+          .orderBy('expiresAt')
+          .limit(100)
+          .get(),
+    ]);
+    final following = results[0] as List<String>;
+    final snap = results[1] as QuerySnapshot<Map<String, dynamic>>;
     final allowed = {...following, _uid};
-
-    final snap = await _stories
-        .where('expiresAt', isGreaterThan: Timestamp.now())
-        .orderBy('expiresAt')
-        .limit(100)
-        .get();
 
     final byAuthor = <String, List<Story>>{};
     for (final d in snap.docs) {

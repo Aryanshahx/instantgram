@@ -12,6 +12,7 @@ class VideoThumb extends StatelessWidget {
     required this.post,
     this.playSize = 56,
     this.fit = BoxFit.cover,
+    this.showPlay = true,
   });
 
   final Post post;
@@ -19,6 +20,9 @@ class VideoThumb extends StatelessWidget {
 
   /// cover fills the box; contain always shows the whole frame.
   final BoxFit fit;
+
+  /// The play icon in the middle (off for clips that start by themselves).
+  final bool showPlay;
 
   @override
   Widget build(BuildContext context) {
@@ -51,14 +55,15 @@ class VideoThumb extends StatelessWidget {
             placeholder: (_, _) => placeholder,
             errorWidget: (_, _, _) => placeholder,
           ),
-        Center(
-          child: Icon(
-            Icons.play_arrow_rounded,
-            color: Colors.white,
-            size: playSize,
-            shadows: kReelShadow,
+        if (showPlay)
+          Center(
+            child: Icon(
+              Icons.play_arrow_rounded,
+              color: Colors.white,
+              size: playSize,
+              shadows: kReelShadow,
+            ),
           ),
-        ),
       ],
     );
   }

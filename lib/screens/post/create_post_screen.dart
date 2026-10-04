@@ -12,11 +12,13 @@ import '../../core/media_url.dart';
 import '../../core/responsive.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import '../../models/music.dart';
 import '../../services/media_server.dart';
 import '../../services/media_service.dart';
 import '../../services/mp4_faststart.dart';
 import '../../services/photo_edit.dart';
 import '../../services/post_service.dart';
+import '../../widgets/music_widgets.dart';
 import '../../widgets/pill_tabs.dart';
 import 'photo_editor_screen.dart';
 import 'video_editor_screen.dart';
@@ -36,7 +38,12 @@ class CreatePostScreen extends StatefulWidget {
 }
 
 class _CreatePostScreenState extends State<CreatePostScreen> {
-  int _mode = 0; // 0 = post (photo), 1 = clips (video)
+  int _mode = 0; // 0 = post (photo), 1 = clips (video, or a photo with music)
+  bool _clipPhoto = false; // in Clips: false = video, true = photo clip
+  MusicTrack? _music;
+  double _musicVol = 0.8;
+  bool _keepSound = true;
+  int _clipSeconds = 10; // length of a photo clip
   int _step = 0; // 0 = preview, 1 = details
 
   File? _image; // what gets uploaded (the original, or its edited copy)
@@ -74,6 +81,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (_busy) VideoCompress.cancelCompression();
     super.dispose();
   }
+
+  bool get _photoClip => _mode == 1 && _clipPhoto;
+
+  /// Post and photo clips pick a photo; video clips pick a video.
+  bool get _isImageMode => _mode == 0 || _clipPhoto;
 
   // ------------------------------------------------------------------ picking
 
@@ -124,7 +136,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (source == null) return;
     try {
       // Uploaded exactly as taken; the bucket keeps the original.
-      final file = await MediaService.pickPostImage(source);
+      final file = _photoClip
+          ? await MediaService.pickClipImage(source)
+          : await MediaService.pickPostImage(source);
       if (file == null) return;
       final bytes = await file.length();
       if (!mounted) return;
@@ -249,7 +263,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   Future<void> _edit() async {
-    if (_mode == 0) {
+    if (_isImageMode) {
       final src = _imageOriginal;
       if (src == null) return;
       final r = await Navigator.of(context).push<PhotoEditResult>(
@@ -297,7 +311,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   void _syncPreview() {
     final c = _preview;
     if (c == null) return;
-    final show = _mode == 1 && _step == 0 && !_busy && !_previewPaused;
+    final show =
+        _mode == 1 && !_clipPhoto && _step == 0 && !_busy && !_previewPaused;
     if (show) {
       c.play();
     } else {
@@ -306,16 +321,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   void _togglePreview() {
-    if (_mode != 1 || _preview == null) return;
+    if (_mode != 1 || _clipPhoto || _preview == null) return;
     setState(() => _previewPaused = !_previewPaused);
     _syncPreview();
   }
 
   // --------------------------------------------------------------- publishing
 
-  bool get _hasMedia => _mode == 0 ? _image != null : _video != null;
+  bool get _hasMedia => _isImageMode ? _image != null : _video != null;
 
-  bool get _canShare => !_busy && _hasMedia;
+  /// A photo clip needs music (that is what makes it a clip).
+  bool get _canShare => !_busy && _hasMedia && (!_photoClip || _music != null);
 
   void _go(int step) {
     setState(() => _step = step);
@@ -344,13 +360,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _busy = true;
       _progress = null;
       _totalBytes = 0;
-      _stage = (_mode == 1 && _willShrink)
+      _stage = (!_isImageMode && _willShrink)
           ? 'Processing video...'
-          : (_mode == 1 ? 'Getting ready...' : 'Uploading...');
+          : (!_isImageMode ? 'Getting ready...' : 'Uploading...');
     });
     _syncPreview();
     try {
-      if (_mode == 0) {
+      if (_isImageMode) {
         _totalBytes = _imageBytes;
         _clock
           ..reset()
@@ -363,6 +379,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           onProgress: _onProgress,
           width: dims?.width.round() ?? 0,
           height: dims?.height.round() ?? 0,
+          musicId: _music?.id,
+          musicVolume: _musicVol,
+          clip: _photoClip,
+          clipSeconds: _clipSeconds,
         );
       } else {
         await _publishVideo();
@@ -464,6 +484,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         duration: _videoSeconds,
         width: w,
         height: h,
+        musicId: _music?.id,
+        musicVolume: _musicVol,
+        keepSound: _keepSound,
       );
     } finally {
       tempCopy?.delete().ignore();
@@ -529,6 +552,39 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             },
           ),
         ),
+        if (_mode == 1)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                ChoiceChip(
+                  label: const Text('Video'),
+                  avatar: const Icon(Icons.videocam_rounded, size: 18),
+                  selected: !_clipPhoto,
+                  onSelected: _busy
+                      ? null
+                      : (_) {
+                          setState(() => _clipPhoto = false);
+                          _syncPreview();
+                        },
+                ),
+
+                ChoiceChip(
+                  label: const Text('Photo + music'),
+                  avatar: const Icon(Icons.music_note_rounded, size: 18),
+                  selected: _clipPhoto,
+                  onSelected: _busy
+                      ? null
+                      : (_) {
+                          setState(() => _clipPhoto = true);
+                          _syncPreview();
+                        },
+                ),
+              ],
+            ),
+          ),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -536,7 +592,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               behavior: HitTestBehavior.opaque,
               onTap: _hasMedia
                   ? _togglePreview
-                  : (_mode == 0 ? _pickImage : _pickVideo),
+                  : (_isImageMode ? _pickImage : _pickVideo),
               child: _frame(context, _previewContent(context)),
             ),
           ),
@@ -553,7 +609,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         children: [
                           Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: _mode == 0 ? _pickImage : _pickVideo,
+                              onPressed: _isImageMode ? _pickImage : _pickVideo,
                               icon: const Icon(Icons.swap_horiz_rounded),
                               label: const Text('Change'),
                             ),
@@ -582,14 +638,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 : SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
-                      onPressed: _mode == 0 ? _pickImage : _pickVideo,
+                      onPressed: _isImageMode ? _pickImage : _pickVideo,
                       icon: Icon(
-                        _mode == 0
+                        _isImageMode
                             ? Icons.add_photo_alternate_rounded
                             : Icons.video_call_rounded,
                       ),
                       label: Text(
-                        _mode == 0 ? 'Choose a photo' : 'Choose a clip',
+                        _isImageMode ? 'Choose a photo' : 'Choose a clip',
                       ),
                     ),
                   ),
@@ -625,13 +681,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (!_hasMedia) {
       return Center(
         child: Icon(
-          _mode == 0 ? Icons.image_outlined : Icons.smart_display_outlined,
+          _isImageMode ? Icons.image_outlined : Icons.smart_display_outlined,
           size: 64,
           color: Colors.white24,
         ),
       );
     }
-    if (_mode == 0) {
+    if (_isImageMode) {
       return SizedBox.expand(
         child: Image.file(
           _image!,
@@ -668,7 +724,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   // ---- step 2: details ----
 
   Widget _detailsStep(BuildContext context) {
-    final isVideo = _mode == 1;
+    final isVideo = !_isImageMode;
     final thumb = isVideo
         ? (_videoThumb == null
               ? const SizedBox.shrink()
@@ -699,7 +755,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          isVideo ? 'Clip' : 'Photo',
+                          _mode == 1 ? 'Clip' : 'Photo',
                           style: const TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w900,
@@ -742,8 +798,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   hintText: 'Say something about it...',
                 ),
               ),
+              _musicTile(context),
               if (isVideo) ...[
-                const SizedBox(height: 4),
+                const SizedBox(height: 12),
                 _qualityTile(context),
               ],
             ],
@@ -810,8 +867,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   String _summary() {
-    if (_mode == 0) {
-      return '${_imageEdits != null ? 'Edited' : 'Original'}  \u00b7  ${_mb(_imageBytes)}';
+    if (_isImageMode) {
+      final base =
+          '${_imageEdits != null ? 'Edited' : 'Original'}  \u00b7  ${_mb(_imageBytes)}';
+      return _photoClip ? '$base  \u00b7  ${_clipSeconds}s' : base;
     }
     final e = _videoEdits;
     final tags = <String>[
@@ -821,6 +880,125 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       if (e != null && e.mute) 'No sound',
     ];
     return tags.join('  \u00b7  ');
+  }
+
+  Widget _musicTile(BuildContext context) {
+    final m = _music;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      decoration: BoxDecoration(
+        color: context.card,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Column(
+        children: [
+          ListTile(
+            contentPadding: const EdgeInsets.fromLTRB(18, 4, 8, 4),
+            onTap: _busy
+                ? null
+                : () async {
+                    final t = await pickMusic(context, currentId: m?.id);
+                    if (t != null && mounted) setState(() => _music = t);
+                  },
+            leading: Container(
+              width: 42,
+              height: 42,
+              decoration: const BoxDecoration(
+                color: AppTheme.volt,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.music_note_rounded, color: AppTheme.ink),
+            ),
+            title: Text(
+              m == null ? 'Add music' : m.title,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            subtitle: Text(
+              m == null
+                  ? (_photoClip
+                        ? 'Photo clips need music'
+                        : 'Pick a track from InstantGram music')
+                  : '${m.mood}  \u00b7  ${m.bpm} BPM  \u00b7  tap to change',
+              style: TextStyle(color: context.muted, fontSize: 12.5),
+            ),
+            trailing: m == null
+                ? const Icon(Icons.chevron_right_rounded)
+                : IconButton(
+                    tooltip: 'Remove music',
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: _busy
+                        ? null
+                        : () => setState(() => _music = null),
+                  ),
+          ),
+          if (m != null) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
+              child: Row(
+                children: [
+                  Icon(Icons.volume_up_rounded, size: 20, color: context.muted),
+                  Expanded(
+                    child: Slider(
+                      value: _musicVol,
+                      min: 0.1,
+                      onChanged: _busy
+                          ? null
+                          : (v) => setState(() => _musicVol = v),
+                    ),
+                  ),
+                  Text(
+                    '${(_musicVol * 100).round()}%',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ],
+              ),
+            ),
+            if (!_isImageMode)
+              SwitchListTile(
+                value: _keepSound,
+                onChanged: _busy ? null : (v) => setState(() => _keepSound = v),
+                activeTrackColor: AppTheme.volt,
+                contentPadding: const EdgeInsets.fromLTRB(18, 0, 12, 4),
+                title: const Text(
+                  "Keep the clip's own sound",
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+          ],
+          if (_photoClip)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 4, 18, 16),
+              child: Row(
+                children: [
+                  Text(
+                    'Length',
+                    style: TextStyle(
+                      color: context.muted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Wrap(
+                      spacing: 6,
+                      children: [
+                        for (final s in const [5, 10, 15, 20, 30])
+                          ChoiceChip(
+                            label: Text('${s}s'),
+                            selected: _clipSeconds == s,
+                            onSelected: _busy
+                                ? null
+                                : (_) => setState(() => _clipSeconds = s),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   String _qualityText(bool big) {
