@@ -7,6 +7,7 @@ import '../core/theme.dart';
 import '../models/music.dart';
 import '../models/post.dart';
 import '../services/music_player.dart';
+import 'reel_progress.dart';
 import 'reel_touch.dart';
 
 /// A photo clip: the picture is shown for its length (5 s or more) with a slow zoom while its
@@ -17,13 +18,13 @@ class ReelPhoto extends StatefulWidget {
     super.key,
     required this.post,
     required this.play,
-    this.progressBottom = 0,
+    this.progress,
     this.onDoubleTap,
   });
 
   final Post post;
   final bool play;
-  final double progressBottom;
+  final ReelProgressHost? progress;
   final VoidCallback? onDoubleTap;
 
   @override
@@ -46,6 +47,7 @@ class _ReelPhotoState extends State<ReelPhoto>
   bool _userPaused = false;
   bool _flash = false;
   bool _started = false;
+  PhotoProgressSource? _source;
 
   @override
   void initState() {
@@ -85,6 +87,9 @@ class _ReelPhotoState extends State<ReelPhoto>
       setState(() => _loaded = true);
       _applyVolume();
       _sync();
+      final src = PhotoProgressSource(_anim, onScrubEnd: _sync);
+      _source = src;
+      widget.progress?.offer(src);
     } catch (_) {
       if (mounted) setState(() => _failed = true);
     }
@@ -122,6 +127,11 @@ class _ReelPhotoState extends State<ReelPhoto>
   void dispose() {
     ReelAudio.muted.removeListener(_applyVolume);
     ReelAudio.volume.removeListener(_applyVolume);
+    final s = _source;
+    if (s != null) {
+      widget.progress?.withdraw(s);
+      s.dispose();
+    }
     _anim.dispose();
     _music?.dispose();
     super.dispose();
@@ -196,21 +206,6 @@ class _ReelPhotoState extends State<ReelPhoto>
               ),
             ),
           ),
-          if (_loaded)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: widget.progressBottom + 8,
-              child: AnimatedBuilder(
-                animation: _anim,
-                builder: (_, _) => LinearProgressIndicator(
-                  value: _anim.value,
-                  minHeight: 3,
-                  color: AppTheme.volt,
-                  backgroundColor: Colors.white12,
-                ),
-              ),
-            ),
         ],
       ),
     );

@@ -173,7 +173,11 @@ class UserService {
             ? null
             : _db.collection('usernames').doc(old);
         final oldSnap = oldRef == null ? null : await tx.get(oldRef);
-        tx.set(nameRef, {'uid': uid});
+        final email = FirebaseAuth.instance.currentUser?.email;
+        tx.set(nameRef, {
+          'uid': uid,
+          if (email != null && email.isNotEmpty) 'email': email,
+        });
         if (oldRef != null && (oldSnap?.exists ?? false)) tx.delete(oldRef);
         tx.update(_users.doc(uid), {...data, 'username': wanted});
       });

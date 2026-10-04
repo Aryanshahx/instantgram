@@ -5,6 +5,7 @@ import '../../core/responsive.dart';
 import '../../core/theme.dart';
 import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
+import '../../widgets/brand_logo.dart';
 import '../../widgets/post_card.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/stories_bar.dart';
@@ -75,16 +76,7 @@ class _FeedHeader extends StatelessWidget {
       children: [
         Padding(
           padding: EdgeInsets.fromLTRB(20, 10, 20, 6),
-          child: Center(
-            child: Text(
-              'InstantGram',
-              style: TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w900,
-                letterSpacing: -1.2,
-              ),
-            ),
-          ),
+          child: Center(child: BrandWordmark(size: 26)),
         ),
         StoriesBar(),
         SizedBox(height: 4),

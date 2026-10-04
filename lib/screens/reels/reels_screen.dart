@@ -17,6 +17,7 @@ import '../../widgets/like_button.dart';
 import '../../widgets/reel_actions.dart';
 import '../../widgets/music_widgets.dart';
 import '../../widgets/reel_photo.dart';
+import '../../widgets/reel_progress.dart';
 import '../../widgets/reel_video.dart';
 import '../../widgets/save_controller.dart';
 import '../../widgets/state_views.dart';
@@ -250,6 +251,7 @@ class _ReelPage extends StatefulWidget {
 }
 
 class _ReelPageState extends State<_ReelPage> {
+  final ReelProgressHost _progress = ReelProgressHost();
   late final LikeController _like = LikeController(
     widget.post.id,
     widget.post.likeCount,
@@ -260,6 +262,7 @@ class _ReelPageState extends State<_ReelPage> {
 
   @override
   void dispose() {
+    _progress.dispose();
     _like.dispose();
     _save.dispose();
     super.dispose();
@@ -296,7 +299,8 @@ class _ReelPageState extends State<_ReelPage> {
     final post = widget.post;
     final live = widget.playing || widget.preload;
     // The bottom bar is hidden on this screen, so only the phone's own gesture area is left.
-    final bottom = MediaQuery.of(context).padding.bottom + 18;
+    final inset = MediaQuery.of(context).padding.bottom;
+    final bottom = inset + ReelProgressBar.hitHeight + 2;
 
     return Stack(
       fit: StackFit.expand,
@@ -306,13 +310,13 @@ class _ReelPageState extends State<_ReelPage> {
               ? ReelPhoto(
                   post: post,
                   play: widget.playing,
-                  progressBottom: bottom - 14,
+                  progress: _progress,
                   onDoubleTap: () => _like.setLiked(true),
                 )
               : ReelVideo(
                   post: post,
                   play: widget.playing,
-                  progressBottom: bottom - 14,
+                  progress: _progress,
                   onDoubleTap: () => _like.setLiked(true),
                 )
         else
@@ -352,6 +356,14 @@ class _ReelPageState extends State<_ReelPage> {
               ),
             ),
           ),
+        ),
+
+        // the progress line sits above the dark gradient, so it keeps its colour
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: inset,
+          child: ReelProgressBar(host: _progress),
         ),
 
         // top: back, title, sound (plain icons, no backgrounds)
@@ -450,23 +462,29 @@ class _ReelPageState extends State<_ReelPage> {
                           ),
                           const SizedBox(width: 10),
                           Flexible(
-                            child: Text(
-                              post.authorUsername,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                                shadows: kReelShadow,
-                              ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  post.authorUsername,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                    shadows: kReelShadow,
+                                  ),
+                                ),
+                                // the audio name goes right under the username
+                                if (post.hasMusic)
+                                  MusicLabel(musicId: post.musicId),
+                              ],
                             ),
                           ),
                         ],
                       ),
                     ),
-                    if (post.hasMusic) ...[
-                      const SizedBox(height: 10),
-                      MusicLabel(musicId: post.musicId),
-                    ],
                     if (post.caption.isNotEmpty) ...[
                       const SizedBox(height: 10),
                       GestureDetector(

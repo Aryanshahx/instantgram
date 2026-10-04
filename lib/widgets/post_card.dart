@@ -212,13 +212,23 @@ class _PostCardState extends State<PostCard> {
                   ),
                   const SizedBox(width: 10),
                   Flexible(
-                    child: Text(
-                      post.authorUsername,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
-                      ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          post.authorUsername,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
+                        ),
+                        // the audio name goes right under the username
+                        if (post.hasMusic)
+                          MusicLabel(musicId: post.musicId, onDark: false),
+                      ],
                     ),
                   ),
                 ],

@@ -184,6 +184,10 @@ void main() {
         await t.pump(const Duration(milliseconds: 300));
         expect(find.text('Log in'), findsOneWidget);
         expect(find.textContaining('instantly'), findsOneWidget);
+        // text wordmark instead of the logo picture
+        expect(find.text('InstantGram'), findsOneWidget);
+        expect(find.byType(Image), findsNothing);
+        expect(find.text('Email or username'), findsOneWidget);
         expect(t.takeException(), isNull);
       });
 
@@ -194,6 +198,8 @@ void main() {
         await t.pumpWidget(_app(const SignupScreen(), entry.value));
         await t.pump(const Duration(milliseconds: 300));
         expect(find.text('Create account'), findsOneWidget);
+        expect(find.text('InstantGram'), findsOneWidget);
+        expect(find.byType(Image), findsNothing);
         expect(t.takeException(), isNull);
       });
 
@@ -265,7 +271,7 @@ void main() {
               body: StatefulBuilder(
                 builder: (context, set) => Column(
                   children: [
-                    const BrandLogo(size: 28),
+                    const BrandWordmark(size: 28),
                     const UserAvatar(
                       url: '',
                       name: 'aryan',

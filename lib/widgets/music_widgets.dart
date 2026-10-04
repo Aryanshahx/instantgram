@@ -5,35 +5,41 @@ import '../models/music.dart';
 import '../models/post.dart';
 import '../services/music_player.dart';
 
-/// "♪ Track name" on the Clips screen (plain white text, readable on any video).
+/// "♪ Track name": shown right under the username on posts and on clips.
+/// [onDark] = white text with a soft shadow (on top of a video); otherwise the muted theme colour.
 class MusicLabel extends StatelessWidget {
-  const MusicLabel({super.key, required this.musicId});
+  const MusicLabel({super.key, required this.musicId, this.onDark = true});
   final String musicId;
+  final bool onDark;
 
   @override
   Widget build(BuildContext context) {
     final t = musicById(musicId);
     if (t == null) return const SizedBox.shrink();
+    final color = onDark ? Colors.white : context.muted;
+    final shadows = onDark
+        ? const [Shadow(blurRadius: 8, color: Colors.black54)]
+        : null;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(
+        Icon(
           Icons.music_note_rounded,
-          size: 16,
-          color: Colors.white,
-          shadows: [Shadow(blurRadius: 8, color: Colors.black54)],
+          size: 14,
+          color: color,
+          shadows: shadows,
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: 3),
         Flexible(
           child: Text(
-            '${t.title}  \u00b7  InstantGram music',
+            t.title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              shadows: [Shadow(blurRadius: 8, color: Colors.black54)],
+            style: TextStyle(
+              color: color,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              shadows: shadows,
             ),
           ),
         ),

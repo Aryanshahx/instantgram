@@ -9,12 +9,14 @@ import '../models/music.dart';
 import '../models/post.dart';
 import '../services/clip_cache.dart';
 import '../services/music_player.dart';
+import 'reel_progress.dart';
 import 'reel_touch.dart';
 
 export 'reel_touch.dart' show ReelAudio;
 
 /// Our own video player UI on top of the native player (ExoPlayer):
-/// full-bleed video, tap to pause, loop, thin lime progress line, spinner.
+/// full-bleed video, tap to pause, loop, spinner. The lime progress line is drawn by the screen
+/// (see `ReelProgressBar`) from the position this widget reports.
 /// Streams from the bucket, which supports seeking (HTTP Range).
 class ReelVideo extends StatefulWidget {
   const ReelVideo({
@@ -22,7 +24,7 @@ class ReelVideo extends StatefulWidget {
     required this.post,
     required this.play,
     this.fit,
-    this.progressBottom = 0,
+    this.progress,
     this.onDoubleTap,
   });
 
@@ -34,8 +36,8 @@ class ReelVideo extends StatefulWidget {
   /// null = automatic (cover for portrait clips, contain for landscape).
   final BoxFit? fit;
 
-  /// Space under the progress line (to stay above the floating nav bar).
-  final double progressBottom;
+  /// Where this clip reports its position; the screen draws the progress line from it.
+  final ReelProgressHost? progress;
 
   /// Double tap (the clips screen uses it for "like"). A heart pops up under the finger.
   final VoidCallback? onDoubleTap;
@@ -54,6 +56,15 @@ class _ReelVideoState extends State<ReelVideo> {
   Duration _lastPos = Duration.zero;
   int _gen = 0; // bumped whenever a newer start replaces an older one
   DateTime? _playingSince;
+  VideoProgressSource? _source;
+
+  void _dropSource() {
+    final s = _source;
+    if (s == null) return;
+    _source = null;
+    widget.progress?.withdraw(s);
+    s.dispose();
+  }
 
   @override
   void initState() {
@@ -148,6 +159,7 @@ class _ReelVideoState extends State<ReelVideo> {
     }
     final old = _c;
     final oldMusic = _music;
+    _dropSource();
     _c = null;
     _music = null;
     await old?.dispose();
@@ -181,6 +193,9 @@ class _ReelVideoState extends State<ReelVideo> {
       });
       _applyVolume();
       _sync();
+      final src = VideoProgressSource(c, onScrubEnd: _sync);
+      _source = src;
+      widget.progress?.offer(src);
     } catch (_) {
       if (mounted && gen == _gen) setState(() => _failed = true);
     }
@@ -244,6 +259,7 @@ class _ReelVideoState extends State<ReelVideo> {
     ReelAudio.muted.removeListener(_applyVolume);
     ReelAudio.volume.removeListener(_applyVolume);
     _gen++;
+    _dropSource();
     _c?.removeListener(_onTick);
     _c?.dispose();
     _music?.dispose();
@@ -336,22 +352,6 @@ class _ReelVideoState extends State<ReelVideo> {
                     child: const Text('Retry'),
                   ),
                 ],
-              ),
-            ),
-          if (_ready && c != null)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: widget.progressBottom,
-              child: VideoProgressIndicator(
-                c,
-                allowScrubbing: true,
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                colors: VideoProgressColors(
-                  playedColor: AppTheme.volt,
-                  bufferedColor: Colors.white24,
-                  backgroundColor: Colors.white12,
-                ),
               ),
             ),
         ],

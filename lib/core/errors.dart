@@ -7,6 +7,14 @@ class UsernameTakenException implements Exception {
   String toString() => 'That username is already taken.';
 }
 
+/// A username could not be turned into an email (unknown name, nothing linked yet).
+class LoginLookupException implements Exception {
+  const LoginLookupException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
 class MediaException implements Exception {
   const MediaException(this.message);
   final String message;
@@ -16,7 +24,9 @@ class MediaException implements Exception {
 
 /// Turns any error into a short, user-friendly message.
 String friendlyError(Object e) {
-  if (e is UsernameTakenException || e is MediaException) {
+  if (e is UsernameTakenException ||
+      e is MediaException ||
+      e is LoginLookupException) {
     return e.toString();
   }
   if (e is DioException) {
@@ -56,7 +66,7 @@ String friendlyError(Object e) {
       case 'user-not-found':
       case 'wrong-password':
       case 'invalid-credential':
-        return 'Incorrect email or password.';
+        return 'Incorrect email/username or password.';
       case 'email-already-in-use':
         return 'An account already exists with that email.';
       case 'weak-password':

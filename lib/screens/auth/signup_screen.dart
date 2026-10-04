@@ -68,6 +68,8 @@ class _SignupScreenState extends State<SignupScreen> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      const BrandWordmark(size: 34),
+                      const SizedBox(height: 22),
                       const Text(
                         'Join the\nflow.',
                         style: TextStyle(
@@ -154,8 +156,6 @@ class _SignupScreenState extends State<SignupScreen> {
                               )
                             : const Text('Create account'),
                       ),
-                      const SizedBox(height: 18),
-                      const Center(child: BrandLogo(size: 20)),
                     ],
                   ),
                 ),

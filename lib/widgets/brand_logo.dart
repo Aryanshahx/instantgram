@@ -1,45 +1,38 @@
 import 'package:flutter/material.dart';
 
-import '../core/theme.dart';
-
-/// Bolt badge + lowercase wordmark.
-class BrandLogo extends StatelessWidget {
-  const BrandLogo({super.key, this.size = 28, this.showText = true});
+/// The app logo (the picture the app icon is made from).
+class AppLogo extends StatelessWidget {
+  const AppLogo({super.key, this.size = 96});
   final double size;
-  final bool showText;
 
   @override
-  Widget build(BuildContext context) {
-    final badge = size * 1.15;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: badge,
-          height: badge,
-          decoration: BoxDecoration(
-            gradient: AppTheme.voltGradient,
-            borderRadius: BorderRadius.circular(badge * 0.34),
-          ),
-          child: Icon(
-            Icons.bolt_rounded,
-            color: AppTheme.ink,
-            size: badge * 0.72,
-          ),
-        ),
-        if (showText) ...[
-          SizedBox(width: size * 0.3),
-          Text(
-            'instantgram',
-            style: TextStyle(
-              fontSize: size * 0.82,
-              fontWeight: FontWeight.w900,
-              letterSpacing: -1,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
+  Widget build(BuildContext context) => Image.asset(
+    'assets/logo/instantgram_logo.png',
+    width: size,
+    height: size,
+    filterQuality: FilterQuality.medium,
+    errorBuilder: (_, _, _) => SizedBox(width: size, height: size),
+  );
+}
+
+/// "InstantGram" as plain bold text (same look as the header of the feed).
+class BrandWordmark extends StatelessWidget {
+  const BrandWordmark({
+    super.key,
+    this.size = 26,
+    this.align = TextAlign.start,
+  });
+  final double size;
+  final TextAlign align;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    'InstantGram',
+    textAlign: align,
+    style: TextStyle(
+      fontSize: size,
+      fontWeight: FontWeight.w900,
+      letterSpacing: -size * 0.046,
+    ),
+  );
 }

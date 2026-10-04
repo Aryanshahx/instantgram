@@ -16,6 +16,10 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
       // changing your username releases the old name
       allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      // the owner links the email to the username (so the username can be used to log in)
+      allow update: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid;
     }
 
     match /users/{uid} {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_events.dart';
+import '../../services/auth_service.dart';
 import '../../services/chat_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/app_nav_bar.dart';
@@ -27,6 +28,8 @@ class _MainShellState extends State<MainShell> {
     super.initState();
     ChatService.instance
         .start(); // keeps the unread dot on the Chats tab up to date
+    AuthService.instance
+        .linkLoginEmail(); // lets the username be used to log in
   }
 
   @override
