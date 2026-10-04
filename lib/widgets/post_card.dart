@@ -3,6 +3,7 @@ import 'package:timeago/timeago.dart' as timeago;
 
 import '../core/errors.dart';
 import '../core/theme.dart';
+import '../core/share.dart';
 import '../core/ui.dart';
 import '../models/post.dart';
 import '../screens/post/comments_screen.dart';
@@ -14,6 +15,7 @@ import 'avatar.dart';
 import 'like_button.dart';
 import 'post_media.dart';
 import 'reel_actions.dart';
+import 'save_controller.dart';
 
 /// A post in Discover: author on top, the photo or clip in its real proportions (square
 /// corners, nothing drawn over it), then like and comment under it.
@@ -29,6 +31,7 @@ class PostCard extends StatefulWidget {
 
 class _PostCardState extends State<PostCard> {
   late final LikeController _like;
+  late final SaveController _save;
   late int _comments;
   bool _heart = false;
   bool _expanded = false;
@@ -40,12 +43,14 @@ class _PostCardState extends State<PostCard> {
   void initState() {
     super.initState();
     _like = LikeController(post.id, post.likeCount);
+    _save = SaveController(post.id);
     _comments = post.commentCount;
   }
 
   @override
   void dispose() {
     _like.dispose();
+    _save.dispose();
     super.dispose();
   }
 
@@ -76,6 +81,27 @@ class _PostCardState extends State<PostCard> {
     );
   }
 
+  Future<void> _toggleSave() async {
+    final err = await _save.toggle();
+    if (!mounted) return;
+    if (err != null) {
+      showToast(context, friendlyError(err));
+    } else {
+      showToast(
+        context,
+        _save.saved ? 'Saved to your profile' : 'Removed from saved',
+      );
+    }
+  }
+
+  Future<void> _share() async {
+    try {
+      await sharePost(post);
+    } catch (_) {
+      if (mounted) showToast(context, 'Could not open the share menu.');
+    }
+  }
+
   Future<void> _delete() async {
     final ok = await confirm(
       context,
@@ -96,7 +122,7 @@ class _PostCardState extends State<PostCard> {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
-    final maxMediaHeight = size.height * (size.width > 600 ? 0.72 : 0.86);
+    final maxMediaHeight = size.height * (size.width > 600 ? 0.72 : 0.92);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -225,6 +251,32 @@ class _PostCardState extends State<PostCard> {
               ),
             ),
           ),
+          const Spacer(),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _share,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              child: Icon(Icons.ios_share_rounded, size: 25),
+            ),
+          ),
+          ListenableBuilder(
+            listenable: _save,
+            builder: (context, _) => GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _toggleSave,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                child: Icon(
+                  _save.saved
+                      ? Icons.bookmark_rounded
+                      : Icons.bookmark_border_rounded,
+                  size: 27,
+                  color: _save.saved ? context.accentInk : null,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -268,15 +320,6 @@ class _PostCardState extends State<PostCard> {
               ),
             ),
           ],
-          const SizedBox(height: 6),
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _openComments,
-            child: Text(
-              'Add a comment...',
-              style: TextStyle(color: context.muted, fontSize: 14),
-            ),
-          ),
           const SizedBox(height: 6),
           Text(
             timeago.format(post.createdAt),

@@ -7,10 +7,18 @@ import 'reel_actions.dart';
 /// Thumbnail of a video post (a cheap image; no player is created in lists).
 /// Just the picture and a plain play icon: no duration, no button background.
 class VideoThumb extends StatelessWidget {
-  const VideoThumb({super.key, required this.post, this.playSize = 56});
+  const VideoThumb({
+    super.key,
+    required this.post,
+    this.playSize = 56,
+    this.fit = BoxFit.cover,
+  });
 
   final Post post;
   final double playSize;
+
+  /// cover fills the box; contain always shows the whole frame.
+  final BoxFit fit;
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +47,7 @@ class VideoThumb extends StatelessWidget {
         else
           CachedNetworkImage(
             imageUrl: post.thumbnailUrl,
-            fit: BoxFit.cover,
+            fit: fit,
             placeholder: (_, _) => placeholder,
             errorWidget: (_, _, _) => placeholder,
           ),

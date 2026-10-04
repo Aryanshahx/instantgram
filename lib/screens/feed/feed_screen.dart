@@ -9,7 +9,6 @@ import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
-import '../../widgets/brand_logo.dart';
 import '../../widgets/post_card.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/stories_bar.dart';
@@ -88,7 +87,14 @@ class _FeedHeader extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(20, 10, 20, 6),
           child: Row(
             children: [
-              const BrandLogo(size: 24),
+              const Text(
+                'InstantGram',
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -1.2,
+                ),
+              ),
               const Spacer(),
               StreamBuilder<AppUser?>(
                 stream: me,

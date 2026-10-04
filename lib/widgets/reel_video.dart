@@ -1,9 +1,12 @@
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../core/theme.dart';
 import '../models/post.dart';
+import '../services/clip_cache.dart';
 
 /// App-wide sound switch for clips.
 class ReelAudio {
@@ -43,15 +46,76 @@ class _ReelVideoState extends State<ReelVideo> {
   bool _failed = false;
   bool _userPaused = false;
   bool _flash = false;
+  int _gen = 0; // bumped whenever a newer start replaces an older one
+  DateTime? _playingSince;
 
   @override
   void initState() {
     super.initState();
+    if (widget.play) _playingSince = DateTime.now();
     ReelAudio.muted.addListener(_applyVolume);
     _init(first: true);
   }
 
+  /// The downloaded copy of this clip, if there is (or soon will be) one.
+  ///  * Already on the phone: use it.
+  ///  * Being downloaded in the background: wait for it. A clip that is only being preloaded
+  ///    waits as long as it takes; once it is on screen it waits at most 2.5 s, then the
+  ///    download is stopped and the clip streams directly with the full connection.
+  ///  * Nothing coming and on screen now: stream it.
+  Future<File?> _localCopy(int gen) async {
+    final url = widget.post.videoUrl;
+    final cache = ClipCache.instance;
+    final have = cache.cached(url);
+    if (have != null) return have;
+    var pending = cache.inFlight(url);
+    if (pending == null) {
+      if (widget.play) return null;
+      pending = cache.prefetch(url);
+    }
+    while (true) {
+      if (!mounted || gen != _gen) return null;
+      var finished = false;
+      pending.whenComplete(() => finished = true);
+      await Future.any<void>([
+        pending,
+        Future<void>.delayed(const Duration(milliseconds: 150)),
+      ]);
+      if (!mounted || gen != _gen) return null;
+      final f = cache.cached(url);
+      if (f != null) return f;
+      if (finished) return null;
+      if (widget.play) {
+        final since = _playingSince ?? DateTime.now();
+        if (DateTime.now().difference(since) >
+            const Duration(milliseconds: 2500)) {
+          cache.cancel(url);
+          return null;
+        }
+      }
+    }
+  }
+
+  Future<VideoPlayerController> _open(File? local) async {
+    if (local != null) {
+      final c = VideoPlayerController.file(local);
+      try {
+        await c.initialize();
+        return c;
+      } catch (_) {
+        await c.dispose();
+        try {
+          await local.delete(); // damaged copy: download it again next time
+        } catch (_) {}
+      }
+    }
+    final c = VideoPlayerController.networkUrl(Uri.parse(widget.post.videoUrl));
+    await c.initialize();
+    return c;
+  }
+
   Future<void> _init({bool first = false}) async {
+    final gen = ++_gen;
     if (!first) {
       setState(() {
         _failed = false;
@@ -59,18 +123,29 @@ class _ReelVideoState extends State<ReelVideo> {
       });
     }
     final old = _c;
-    final c = VideoPlayerController.networkUrl(Uri.parse(widget.post.videoUrl));
-    _c = c;
+    _c = null;
     await old?.dispose();
     try {
-      await c.initialize();
-      if (!mounted || _c != c) return;
+      final local = await _localCopy(gen);
+      if (!mounted || gen != _gen) return;
+      final c = await _open(local);
+      if (!mounted || gen != _gen) {
+        await c.dispose();
+        return;
+      }
       await c.setLooping(true);
       await c.setVolume(ReelAudio.muted.value ? 0 : 1);
-      setState(() => _ready = true);
+      if (!mounted || gen != _gen) {
+        await c.dispose();
+        return;
+      }
+      setState(() {
+        _c = c;
+        _ready = true;
+      });
       _sync();
     } catch (_) {
-      if (mounted && _c == c) setState(() => _failed = true);
+      if (mounted && gen == _gen) setState(() => _failed = true);
     }
   }
 
@@ -98,6 +173,7 @@ class _ReelVideoState extends State<ReelVideo> {
     if (old.play != widget.play) {
       if (widget.play) {
         _userPaused = false;
+        _playingSince = DateTime.now();
         _c?.seekTo(Duration.zero);
       }
       _sync();
@@ -107,6 +183,7 @@ class _ReelVideoState extends State<ReelVideo> {
   @override
   void dispose() {
     ReelAudio.muted.removeListener(_applyVolume);
+    _gen++;
     _c?.dispose();
     super.dispose();
   }
@@ -154,25 +231,16 @@ class _ReelVideoState extends State<ReelVideo> {
                 ),
               ),
             ),
-          if (c != null && !_failed)
-            ValueListenableBuilder<VideoPlayerValue>(
-              valueListenable: c,
-              builder: (_, v, _) {
-                final busy = !_ready || v.isBuffering;
-                return busy
-                    ? const Center(
-                        child: SizedBox(
-                          width: 34,
-                          height: 34,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 3,
-                            color: AppTheme.volt,
-                          ),
-                        ),
-                      )
-                    : const SizedBox.shrink();
-              },
-            ),
+          if (!_failed)
+            if (c == null)
+              const _Spinner()
+            else
+              ValueListenableBuilder<VideoPlayerValue>(
+                valueListenable: c,
+                builder: (_, v, _) => (!_ready || v.isBuffering)
+                    ? const _Spinner()
+                    : const SizedBox.shrink(),
+              ),
           Center(
             child: AnimatedOpacity(
               opacity: (_flash || (_userPaused && _ready)) ? 1 : 0,
@@ -227,4 +295,17 @@ class _ReelVideoState extends State<ReelVideo> {
       ),
     );
   }
+}
+
+class _Spinner extends StatelessWidget {
+  const _Spinner();
+
+  @override
+  Widget build(BuildContext context) => const Center(
+    child: SizedBox(
+      width: 34,
+      height: 34,
+      child: CircularProgressIndicator(strokeWidth: 3, color: AppTheme.volt),
+    ),
+  );
 }

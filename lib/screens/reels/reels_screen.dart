@@ -7,6 +7,7 @@ import '../../core/share.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/post.dart';
+import '../../services/clip_cache.dart';
 import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
 import '../../widgets/avatar.dart';
@@ -67,11 +68,38 @@ class _ReelsScreenState extends State<ReelsScreen> {
   final PageController _pages = PageController();
   int _page = 0;
   bool _started = false;
+  bool _wanting = false;
 
   @override
   void initState() {
     super.initState();
     AppEvents.feedRefresh.addListener(_refresh);
+    _pager.addListener(_preload);
+  }
+
+  @override
+  void didUpdateWidget(ReelsScreen old) {
+    super.didUpdateWidget(old);
+    if (old.active != widget.active) _preload();
+  }
+
+  /// Background preloading: while a clip plays, the next three are downloaded to the phone
+  /// (several connections at once). When the user scrolls to them they start instantly.
+  void _preload() {
+    if (!_started || !widget.active) {
+      if (_wanting) {
+        _wanting = false;
+        ClipCache.instance.want(const []);
+      }
+      return;
+    }
+    final posts = _pager.posts;
+    final urls = <String>[
+      for (var i = _page + 1; i <= _page + 3 && i < posts.length; i++)
+        if (posts[i].isVideo) posts[i].videoUrl,
+    ];
+    _wanting = true;
+    ClipCache.instance.want(urls);
   }
 
   void _refresh() {
@@ -81,6 +109,8 @@ class _ReelsScreenState extends State<ReelsScreen> {
   @override
   void dispose() {
     AppEvents.feedRefresh.removeListener(_refresh);
+    _pager.removeListener(_preload);
+    if (_wanting) ClipCache.instance.want(const []);
     _pager.dispose();
     _pages.dispose();
     super.dispose();
@@ -151,6 +181,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
                     itemCount: _pager.posts.length,
                     onPageChanged: (i) {
                       setState(() => _page = i);
+                      _preload();
                       if (i >= _pager.posts.length - 3) _pager.loadMore();
                     },
                     itemBuilder: (context, i) {

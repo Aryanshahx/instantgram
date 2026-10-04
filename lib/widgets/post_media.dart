@@ -36,6 +36,7 @@ class PostMedia extends StatefulWidget {
 class _PostMediaState extends State<PostMedia> {
   double? _aspect;
   ImageProvider? _provider;
+  bool _probed = false;
   ImageStream? _stream;
   ImageStreamListener? _listener;
 
@@ -45,7 +46,10 @@ class _PostMediaState extends State<PostMedia> {
   void initState() {
     super.initState();
     if (post.isVideo) {
-      _aspect = post.videoAspect > 0 ? post.videoAspect : 9 / 16;
+      // the thumbnail is the real first frame, so its proportions win once they are known
+      _aspect =
+          PostMedia._seen[post.thumbnailUrl] ??
+          (post.videoAspect > 0 ? post.videoAspect : 9 / 16);
     } else {
       _aspect = post.imageAspect > 0
           ? post.imageAspect
@@ -56,16 +60,25 @@ class _PostMediaState extends State<PostMedia> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (post.isVideo || _provider != null) return;
-    final mq = MediaQuery.of(context);
-    final w = (mq.size.width * mq.devicePixelRatio).clamp(480, 1600).round();
-    _provider = CachedNetworkImageProvider(post.imageUrl, maxWidth: w);
-    if (_aspect == null) {
-      final stream = _provider!.resolve(ImageConfiguration.empty);
+    if (_provider != null || _probed) return;
+    final String url;
+    if (post.isVideo) {
+      url = post.thumbnailUrl;
+      if (url.isEmpty || PostMedia._seen[url] != null) return;
+      _probed = true;
+    } else {
+      final mq = MediaQuery.of(context);
+      final w = (mq.size.width * mq.devicePixelRatio).clamp(480, 1600).round();
+      _provider = CachedNetworkImageProvider(post.imageUrl, maxWidth: w);
+      url = post.imageUrl;
+    }
+    if (post.isVideo || _aspect == null) {
+      final probe = _provider ?? CachedNetworkImageProvider(url);
+      final stream = probe.resolve(ImageConfiguration.empty);
       late final ImageStreamListener l;
       l = ImageStreamListener((info, _) {
         final a = info.image.width / info.image.height;
-        PostMedia._seen[post.imageUrl] = a;
+        PostMedia._seen[url] = a;
         stream.removeListener(l);
         if (mounted) setState(() => _aspect = a);
       }, onError: (_, _) => stream.removeListener(l));
@@ -83,7 +96,17 @@ class _PostMediaState extends State<PostMedia> {
   }
 
   Widget _content(BuildContext context) {
-    if (post.isVideo) return VideoThumb(post: post, playSize: widget.playSize);
+    if (post.isVideo) {
+      // the whole frame, never cropped
+      return ColoredBox(
+        color: Colors.black,
+        child: VideoThumb(
+          post: post,
+          playSize: widget.playSize,
+          fit: BoxFit.contain,
+        ),
+      );
+    }
     final p = _provider;
     if (p == null) return ColoredBox(color: context.cardHigh);
     return Image(
