@@ -8,11 +8,14 @@
 //   POST /api/sign     {kind:"image"|"video", ext:"jpg", thumb:true}  -> upload links
 //   POST /api/confirm  {key}                                          -> checks size + file type
 //   POST /api/delete   {keys:[...]}                                   -> removes your own files
+//   POST /api/music    {op:"search", term, offset, limit}             -> Epidemic Sound tracks
+//   POST /api/music    {op:"url", id}                                 -> short-lived mp3 link
 //   GET  /api/health
 //
 // Settings (Vercel environment variables):
 //   FIREBASE_PROJECT_ID, TIGRIS_BUCKET, TIGRIS_ACCESS_KEY_ID, TIGRIS_SECRET_ACCESS_KEY
 //   (optional) TIGRIS_ENDPOINT, default t3.storage.dev
+//   (optional, for music) EPIDEMIC_API_KEY  - the Epidemic Sound key stays here, never in the app
 
 const MB = 1024 * 1024;
 export const LIMITS = { image: 30 * MB, video: 300 * MB, thumb: 2 * MB };
@@ -278,12 +281,69 @@ async function handleDelete(request, env, uid, store) {
   return json({ ok: true, deleted: mine.length });
 }
 
-const ROUTES = { sign: handleSign, confirm: handleConfirm, delete: handleDelete };
+// ------------------------------------------------------- Epidemic Sound (music)
+const EPIDEMIC_BASE = "https://partner-content-api.epidemicsound.com";
+
+async function epidemic(env, uid, path) {
+  return fetch(EPIDEMIC_BASE + path, {
+    headers: {
+      authorization: `Bearer ${env.EPIDEMIC_API_KEY}`,
+      "x-partner-user-id": uid,
+      accept: "application/json",
+    },
+  });
+}
+
+/** Keeps only what the app shows. */
+export function slimTrack(t) {
+  const artists = [...(t.mainArtists || []), ...(t.featuredArtists || [])].filter(Boolean);
+  const img = t.images || {};
+  return {
+    id: String(t.id),
+    title: String(t.title || ""),
+    artist: artists.slice(0, 2).join(", "),
+    seconds: Number(t.length) || 0,
+    bpm: Number(t.bpm) || 0,
+    cover: img.XS || img.S || img.default || "",
+    vocals: t.hasVocals === true,
+  };
+}
+
+async function handleMusic(request, env, uid) {
+  if (!env.EPIDEMIC_API_KEY) return fail(503, "Music search is not set up yet (EPIDEMIC_API_KEY is missing).");
+  const body = await readJson(request);
+  if (body.op === "search") {
+    const term = String(body.term || "").slice(0, 80);
+    const limit = Math.min(Math.max(parseInt(body.limit, 10) || 30, 1), 60);
+    const offset = Math.max(parseInt(body.offset, 10) || 0, 0);
+    const q = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (term.trim()) q.set("term", term.trim());
+    const res = await epidemic(env, uid, `/v0/tracks/search?${q}`);
+    if (res.status === 401 || res.status === 403) return fail(502, "Epidemic Sound refused the key. Check EPIDEMIC_API_KEY and your partner access.");
+    if (!res.ok) return fail(502, `Epidemic Sound answered ${res.status}.`);
+    const data = await res.json();
+    const tracks = (data.tracks || []).map(slimTrack);
+    return json({ tracks, hasMore: Boolean(data.links && data.links.next) });
+  }
+  if (body.op === "url") {
+    const id = String(body.id || "");
+    if (!/^[A-Za-z0-9_-]{4,64}$/.test(id)) return fail(400, "Bad track id.");
+    const res = await epidemic(env, uid, `/v0/tracks/${encodeURIComponent(id)}/download?format=mp3&quality=normal`);
+    if (res.status === 401 || res.status === 403) return fail(502, "Epidemic Sound refused this download (check your partner access).");
+    if (!res.ok) return fail(502, `Epidemic Sound answered ${res.status}.`);
+    const data = await res.json();
+    if (!data.url) return fail(502, "Epidemic Sound sent no link.");
+    return json({ url: data.url, expires: data.expires || null });
+  }
+  return fail(400, "Unknown music request.");
+}
+
+const ROUTES = { sign: handleSign, confirm: handleConfirm, delete: handleDelete, music: handleMusic };
 
 /** One entry point for every function in api/. `store` is only replaced in tests. */
 export async function handle(request, env, route, store = null) {
   if (route === "health") {
-    return request.method === "GET" ? json({ ok: true, ready: configured(env) }) : fail(404, "Not found");
+    return request.method === "GET" ? json({ ok: true, ready: configured(env), music: Boolean(env.EPIDEMIC_API_KEY) }) : fail(404, "Not found");
   }
   const fn = ROUTES[route];
   if (!fn || request.method !== "POST") return fail(404, "Not found");
@@ -293,7 +353,7 @@ export async function handle(request, env, route, store = null) {
   } catch (e) {
     return fail(401, "Please log in again.");
   }
-  if (!store && !configured(env)) return fail(500, "The media service is not fully set up (missing settings).");
+  if (route !== "music" && !store && !configured(env)) return fail(500, "The media service is not fully set up (missing settings).");
   try {
     return await fn(request, env, uid, store || s3Store(env));
   } catch (e) {

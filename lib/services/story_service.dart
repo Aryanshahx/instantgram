@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../core/media_url.dart';
 import '../models/story.dart';
+import 'mp4_faststart.dart';
 import 'media_server.dart';
 import 'user_service.dart';
 
@@ -69,6 +70,8 @@ class StoryService {
     int duration = 0,
     List<StoryOverlay> overlays = const [],
     String musicId = '',
+    String musicTitle = '',
+    String musicArtist = '',
     double musicVolume = 0.8,
     bool keepSound = true,
     void Function(double progress)? onProgress,
@@ -91,15 +94,25 @@ class StoryService {
         'overlays': [for (final o in overlays.take(20)) o.toMap()],
       if (musicId.isNotEmpty) ...{
         'musicId': musicId,
+        if (musicTitle.isNotEmpty) 'musicTitle': musicTitle,
+        if (musicArtist.isNotEmpty) 'musicArtist': musicArtist,
         'musicVolume': musicVolume,
       },
     };
     if (video != null) {
-      final up = await MediaServer.instance.uploadVideo(
-        file: video,
-        thumb: thumb,
-        onProgress: onProgress,
-      );
+      // the video's index goes to the front so the moment starts playing at once
+      // (nothing is re-encoded)
+      final fast = await Mp4FastStart.run(video);
+      final UploadedMedia up;
+      try {
+        up = await MediaServer.instance.uploadVideo(
+          file: fast,
+          thumb: thumb,
+          onProgress: onProgress,
+        );
+      } finally {
+        if (fast.path != video.path) fast.delete().ignore();
+      }
       data['videoUrl'] = up.ref;
       data['thumbnailUrl'] = up.thumbRef;
       data['imageUrl'] = '';

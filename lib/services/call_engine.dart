@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -40,6 +41,50 @@ abstract class CallEngine {
 
   /// Leaves the room and frees the microphone and camera. Safe to call twice.
   Future<void> leave();
+}
+
+/// What went wrong when a call could not start, in words the person (or you) can act on.
+/// Shows the real cause instead of a general "check your connection".
+String callFailureMessage(Object e) {
+  if (e is FirebaseException) {
+    switch (e.code) {
+      case 'permission-denied':
+        return 'Calls are blocked by your Firestore rules. Open Firebase Console > '
+            'Firestore Database > Rules, paste the file firebase/firestore.rules from '
+            'the project and press Publish. Then try again.';
+      case 'unavailable':
+      case 'deadline-exceeded':
+        return 'Could not reach the server. Check your internet connection and try again.';
+      case 'unauthenticated':
+        return 'Please log out and log in again, then try the call.';
+      case 'failed-precondition':
+        return 'Firestore needs an index for calls (${e.message ?? e.code}).';
+    }
+    return 'Firestore refused the call (${e.code}).';
+  }
+  if (e is AgoraRtcException) {
+    switch (e.code) {
+      case -101:
+        return 'The Agora App ID is not valid. Run: bash tools/set_agora_id.sh YOUR_REAL_APP_ID';
+      case -102:
+        return 'Agora refused the room name.';
+      case -109:
+      case -110:
+      case -17:
+        return 'Agora wants a token: in console.agora.io open your project and use '
+            '"Testing mode: APP ID" (no certificate), then run bash tools/set_agora_id.sh again.';
+      case -3:
+      case -7:
+        return 'The calling engine did not start (code ${e.code}). Close the app fully and try again.';
+    }
+    return 'The calling engine stopped (code ${e.code}${(e.message ?? '').isEmpty ? '' : ': ${e.message}'}).';
+  }
+  final text = e.toString().replaceFirst(
+    RegExp(r'^[A-Za-z]*Exception:? ?'),
+    '',
+  );
+  final short = text.length > 140 ? '${text.substring(0, 140)}...' : text;
+  return 'Could not start the call: $short';
 }
 
 /// Things the call screens need from the phone. Tests replace them.

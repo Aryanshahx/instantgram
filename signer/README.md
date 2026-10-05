@@ -45,4 +45,15 @@ payment method on the Tigris account (verification only).
   `bash tools/set_media_url.sh <signer-url> <your-domain>`.
 * Tests: `cd signer && npm test` (needs Node 18+).
 * Settings (Vercel -> Settings -> Environment Variables): FIREBASE_PROJECT_ID, TIGRIS_BUCKET,
-  TIGRIS_ACCESS_KEY_ID, TIGRIS_SECRET_ACCESS_KEY. After changing one, Redeploy.
+  TIGRIS_ACCESS_KEY_ID, TIGRIS_SECRET_ACCESS_KEY, EPIDEMIC_API_KEY (music). After changing one,
+  Redeploy.
+
+## Music from Epidemic Sound
+
+`POST /api/music` searches Epidemic Sound and returns a playable address for a track. The API key
+stays here, in the Vercel environment variable `EPIDEMIC_API_KEY`, and is never in the app or in
+git. Only logged-in users can use it. Without the key the app still has its built-in music.
+
+1. Vercel -> your project -> Settings -> Environment Variables -> add `EPIDEMIC_API_KEY`.
+2. Deployments -> the latest one -> Redeploy.
+3. Check in the app: Create > Music > Epidemic Sound, and search for a word like "calm".

@@ -138,16 +138,15 @@ class _CallScreenState extends State<CallScreen> {
     } catch (e) {
       if (!mounted) return;
       _failed = true;
-      _problem =
-          'Could not start the call. Check your connection and try again.';
+      _problem = callFailureMessage(e);
       setState(() => _status = 'Call failed');
       if (_call != null) await _service.setStatus(_call!.id, CallStatus.ended);
-      _closeLater();
+      _closeLater(long: true);
     }
   }
 
-  void _closeLater() {
-    Future<void>.delayed(const Duration(seconds: 2), () {
+  void _closeLater({bool long = false}) {
+    Future<void>.delayed(Duration(seconds: long ? 9 : 2), () {
       if (mounted && !_finishing) _finish(CallStatus.ended, fromRemote: true);
     });
   }

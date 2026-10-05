@@ -170,59 +170,84 @@ void main() {
       await t.pump(const Duration(milliseconds: 300));
     }
 
-    testWidgets('Post: the audio bar is under the preview', (t) async {
-      await open(t);
-      expect(find.byKey(const ValueKey('audioBar')), findsOneWidget);
-      expect(find.text('Add audio'), findsOneWidget);
-      await t.tap(find.byKey(const ValueKey('audioBar')));
-      await t.pump(const Duration(milliseconds: 400));
-      expect(find.text('No audio yet'), findsOneWidget);
-      expect(find.text('Choose'), findsOneWidget);
-      expect(find.text('Length'), findsNothing); // only for photo clips
-      expect(t.takeException(), isNull);
-    });
+    testWidgets(
+      'Post: the music button is under the preview, no volume slider',
+      (t) async {
+        await open(t);
+        expect(find.byKey(const ValueKey('audioBar')), findsOneWidget);
+        expect(find.byKey(const ValueKey('editButton')), findsOneWidget);
+        expect(find.text('Music'), findsOneWidget);
+        await t.tap(find.byKey(const ValueKey('audioBar')));
+        await t.pump(const Duration(milliseconds: 500));
+        expect(find.byType(Slider), findsNothing); // no custom volume range
+        expect(find.text('Length'), findsNothing); // photo clips are always 5 s
+        expect(t.takeException(), isNull);
+      },
+    );
 
-    testWidgets('Clips: any photo works, audio is needed, length shown', (
+    testWidgets('Clips: a photo needs music first, no length choice', (
       t,
     ) async {
       await open(t);
-      await t.tap(find.text('Clips'));
+      await t.tap(find.byKey(const ValueKey('mode1')));
       await t.pump(const Duration(milliseconds: 300));
-      // the photo picked in Post became a photo clip; no Video / Photo switch
-      expect(find.text('Photo + music'), findsNothing);
-      expect(find.text('Add audio to make this a clip'), findsOneWidget);
-      await t.tap(find.text('Next'));
-      await t.pump(const Duration(milliseconds: 400));
+      expect(find.text('Add music (needed)'), findsOneWidget);
+      expect(find.byType(Slider), findsNothing);
+      await t.tap(find.byKey(const ValueKey('nextButton')));
+      await t.pump(const Duration(milliseconds: 600));
+      // the toast tells why, and the music picker opens instead of the details
       expect(
-        find.text('Add audio to make a clip from a photo.'),
+        find.text('Add music to make a clip from a photo.'),
         findsOneWidget,
       );
-      expect(find.text('Audio'), findsOneWidget);
-      expect(find.text('Length'), findsOneWidget);
-      expect(find.text('10s'), findsOneWidget);
+      expect(find.byKey(const ValueKey('captionField')), findsNothing);
+      expect(find.text('Length'), findsNothing);
       expect(t.takeException(), isNull);
     });
 
-    testWidgets('Publish stays off until there is a title', (t) async {
+    testWidgets('Share stays off until there is a caption', (t) async {
       await open(t);
-      await t.tap(find.text('Next'));
-      await t.pump(const Duration(milliseconds: 300));
-      FilledButton publish() => t.widget<FilledButton>(
-        find
-            .ancestor(
-              of: find.text('Publish'),
-              matching: find.bySubtype<FilledButton>(),
-            )
-            .first,
+      await t.tap(find.byKey(const ValueKey('nextButton')));
+      await t.pump(const Duration(milliseconds: 400));
+      FilledButton share() =>
+          t.widget<FilledButton>(find.byKey(const ValueKey('shareButton')));
+      expect(find.text('A caption is required'), findsOneWidget);
+      expect(share().onPressed, isNull);
+      await t.enterText(find.byKey(const ValueKey('captionField')), '   ');
+      await t.pump();
+      expect(share().onPressed, isNull);
+      await t.enterText(find.byKey(const ValueKey('captionField')), 'Sunset');
+      await t.pump();
+      expect(share().onPressed, isNotNull);
+      expect(t.takeException(), isNull);
+    });
+
+    testWidgets('carousel: several photos, counter, remove one', (t) async {
+      t.view.physicalSize = const Size(1080, 2000);
+      t.view.devicePixelRatio = 2.5;
+      addTearDown(t.view.reset);
+      await t.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark,
+          home: CreatePostScreen(debugImages: [photo, photo, photo]),
+        ),
       );
-      expect(find.text('Title'), findsOneWidget);
-      expect(publish().onPressed, isNull);
-      await t.enterText(find.byType(TextField), '   ');
-      await t.pump();
-      expect(publish().onPressed, isNull);
-      await t.enterText(find.byType(TextField), 'Sunset');
-      await t.pump();
-      expect(publish().onPressed, isNotNull);
+      await t.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const ValueKey('mediaStrip')), findsOneWidget);
+      expect(find.byKey(const ValueKey('tile2')), findsOneWidget);
+      expect(find.text('1/3'), findsOneWidget);
+      await t.tap(find.byKey(const ValueKey('tile1')));
+      await t.pump(const Duration(milliseconds: 300));
+      expect(find.text('2/3'), findsOneWidget);
+      await t.tap(find.byKey(const ValueKey('remove1')));
+      await t.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const ValueKey('tile2')), findsNothing);
+      expect(find.text('2/2'), findsOneWidget); // the next photo moved up
+      await t.tap(find.byKey(const ValueKey('remove0')));
+      await t.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const ValueKey('tile1')), findsNothing);
+      expect(find.byKey(const ValueKey('tile0')), findsOneWidget);
+      expect(find.text('1/1'), findsNothing); // no counter for one photo
       expect(t.takeException(), isNull);
     });
   });

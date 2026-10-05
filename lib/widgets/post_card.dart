@@ -158,16 +158,8 @@ class _PostCardState extends State<PostCard> {
                 PostMedia(
                   post: post,
                   maxHeight: maxMediaHeight,
-                  inline: widget.inline,
+                  inline: widget.inline || post.isCarousel,
                 ),
-                // photos: a small button to hear the music (the name is under the username);
-                // nothing is drawn over a video
-                if (post.hasMusic && !post.isVideo)
-                  Positioned(
-                    left: 10,
-                    bottom: 10,
-                    child: MusicToggleChip(post: post, showName: false),
-                  ),
                 Positioned.fill(
                   child: IgnorePointer(
                     child: Center(

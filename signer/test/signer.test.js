@@ -167,7 +167,7 @@ test("delete: only your own files", async () => {
 test("health and unknown routes", async () => {
   const health = await call("/health", null, null, baseEnv(), "GET");
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { ok: true, ready: true });
+  assert.deepEqual(await health.json(), { ok: true, ready: true, music: false });
   const half = baseEnv(); delete half.TIGRIS_BUCKET;
   assert.equal((await (await call("/health", null, null, half, "GET")).json()).ready, false);
   assert.equal((await call("/nope", {}, await token())).status, 404);
@@ -227,6 +227,45 @@ test("s3Store talks to a signed S3 API: head / ranged get / delete, and sign lin
     const del = await handle(new Request("https://x/api/delete", { method: "POST", headers: { authorization: "Bearer " + t }, body: JSON.stringify({ keys: [sign.key] }) }), env, "delete");
     assert.equal(del.status, 200); assert.ok(!objects.has(sign.key));
     assert.ok(seen.includes("HEAD") && seen.includes("GET") && seen.includes("DELETE"));
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
+});
+
+test("music: search and download link come from Epidemic Sound, the key never leaves the server", async () => {
+  const prevFetch = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes("securetoken@system.gserviceaccount.com")) return new Response(JSON.stringify({ keys: [jwk] }), { status: 200 });
+    if (u.startsWith("https://partner-content-api.epidemicsound.com")) {
+      seen.push({ u, auth: init.headers.authorization, user: init.headers["x-partner-user-id"] });
+      if (u.includes("/tracks/search")) {
+        return new Response(JSON.stringify({
+          tracks: [{ id: "abc123", title: "Sunrise", mainArtists: ["Ann"], featuredArtists: ["Bo"], length: 143, bpm: 90, images: { XS: "https://cdn/x.jpg" }, hasVocals: false, secret: "x" }],
+          links: { next: "/v0/tracks/search?offset=30" },
+        }), { status: 200 });
+      }
+      if (u.includes("/download")) return new Response(JSON.stringify({ url: "https://cdn/abc.mp3", expires: "soon" }), { status: 200 });
+      return new Response("{}", { status: 404 });
+    }
+    return prevFetch(url, init);
+  };
+  try {
+    const t = await token();
+    const env = { ...baseEnv(), EPIDEMIC_API_KEY: "ES_KEY" };
+    const found = await (await call("/music", { op: "search", term: "sunrise" }, t, env)).json();
+    assert.deepEqual(found.tracks, [{ id: "abc123", title: "Sunrise", artist: "Ann, Bo", seconds: 143, bpm: 90, cover: "https://cdn/x.jpg", vocals: false }]);
+    assert.equal(found.hasMore, true);
+    assert.equal(seen[0].auth, "Bearer ES_KEY");
+    assert.equal(seen[0].user, "user1abc");
+    assert.ok(seen[0].u.includes("term=sunrise"));
+    const link = await (await call("/music", { op: "url", id: "abc123" }, t, env)).json();
+    assert.equal(link.url, "https://cdn/abc.mp3");
+    // bad id, no login, no key
+    assert.equal((await call("/music", { op: "url", id: "../x" }, t, env)).status, 400);
+    assert.equal((await call("/music", { op: "search" }, null, env)).status, 401);
+    assert.equal((await call("/music", { op: "search" }, t, baseEnv())).status, 503);
   } finally {
     globalThis.fetch = prevFetch;
   }

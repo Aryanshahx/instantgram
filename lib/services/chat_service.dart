@@ -73,6 +73,13 @@ class ChatService {
     final me = _me;
     final id = chatIdFor(me, otherUid);
     final ref = _chats.doc(id);
+    // A chat that was opened before is in the phone's cache: no waiting for the server.
+    try {
+      final cached = await ref.get(const GetOptions(source: Source.cache));
+      if (cached.exists) return id;
+    } catch (_) {
+      // not cached yet: ask the server
+    }
     final snap = await ref.get();
     if (!snap.exists) {
       await ref.set({
@@ -109,7 +116,7 @@ class ChatService {
   }
 
   /// A photo already uploaded to our storage.
-  Future<void> sendImage(
+  Future<String> sendImage(
     String otherUid, {
     required String mediaRef,
     required int width,
@@ -255,7 +262,9 @@ class ChatService {
     }
   }
 
-  Future<void> _write(
+  /// Returns the id of the new message. The returned future completes when the server has
+  /// the message; the message itself is already visible in the chat before that.
+  Future<String> _write(
     String otherUid,
     Map<String, dynamic> fields,
     String preview, {
@@ -266,7 +275,8 @@ class ChatService {
     if (ensureChat) await open(otherUid);
     final ref = _chats.doc(chatIdFor(me, otherUid));
     final batch = _db.batch();
-    batch.set(ref.collection('messages').doc(), {
+    final msg = ref.collection('messages').doc();
+    batch.set(msg, {
       ...fields,
       'senderId': me,
       'createdAt': FieldValue.serverTimestamp(),
@@ -279,7 +289,14 @@ class ChatService {
       'seen.$me': FieldValue.serverTimestamp(),
     });
     await batch.commit();
+    return msg.id;
   }
+
+  /// Wipes a message of mine that should not exist (its photo was rejected).
+  Future<void> discardMine(String otherUid, String messageId) => _msg(
+    chatIdFor(_me, otherUid),
+    messageId,
+  ).update({'deleted': true, 'text': '', 'mediaUrl': ''});
 
   DocumentReference<Map<String, dynamic>> _msg(String chatId, String id) =>
       _chats.doc(chatId).collection('messages').doc(id);

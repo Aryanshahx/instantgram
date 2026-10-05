@@ -68,13 +68,13 @@ class _Tile extends StatelessWidget {
             inline: inline && post.isVideo,
             showSound: false,
           ),
-          if (post.hasMusic)
+          if (post.isCarousel)
             const Positioned(
               right: 8,
               top: 8,
               child: IgnorePointer(
                 child: Icon(
-                  Icons.music_note_rounded,
+                  Icons.collections_rounded,
                   size: 18,
                   color: Colors.white,
                   shadows: kReelShadow,

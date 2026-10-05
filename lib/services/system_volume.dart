@@ -40,14 +40,24 @@ class SystemVolume {
   /// 0..1, null until it is known.
   final ValueNotifier<double?> level = ValueNotifier<double?>(null);
   VoidCallback? _stop;
-  bool _writing = false;
+
+  /// When this app last changed the volume. The phone reports every change back a moment
+  /// later (often out of order while sliding fast); those echoes must not move the level.
+  DateTime _lastWrite = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _inFlight = false;
+  double? _pending;
+
+  /// Time during which reports from the phone are treated as echoes of our own writes.
+  static const Duration echoWindow = Duration(milliseconds: 900);
 
   /// Reads the current volume and follows changes made with the buttons.
   Future<void> start() async {
     if (_stop != null) return;
     try {
       _stop = backend.listen((v) {
-        if (!_writing) level.value = v.clamp(0.0, 1.0);
+        if (DateTime.now().difference(_lastWrite) > echoWindow) {
+          level.value = v.clamp(0.0, 1.0);
+        }
       });
       level.value = (await backend.get()).clamp(0.0, 1.0);
     } catch (_) {
@@ -60,19 +70,33 @@ class SystemVolume {
     _stop = null;
   }
 
+  /// Sets the volume. While a write is still running only the newest value is kept, so a
+  /// fast slide sends a few writes (always ending on the last one) instead of a flood.
   Future<void> set(double v) async {
     final x = v.clamp(0.0, 1.0);
     level.value = x;
-    _writing = true;
+    _lastWrite = DateTime.now();
+    if (_inFlight) {
+      _pending = x;
+      return;
+    }
+    _inFlight = true;
+    var next = x;
     try {
-      await backend.set(x);
-    } catch (_) {
-      // see above
+      while (true) {
+        try {
+          await backend.set(next);
+        } catch (_) {
+          // see above
+        }
+        _lastWrite = DateTime.now();
+        final p = _pending;
+        _pending = null;
+        if (p == null || (p - next).abs() < 0.001) break;
+        next = p;
+      }
     } finally {
-      Future<void>.delayed(
-        const Duration(milliseconds: 250),
-        () => _writing = false,
-      );
+      _inFlight = false;
     }
   }
 }

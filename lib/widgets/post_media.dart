@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../core/theme.dart';
 import '../models/post.dart';
 import 'inline_video.dart';
+import 'post_carousel.dart';
 import 'video_thumb.dart';
 
 /// Photos and clips in their real proportions (no fixed crop). Square corners.
@@ -64,12 +65,17 @@ class _PostMediaState extends State<PostMedia> {
           ? post.imageAspect
           : PostMedia._seen[post.imageUrl];
     }
+    if (post.isCarousel) {
+      // the first picture or video decides the proportions of the whole post
+      final a = post.items.first.aspect;
+      if (a > 0) _aspect = a;
+    }
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_provider != null || _probed) return;
+    if (_provider != null || _probed || post.isCarousel) return;
     final String url;
     if (post.isVideo) {
       url = post.thumbnailUrl;
@@ -105,6 +111,13 @@ class _PostMediaState extends State<PostMedia> {
   }
 
   Widget _content(BuildContext context) {
+    if (post.isCarousel) {
+      return PostCarousel(
+        post: post,
+        inline: widget.inline,
+        showSound: widget.showSound,
+      );
+    }
     if (post.isVideo) {
       // the whole frame, never cropped
       return ColoredBox(
@@ -127,7 +140,7 @@ class _PostMediaState extends State<PostMedia> {
     }
     final p = _provider;
     if (p == null) return ColoredBox(color: context.cardHigh);
-    return Image(
+    final image = Image(
       image: p,
       fit: BoxFit.cover,
       gaplessPlayback: true,
@@ -138,6 +151,21 @@ class _PostMediaState extends State<PostMedia> {
         child: Icon(Icons.broken_image_outlined, color: context.muted),
       ),
     );
+    // a photo with music: the music plays while it is on screen, with a speaker button
+    if (widget.inline && post.hasMusic) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          image,
+          InlineVideoLayer(
+            post: post,
+            videoUrl: '',
+            showSound: widget.showSound,
+          ),
+        ],
+      );
+    }
+    return image;
   }
 
   @override

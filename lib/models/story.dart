@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/painting.dart';
 
 import '../core/media_url.dart';
+import 'music.dart';
 
 /// The longest video that can be put in a moment.
 const int kMaxStorySeconds = 30;
@@ -140,6 +141,7 @@ class Story {
     String s(Object? v) => v is String ? v : '';
     final ts = m['createdAt'];
     final ov = m['overlays'];
+    rememberMusic(s(m['musicId']), s(m['musicTitle']), s(m['musicArtist']));
     return Story(
       id: d.id,
       authorId: s(m['authorId']),

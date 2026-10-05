@@ -12,6 +12,7 @@ import '../../models/post.dart';
 import '../../services/clip_cache.dart';
 import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
+import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/like_button.dart';
 import '../../core/hashtags.dart';
@@ -446,6 +447,7 @@ class _ReelPageState extends State<_ReelPage> {
                 child: Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: _Rail(
+                    post: post,
                     like: _like,
                     save: _save,
                     comments: _comments,
@@ -541,6 +543,7 @@ class _ReelPageState extends State<_ReelPage> {
 
 class _Rail extends StatelessWidget {
   const _Rail({
+    required this.post,
     required this.like,
     required this.save,
     required this.comments,
@@ -550,6 +553,7 @@ class _Rail extends StatelessWidget {
     required this.onComments,
   });
 
+  final Post post;
   final LikeController like;
   final SaveController save;
   final int comments;
@@ -562,9 +566,21 @@ class _Rail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mine = post.authorId == UserService.instance.myUid;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (!mine) ...[
+          ReelFollowPill(uid: post.authorId),
+          // the three dots sit right under the Follow button
+          ReelIconButton(
+            key: const ValueKey('clipMore'),
+            icon: Icons.more_horiz_rounded,
+            size: 30,
+            onTap: () => showReportSheet(context, post),
+          ),
+          const SizedBox(height: 4),
+        ],
         ListenableBuilder(
           listenable: like,
           builder: (_, _) => ReelIconButton(

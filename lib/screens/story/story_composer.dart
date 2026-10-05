@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:video_compress/video_compress.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../core/config.dart';
 import '../../core/errors.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
@@ -13,8 +14,58 @@ import '../../models/story.dart';
 import '../../services/media_service.dart';
 import '../../services/music_player.dart';
 import '../../services/story_service.dart';
+import '../post/video_editor_screen.dart';
 import '../../widgets/music_widgets.dart';
 import '../../widgets/story_overlays.dart';
+
+/// Saves the kept part of [source] as a new video (a moment can only be so long).
+Future<File?> _cutMoment(
+  BuildContext context,
+  File source,
+  VideoEdits e, {
+  VideoQuality quality = VideoQuality.Res1920x1080Quality,
+}) async {
+  final nav = Navigator.of(context, rootNavigator: true);
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const PopScope(
+      canPop: false,
+      child: AlertDialog(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 26,
+              height: 26,
+              child: CircularProgressIndicator(strokeWidth: 3),
+            ),
+            SizedBox(width: 18),
+            Expanded(child: Text('Preparing your moment...')),
+          ],
+        ),
+      ),
+    ),
+  );
+  File? out;
+  try {
+    final info = await VideoCompress.compressVideo(
+      source.path,
+      quality: quality,
+      deleteOrigin: false,
+      startTime: e.start,
+      duration: e.length,
+      includeAudio: !e.mute,
+    );
+    out = info?.file;
+  } catch (_) {
+    out = null;
+  }
+  nav.pop();
+  if (out == null && context.mounted) {
+    showToast(context, 'Could not trim that video. Try another one.');
+  }
+  return out;
+}
 
 /// "Add to your story": pick a photo or a video, then open the editor. Returns true when a
 /// moment was shared.
@@ -79,19 +130,50 @@ Future<bool> startStoryFlow(BuildContext context) async {
       video = File(x.path);
       final info = await VideoCompress.getMediaInfo(x.path);
       seconds = ((info.duration ?? 0) / 1000).ceil();
-      if (seconds > kMaxStorySeconds + 1) {
-        if (context.mounted) {
-          showToast(
-            context,
-            'Moments can be up to $kMaxStorySeconds seconds. This video is $seconds s.',
-          );
-        }
-        return false;
-      }
       try {
         thumb = await VideoCompress.getFileThumbnail(x.path, quality: 70);
       } catch (_) {
         // the cover is nice to have
+      }
+      // A video longer than a moment can be is trimmed here instead of being refused.
+      if (seconds > kMaxStorySeconds) {
+        if (!context.mounted) return false;
+        final edits = await Navigator.of(context).push<VideoEdits>(
+          MaterialPageRoute(
+            builder: (_) => VideoEditorScreen(
+              file: video!,
+              title: 'Trim your moment',
+              maxSeconds: kMaxStorySeconds,
+              initial: VideoEdits(
+                start: 0,
+                end: kMaxStorySeconds,
+                total: seconds,
+              ),
+            ),
+          ),
+        );
+        if (edits == null) return false;
+        if (!context.mounted) return false;
+        final cut = await _cutMoment(context, video, edits);
+        if (cut == null) return false;
+        video = cut;
+        seconds = edits.length;
+        try {
+          thumb = await VideoCompress.getFileThumbnail(cut.path, quality: 70);
+        } catch (_) {
+          // keep the first cover
+        }
+      } else if (await video.length() > kMaxVideoMb * 1024 * 1024) {
+        // too heavy for the media service: save a smaller copy (720p)
+        if (!context.mounted) return false;
+        final small = await _cutMoment(
+          context,
+          video,
+          VideoEdits(start: 0, end: seconds, total: seconds),
+          quality: VideoQuality.Res1280x720Quality,
+        );
+        if (small == null) return false;
+        video = small;
       }
     } else {
       image = await MediaService.pickStoryImage(choice.source);
@@ -355,6 +437,8 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
         duration: widget.seconds,
         overlays: _overlays,
         musicId: _track?.id ?? '',
+        musicTitle: (_track?.remote ?? false) ? _track!.title : '',
+        musicArtist: _track?.artist ?? '',
         keepSound: _keepSound,
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);

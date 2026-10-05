@@ -81,7 +81,7 @@ void main() {
       Size(1080, 2400), // tall phone
       Size(2560, 1600), // tablet, landscape
     ]) {
-      testWidgets('preview is a clean 9:16 frame at ${size.width.toInt()}', (
+      testWidgets('preview frame is clean and fits at ${size.width.toInt()}', (
         t,
       ) async {
         t.view.physicalSize = size;
@@ -93,7 +93,8 @@ void main() {
         final frame = find.byKey(const ValueKey('previewFrame'));
         expect(frame, findsOneWidget);
         final box = t.getSize(frame);
-        expect(box.width / box.height, closeTo(9 / 16, 0.01));
+        // Post: 4:5 until a photo says otherwise
+        expect(box.width / box.height, closeTo(4 / 5, 0.01));
         // nothing (no text, no button) is drawn inside the preview
         expect(
           find.descendant(of: frame, matching: find.byType(Text)),
@@ -109,9 +110,14 @@ void main() {
           findsNothing,
         );
         // the buttons are outside, under it
-        expect(find.text('Choose a photo'), findsOneWidget);
-        await t.tap(find.text('Clips'));
+        expect(find.text('Choose photos or videos'), findsOneWidget);
+        await t.tap(find.byKey(const ValueKey('mode1')));
         await t.pump(const Duration(milliseconds: 300));
+        // Clips: always 9:16
+        expect(
+          t.getSize(frame).width / t.getSize(frame).height,
+          closeTo(9 / 16, 0.01),
+        );
         expect(find.text('Choose a video or photo'), findsOneWidget);
         // no separate Video / Photo switch: one picker handles both
         expect(find.text('Photo + music'), findsNothing);

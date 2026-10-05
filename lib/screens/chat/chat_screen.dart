@@ -62,7 +62,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Stream<List<ChatMessage>>? _stream;
   Stream<({String id, String preview, String by})?>? _pinStream;
   Object? _error;
-  bool _sending = false;
+  final List<_Outgoing> _outbox = [];
   String? _seenMessageId;
 
   ChatMessage? _replying;
@@ -101,6 +101,7 @@ class _ChatScreenState extends State<ChatScreen> {
           if (mounted && u != null) setState(() => _user = u);
         });
       }
+      unawaited(MediaServer.instance.warmUp());
       final id = await _service.open(widget.otherUid);
       if (!mounted) return;
       setState(() {
@@ -142,49 +143,82 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ------------------------------------------------------------------ sending
 
-  Future<void> _send() async {
+  /// Text goes out at once: the message shows in the chat straight away (the phone keeps it and
+  /// delivers it as soon as the network allows), so there is no waiting for the server.
+  void _send() {
     final body = _text.text.trim();
-    if (body.isEmpty || _sending || _chatId == null) return;
+    if (body.isEmpty || _chatId == null) return;
     final reply = _replyRef();
-    setState(() {
-      _sending = true;
-      _replying = null;
-    });
+    setState(() => _replying = null);
     _text.clear();
-    try {
-      await _service.send(widget.otherUid, body, replyTo: reply);
-    } catch (e) {
-      if (mounted) {
-        _text.text = body;
-        showToast(context, friendlyError(e));
-      }
-    } finally {
-      if (mounted) setState(() => _sending = false);
-    }
+    _service.send(widget.otherUid, body, replyTo: reply).catchError((Object e) {
+      if (!mounted) return;
+      if (_text.text.isEmpty) _text.text = body; // give the words back
+      showToast(context, friendlyError(e));
+    });
   }
 
   Future<void> _sendPhoto(ImageSource source) => _guard(() async {
     final file = await MediaService.pickChatImage(source);
     if (file == null || !mounted) return;
     final reply = _replyRef();
+    final out = _Outgoing(file, reply);
     setState(() {
-      _busy = 'Sending photo...';
+      _outbox.insert(0, out);
       _replying = null;
     });
+    unawaited(_upload(out));
+  });
+
+  /// Sends one photo of the outbox: it is already on screen with a progress ring while this
+  /// runs. The size is read while the bytes go up, and the message is sent before the
+  /// service has finished checking the file.
+  Future<void> _upload(_Outgoing out) async {
+    setState(() {
+      out.failed = false;
+      out.progress = 0;
+    });
     try {
-      final size = await PhotoEditor.probeSize(file);
-      final up = await MediaServer.instance.uploadImage(file);
-      await _service.sendImage(
+      final sizeTask = PhotoEditor.probeSize(out.file);
+      final up = await MediaServer.instance.uploadImage(
+        out.file,
+        deferConfirm: true,
+        onProgress: (p) {
+          if (mounted) setState(() => out.progress = p);
+        },
+      );
+      final size = await sizeTask;
+      final sent = _service.sendImage(
         widget.otherUid,
         mediaRef: up.ref,
         width: size?.width.round() ?? 0,
         height: size?.height.round() ?? 0,
-        replyTo: reply,
+        replyTo: out.reply,
       );
-    } finally {
-      if (mounted) setState(() => _busy = '');
+      if (mounted) setState(() => _outbox.remove(out));
+      unawaited(_settle(sent, up));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => out.failed = true);
+      showToast(context, friendlyError(e));
     }
-  });
+  }
+
+  /// After the message is out: report a send that failed, and take the message back when the
+  /// service rejected the photo.
+  Future<void> _settle(Future<String> sent, UploadedMedia up) async {
+    try {
+      final id = await sent;
+      try {
+        await up.confirmation;
+      } catch (e) {
+        await _service.discardMine(widget.otherUid, id);
+        if (mounted) showToast(context, friendlyError(e));
+      }
+    } catch (e) {
+      if (mounted) showToast(context, friendlyError(e));
+    }
+  }
 
   Future<void> _sendGif() async {
     if (kGiphyKey.trim().isEmpty) {
@@ -707,7 +741,7 @@ class _ChatScreenState extends State<ChatScreen> {
             if (m.visibleFor(_me)) m,
         ];
         _current = msgs;
-        if (msgs.isEmpty) {
+        if (msgs.isEmpty && _outbox.isEmpty) {
           return EmptyState(
             icon: Icons.waving_hand_rounded,
             title: 'Say hi',
@@ -715,8 +749,10 @@ class _ChatScreenState extends State<ChatScreen> {
           );
         }
         // someone else's new message is on screen: mark the chat as read
-        final newest = msgs.first;
-        if (newest.senderId != _me && newest.id != _seenMessageId) {
+        final newest = msgs.isEmpty ? null : msgs.first;
+        if (newest != null &&
+            newest.senderId != _me &&
+            newest.id != _seenMessageId) {
           _seenMessageId = newest.id;
           final id = _chatId;
           if (id != null) {
@@ -729,8 +765,15 @@ class _ChatScreenState extends State<ChatScreen> {
           controller: _scroll,
           reverse: true,
           padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-          itemCount: msgs.length,
-          itemBuilder: (context, i) => _item(msgs[i]),
+          itemCount: _outbox.length + msgs.length,
+          itemBuilder: (context, i) => i < _outbox.length
+              ? _OutgoingBubble(
+                  key: ObjectKey(_outbox[i]),
+                  item: _outbox[i],
+                  onRetry: () => _upload(_outbox[i]),
+                  onDiscard: () => setState(() => _outbox.removeAt(i)),
+                )
+              : _item(msgs[i - _outbox.length]),
         );
       },
     );
@@ -935,4 +978,103 @@ class _BlinkDotState extends State<_BlinkDot>
       ),
     ),
   );
+}
+
+/// A photo that is still going up. It is shown in the chat at once.
+class _Outgoing {
+  _Outgoing(this.file, this.reply);
+  final File file;
+  final ReplyRef? reply;
+  double progress = 0;
+  bool failed = false;
+}
+
+class _OutgoingBubble extends StatelessWidget {
+  const _OutgoingBubble({
+    super.key,
+    required this.item,
+    required this.onRetry,
+    required this.onDiscard,
+  });
+
+  final _Outgoing item;
+  final VoidCallback onRetry;
+  final VoidCallback onDiscard;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: SizedBox(
+                key: const ValueKey('outgoingPhoto'),
+                width: 220,
+                height: 260,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.file(
+                      item.file,
+                      fit: BoxFit.cover,
+                      cacheWidth: 600,
+                      errorBuilder: (_, _, _) =>
+                          ColoredBox(color: context.softFill),
+                    ),
+                    ColoredBox(color: Colors.black.withValues(alpha: 0.28)),
+                    Center(
+                      child: item.failed
+                          ? const Icon(
+                              Icons.error_outline_rounded,
+                              color: Colors.white,
+                              size: 40,
+                            )
+                          : SizedBox(
+                              width: 44,
+                              height: 44,
+                              child: CircularProgressIndicator(
+                                value: item.progress > 0 && item.progress < 1
+                                    ? item.progress
+                                    : null,
+                                strokeWidth: 3.5,
+                                color: Colors.white,
+                              ),
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            if (item.failed)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextButton(
+                    key: const ValueKey('retryPhoto'),
+                    onPressed: onRetry,
+                    child: const Text('Not sent. Tap to retry'),
+                  ),
+                  IconButton(
+                    key: const ValueKey('discardPhoto'),
+                    onPressed: onDiscard,
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                  ),
+                ],
+              )
+            else
+              Text(
+                'Sending...',
+                style: TextStyle(color: context.muted, fontSize: 12),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }

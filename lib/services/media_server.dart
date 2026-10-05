@@ -7,7 +7,15 @@ import '../core/errors.dart';
 import '../core/media_url.dart';
 
 class UploadedMedia {
-  const UploadedMedia({required this.ref, required this.thumbRef});
+  const UploadedMedia({
+    required this.ref,
+    required this.thumbRef,
+    this.confirmation,
+  });
+
+  /// Set when the check of the stored file is still running (see `deferConfirm`); it fails
+  /// when the service rejected the file.
+  final Future<void>? confirmation;
 
   /// `m:<key>`
   final String ref;
@@ -73,10 +81,39 @@ class MediaServer {
     return kind == 'video' ? 'mp4' : 'jpg';
   }
 
+  /// With [deferConfirm] the call returns as soon as the bytes are stored, while the service
+  /// still checks the file: [UploadedMedia.confirmation] completes (or fails) later. Chat uses
+  /// this to send the message one round trip earlier.
   Future<UploadedMedia> uploadImage(
     File file, {
     void Function(double progress)? onProgress,
-  }) => _upload(file: file, kind: 'image', onProgress: onProgress);
+    bool deferConfirm = false,
+  }) => _upload(
+    file: file,
+    kind: 'image',
+    onProgress: onProgress,
+    deferConfirm: deferConfirm,
+  );
+
+  DateTime? _warmAt;
+
+  /// Wakes up the media service (it sleeps when unused) and fetches the login token, so the
+  /// first upload of a screen does not wait for either. Never throws.
+  Future<void> warmUp() async {
+    if (!mediaServerConfigured) return;
+    final last = _warmAt;
+    if (last != null &&
+        DateTime.now().difference(last) < const Duration(minutes: 4)) {
+      return;
+    }
+    _warmAt = DateTime.now();
+    try {
+      await FirebaseAuth.instance.currentUser?.getIdToken();
+      await _api.get<void>('$mediaApiBase/health');
+    } catch (_) {
+      _warmAt = null;
+    }
+  }
 
   Future<UploadedMedia> uploadVideo({
     required File file,
@@ -90,6 +127,7 @@ class MediaServer {
     required String kind,
     File? thumb,
     void Function(double progress)? onProgress,
+    bool deferConfirm = false,
   }) async {
     _requireConfigured();
     if (!await file.exists()) {
@@ -126,6 +164,15 @@ class MediaServer {
         : Future<String>.value('');
 
     await _putFile(url, file, type, onProgress: onProgress);
+    if (deferConfirm) {
+      final check = _confirm(key);
+      check.ignore(); // the caller decides what a failure means
+      return UploadedMedia(
+        ref: 'm:$key',
+        thumbRef: await thumbTask,
+        confirmation: check,
+      );
+    }
     await _confirm(key);
     return UploadedMedia(ref: 'm:$key', thumbRef: await thumbTask);
   }
@@ -172,21 +219,28 @@ class MediaServer {
   }
 
   /// Best effort: removes the files from the bucket. Never throws.
-  Future<void> deleteQuietly(String? ref, [String? thumbRef]) async {
+  Future<void> deleteQuietly(String? ref, [String? thumbRef]) =>
+      deleteRefs([?ref, ?thumbRef]);
+
+  /// Same for any number of files (the service takes four at a time).
+  Future<void> deleteRefs(List<String> refs) async {
     if (!mediaServerConfigured) return;
     final keys = <String>[
-      for (final r in [ref, thumbRef])
-        if (r != null && r.startsWith('m:')) r.substring(2),
+      for (final r in refs)
+        if (r.startsWith('m:')) r.substring(2),
     ];
-    if (keys.isEmpty) return;
-    try {
-      await _api.post<void>(
-        '$mediaApiBase/delete',
-        data: {'keys': keys},
-        options: await _auth(),
-      );
-    } catch (_) {
-      // already gone / offline: ignore
+    for (var i = 0; i < keys.length; i += 4) {
+      try {
+        await _api.post<void>(
+          '$mediaApiBase/delete',
+          data: {
+            'keys': keys.sublist(i, i + 4 > keys.length ? keys.length : i + 4),
+          },
+          options: await _auth(),
+        );
+      } catch (_) {
+        // already gone / offline: ignore
+      }
     }
   }
 }

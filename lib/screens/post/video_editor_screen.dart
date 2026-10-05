@@ -29,10 +29,20 @@ class VideoEdits {
 /// Pick the part of the clip to keep and switch the sound off. The preview plays only the
 /// part that will be kept.
 class VideoEditorScreen extends StatefulWidget {
-  const VideoEditorScreen({super.key, required this.file, this.initial});
+  const VideoEditorScreen({
+    super.key,
+    required this.file,
+    this.initial,
+    this.maxSeconds,
+    this.title = 'Edit clip',
+  });
 
   final File file;
   final VideoEdits? initial;
+
+  /// Longest part that may be kept (for example 30 s for a moment); null = no limit.
+  final int? maxSeconds;
+  final String title;
 
   @override
   State<VideoEditorScreen> createState() => _VideoEditorScreenState();
@@ -74,6 +84,8 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
           _start + 1,
           total.toDouble(),
         );
+        final cap = widget.maxSeconds;
+        if (cap != null && _end - _start > cap) _end = _start + cap;
         _mute = init?.mute ?? false;
       });
       await c.setLooping(false);
@@ -145,20 +157,21 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
           appBar: AppBar(
             backgroundColor: Colors.black,
             leading: IconButton(
+              key: const ValueKey('editorClose'),
               icon: const Icon(Icons.close_rounded),
               onPressed: () => Navigator.of(context).pop(),
             ),
-            title: const Text('Edit clip'),
+            title: Text(widget.title),
             actions: [
               Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: FilledButton(
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(76, 40),
-                    padding: const EdgeInsets.symmetric(horizontal: 18),
-                  ),
+                padding: const EdgeInsets.only(right: 8),
+                child: TextButton(
+                  key: const ValueKey('editorDone'),
                   onPressed: c == null ? null : _done,
-                  child: const Text('Done'),
+                  child: const Text(
+                    'Done',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+                  ),
                 ),
               ),
             ],
@@ -261,6 +274,15 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
                           }
                           s = s.clamp(0, _total - 1);
                           e = e.clamp(s + 1, _total.toDouble());
+                          final cap = widget.maxSeconds;
+                          if (cap != null && e - s > cap) {
+                            // keep the length within the limit: the other handle follows
+                            if (s != _start) {
+                              e = s + cap;
+                            } else {
+                              s = e - cap;
+                            }
+                          }
                           final movedStart = s != _start;
                           setState(() {
                             _start = s;
@@ -275,25 +297,55 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
                           );
                         },
                 ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: _mute,
-                  activeTrackColor: AppTheme.volt,
-                  title: const Text(
-                    'Remove sound',
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  secondary: Icon(
-                    _mute ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                  ),
-                  onChanged: (v) {
-                    setState(() => _mute = v);
-                    c.setVolume(v ? 0 : 1);
-                  },
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    GestureDetector(
+                      key: const ValueKey('muteToggle'),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        setState(() => _mute = !_mute);
+                        c.setVolume(_mute ? 0 : 1);
+                      },
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: _mute ? AppTheme.volt : Colors.white12,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          _mute
+                              ? Icons.volume_off_rounded
+                              : Icons.volume_up_rounded,
+                          color: _mute ? AppTheme.ink : Colors.white,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      _mute ? 'Sound removed' : 'Original sound',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      key: const ValueKey('editorPlayPause'),
+                      onPressed: _togglePause,
+                      icon: Icon(
+                        _paused
+                            ? Icons.play_arrow_rounded
+                            : Icons.pause_rounded,
+                      ),
+                      label: Text(_paused ? 'Play' : 'Pause'),
+                    ),
+                  ],
                 ),
-                const Text(
-                  'Trimming or removing the sound saves the clip again (up to 1080p).',
-                  style: TextStyle(color: Colors.white54, fontSize: 12.5),
+                const SizedBox(height: 6),
+                Text(
+                  widget.maxSeconds != null
+                      ? 'Up to ${widget.maxSeconds} seconds. Trimming or removing the sound saves the clip again (up to 1080p).'
+                      : 'Trimming or removing the sound saves the clip again (up to 1080p).',
+                  style: const TextStyle(color: Colors.white54, fontSize: 12.5),
                 ),
               ],
             ),

@@ -25,6 +25,9 @@ class ReelAudio {
     SystemVolume.instance.set(volume.value);
   }
 
+  /// True while a finger is sliding the volume (the phone's own reports are ignored).
+  static bool sliding = false;
+
   static bool _attached = false;
 
   /// Starts following the phone's volume (also when the buttons are used).
@@ -33,7 +36,9 @@ class ReelAudio {
     _attached = true;
     SystemVolume.instance.level.addListener(() {
       final v = SystemVolume.instance.level.value;
-      if (v != null && (v - volume.value).abs() > 0.001) volume.value = v;
+      if (!sliding && v != null && (v - volume.value).abs() > 0.001) {
+        volume.value = v;
+      }
     });
     SystemVolume.instance.start();
   }
@@ -67,6 +72,12 @@ class _ReelTouchState extends State<ReelTouch> {
   void initState() {
     super.initState();
     ReelAudio.attachSystem();
+  }
+
+  @override
+  void dispose() {
+    if (_sliding) ReelAudio.sliding = false;
+    super.dispose();
   }
 
   /// How far the finger has to slide before it counts as "volume" (not "2x").
@@ -110,6 +121,7 @@ class _ReelTouchState extends State<ReelTouch> {
     final dy = d.offsetFromOrigin.dy;
     if (!_sliding && dy.abs() > _slop) {
       _sliding = true;
+      ReelAudio.sliding = true;
       _setFast(false);
       setState(() => _hud = true);
     }
@@ -126,6 +138,7 @@ class _ReelTouchState extends State<ReelTouch> {
     _setFast(false);
     if (_sliding) {
       _sliding = false;
+      ReelAudio.sliding = false;
       final id = ++_hudId;
       Future<void>.delayed(const Duration(milliseconds: 700), () {
         if (mounted && _hudId == id) setState(() => _hud = false);

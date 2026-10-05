@@ -31,7 +31,8 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
   PhotoProxy? _proxy;
   Object? _loadError;
   late PhotoEdits _e = widget.initial?.copy() ?? PhotoEdits();
-  int _tab = 0;
+  int _tab =
+      1; // opens on Filters, like Instagram (0 crop, 1 filters, 2 adjust)
   int _preset = 0; // index into _presets (0 = free)
   bool _busy = false;
 
@@ -147,22 +148,20 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
             appBar: AppBar(
               backgroundColor: Colors.black,
               leading: IconButton(
+                key: const ValueKey('editorClose'),
                 icon: const Icon(Icons.close_rounded),
                 onPressed: _busy ? null : () => Navigator.of(context).pop(),
               ),
-              title: const Text('Edit photo'),
               actions: [
                 TextButton(
                   onPressed: _busy || _proxy == null ? null : _reset,
+                  style: TextButton.styleFrom(foregroundColor: Colors.white70),
                   child: const Text('Reset'),
                 ),
                 Padding(
-                  padding: const EdgeInsets.only(right: 12, left: 4),
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(76, 40),
-                      padding: const EdgeInsets.symmetric(horizontal: 18),
-                    ),
+                  padding: const EdgeInsets.only(right: 8, left: 2),
+                  child: TextButton(
+                    key: const ValueKey('editorDone'),
                     onPressed: _busy || _proxy == null ? null : _done,
                     child: _busy
                         ? const SizedBox(
@@ -170,10 +169,16 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
                             height: 18,
                             child: CircularProgressIndicator(
                               strokeWidth: 2.5,
-                              color: AppTheme.ink,
+                              color: AppTheme.volt,
                             ),
                           )
-                        : const Text('Done'),
+                        : const Text(
+                            'Done',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
                   ),
                 ),
               ],
@@ -296,12 +301,17 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
               _ => _adjustTools(),
             },
           ),
-          Row(
-            children: [
-              _tabButton(0, Icons.crop_rounded, 'Crop'),
-              _tabButton(1, Icons.auto_awesome_rounded, 'Filters'),
-              _tabButton(2, Icons.tune_rounded, 'Adjust'),
-            ],
+          Container(
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: Colors.white12)),
+            ),
+            child: Row(
+              children: [
+                _tabButton(1, Icons.auto_awesome_rounded, 'Filters'),
+                _tabButton(0, Icons.crop_rounded, 'Crop'),
+                _tabButton(2, Icons.tune_rounded, 'Adjust'),
+              ],
+            ),
           ),
           const SizedBox(height: 6),
         ],
@@ -311,25 +321,34 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
 
   Widget _tabButton(int i, IconData icon, String label) {
     final on = _tab == i;
-    final color = on ? AppTheme.volt : Colors.white70;
     return Expanded(
       child: InkWell(
+        key: ValueKey('editorTab$i'),
         onTap: () => setState(() => _tab = i),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.only(top: 12),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: color),
-              const SizedBox(height: 3),
               Text(
                 label,
                 style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12.5,
+                  color: on ? Colors.white : Colors.white54,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
                 ),
               ),
+              const SizedBox(height: 6),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                height: 3,
+                width: on ? 30 : 0,
+                decoration: BoxDecoration(
+                  color: AppTheme.volt,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 4),
             ],
           ),
         ),

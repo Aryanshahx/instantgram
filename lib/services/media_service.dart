@@ -16,6 +16,16 @@ class MediaService {
   static Future<File?> pickPostImage(ImageSource source) =>
       _pickOriginal(source);
 
+  /// Photos and videos from the gallery, exactly as they are (no resizing). With [limit] 1 the
+  /// phone's single picker is used.
+  static Future<List<XFile>> pickGalleryMedia({int limit = 10}) async {
+    if (limit <= 1) {
+      final x = await _picker.pickMedia();
+      return x == null ? const [] : [x];
+    }
+    return _picker.pickMultipleMedia(limit: limit);
+  }
+
   /// Moments last 24 hours and are only ever shown full screen on a phone, so they are
   /// saved at up to 1440 x 2560 (JPEG quality 88, usually a few hundred KB). That is why they
   /// open instantly for everyone instead of downloading a multi-megabyte original.

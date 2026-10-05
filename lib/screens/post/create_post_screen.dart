@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -13,86 +14,132 @@ import '../../core/responsive.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/music.dart';
+import '../../models/post.dart';
 import '../../services/media_server.dart';
 import '../../services/media_service.dart';
 import '../../services/mp4_faststart.dart';
-import '../../services/photo_edit.dart';
 import '../../services/music_player.dart';
+import '../../services/photo_edit.dart';
 import '../../services/post_service.dart';
 import '../../widgets/music_widgets.dart';
-import '../../widgets/pill_tabs.dart';
+import '../../widgets/post_media.dart';
 import 'photo_editor_screen.dart';
 import 'video_editor_screen.dart';
 
-/// Two steps:
-///  1. Preview: a clean 9:16 frame that only shows your photo or clip (never stretched or
-///     cropped: it is fitted inside the frame). The pick / change / next buttons sit below it.
-///  2. Details: caption, quality switch and the Publish button.
 /// Clips above this bitrate are saved as a lighter copy by default.
 const double kSmoothMbps = 8;
 
+/// How loud the chosen music is (it is not a user setting any more).
+const double kMusicVolume = 0.8;
+
+/// One photo or video that is going into the post.
+class _Item {
+  _Item.photo(File source, this.bytes)
+    : video = false,
+      original = source,
+      file = source;
+
+  _Item.video(File source, this.bytes)
+    : video = true,
+      original = source,
+      file = source;
+
+  final bool video;
+
+  /// The photo or video as it was picked.
+  final File original;
+
+  /// Photo: what gets uploaded (the original, or its edited copy). Video: the same as [original].
+  File file;
+  PhotoEdits? edits;
+  int bytes;
+
+  /// Proportions (0 = unknown).
+  int width = 0;
+  int height = 0;
+
+  // video only
+  File? thumb;
+  int seconds = 0; // length that will be published (after trimming)
+  int secondsFull = 0;
+  VideoEdits? videoEdits;
+
+  double get aspect => (width > 0 && height > 0) ? width / height : 0;
+}
+
+/// A video that is ready to go up.
+class _Ready {
+  _Ready(this.file, this.temp, this.width, this.height);
+  final File file;
+  final File? temp;
+  final int width;
+  final int height;
+}
+
+/// New post / new clip, in the way people know from Instagram:
+///  1. A big preview, a strip with the chosen photos and videos, Edit and Music buttons and the
+///     Post | Clips tabs at the bottom. "Next" is on the top right.
+///  2. Details: a small picture next to the caption, a few option rows and "Share".
+///
+/// Post = one photo, or a carousel of up to 10 photos and videos (at least one photo).
+/// Clips = one video, or one photo that plays for 5 seconds with music.
 class CreatePostScreen extends StatefulWidget {
-  const CreatePostScreen({super.key, @visibleForTesting this.debugImage});
+  const CreatePostScreen({
+    super.key,
+    @visibleForTesting this.debugImage,
+    @visibleForTesting this.debugImages,
+  });
 
   /// Tests only: starts with this photo already picked.
   final File? debugImage;
+
+  /// Tests only: starts with these photos already picked.
+  final List<File>? debugImages;
 
   @override
   State<CreatePostScreen> createState() => _CreatePostScreenState();
 }
 
 class _CreatePostScreenState extends State<CreatePostScreen> {
-  int _mode = 0; // 0 = post (photo), 1 = clips (video, or a photo with music)
-  bool _clipPhoto = false; // in Clips: false = video, true = photo clip
-  MusicTrack? _music;
-  double _musicVol = 0.8;
-  bool _keepSound = true;
-  int _clipSeconds = 10; // length of a photo clip
+  int _mode = 0; // 0 = post, 1 = clips
   int _step = 0; // 0 = preview, 1 = details
 
-  File? _image; // what gets uploaded (the original, or its edited copy)
-  File? _imageOriginal;
-  PhotoEdits? _imageEdits;
-  int _imageBytes = 0;
+  final List<_Item> _items = [];
+  int _sel = 0;
 
-  File? _video;
-  File? _videoThumb;
-  int _videoSeconds = 0; // length that will be published (after trimming)
-  int _videoSecondsFull = 0;
-  int _videoBytes = 0;
-  bool _original = true; // upload the clip exactly as recorded
-  int _videoW = 0;
-  int _videoH = 0;
-  VideoEdits? _videoEdits;
+  MusicTrack? _music;
+  bool _keepSound = true;
+  bool _original = true; // upload videos exactly as recorded
 
-  /// Live preview of the picked clip (silent until the user taps the frame to pause).
+  /// Live preview of the selected video (the photo case shows the picture).
   VideoPlayerController? _preview;
+  _Item? _previewFor;
   bool _previewPaused = false;
+  int _previewGen = 0;
+
+  /// The chosen track, heard while you look at the preview.
+  MusicPlayer? _previewMusic;
 
   final _caption = TextEditingController();
   bool _busy = false;
   String _stage = '';
   double? _progress;
   int _totalBytes = 0;
+  int _sentBytes = 0;
   final Stopwatch _clock = Stopwatch();
   DateTime _lastTick = DateTime.fromMillisecondsSinceEpoch(0);
-
-  MusicPlayer?
-  _previewMusic; // the chosen track, heard while you look at the preview
 
   @override
   void initState() {
     super.initState();
-    final dbg = widget.debugImage;
-    if (dbg != null) {
-      _image = dbg;
-      _imageOriginal = dbg;
-      _imageBytes = dbg.lengthSync();
+    final dbgs = <File>[?widget.debugImage, ...?widget.debugImages];
+    for (final f in dbgs) {
+      _items.add(_Item.photo(f, f.lengthSync()));
     }
-    // the Publish button needs a title
     _caption.addListener(() {
       if (mounted) setState(() {});
     });
+    unawaited(MediaServer.instance.warmUp());
   }
 
   @override
@@ -100,25 +147,54 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _caption.dispose();
     _previewMusic?.dispose();
     _preview?.dispose();
-    _dropEditedCopy();
+    for (final i in _items) {
+      _dropEditedCopy(i);
+    }
     if (_busy) VideoCompress.cancelCompression();
     super.dispose();
   }
 
-  bool get _photoClip => _mode == 1 && _clipPhoto;
+  // ------------------------------------------------------------------ state
 
-  /// Post and photo clips pick a photo; video clips pick a video.
-  bool get _isImageMode => _mode == 0 || _clipPhoto;
+  _Item? get _first => _items.isEmpty ? null : _items.first;
+
+  /// What the preview shows: the selected item (Post) or the one clip (Clips).
+  _Item? get _active {
+    if (_items.isEmpty) return null;
+    if (_mode == 1) return _items.first;
+    return _items[_sel.clamp(0, _items.length - 1)];
+  }
+
+  /// What gets published.
+  List<_Item> get _chosen => _mode == 1 ? [?_first] : List.of(_items);
+
+  bool get _hasMedia => _items.isNotEmpty;
+  bool get _hasPhoto => _chosen.any((i) => !i.video);
+  bool get _hasVideo => _chosen.any((i) => i.video);
+  bool get _photoClip => _mode == 1 && _first != null && !_first!.video;
+
+  /// Post needs a photo; a photo clip needs music (that is what makes it a clip).
+  bool get _canNext => _mode == 1
+      ? (_first != null && (_first!.video || _music != null))
+      : _hasPhoto;
+
+  bool get _canShare => !_busy && _canNext && _caption.text.trim().isNotEmpty;
+
+  /// Frame of the preview: the clip's 9:16, or the proportions the post will have.
+  double get _frameAspect {
+    if (_mode == 1) return 9 / 16;
+    final a = _first?.aspect ?? 0;
+    return a > 0 ? a.clamp(PostMedia.minAspect, PostMedia.maxAspect) : 4 / 5;
+  }
+
+  /// Something that can be played or paused in the preview: a video, or the music.
+  bool get _canPlay => (_active?.video ?? false) || _previewMusic != null;
 
   // ------------------------------------------------------------------ picking
 
-  Future<ImageSource?> _askSource({
-    required IconData galleryIcon,
-    required String galleryText,
-    required IconData cameraIcon,
-    required String cameraText,
-  }) {
-    return showModalBottomSheet<ImageSource>(
+  Future<String?> _askSource() {
+    final multi = _mode == 0;
+    return showModalBottomSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Padding(
@@ -126,77 +202,19 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ListTile(
-                leading: Icon(galleryIcon),
-                title: Text(
-                  galleryText,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-              ),
-              ListTile(
-                leading: Icon(cameraIcon),
-                title: Text(
-                  cameraText,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                onTap: () => Navigator.pop(ctx, ImageSource.camera),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Post: photo. Clips: one picker for photos and videos (see [_pickClip]).
-  VoidCallback get _pickMedia => _mode == 0 ? _pickImage : _pickClip;
-
-  Future<void> _pickImage() async {
-    final source = await _askSource(
-      galleryIcon: Icons.photo_library_rounded,
-      galleryText: 'Choose from gallery',
-      cameraIcon: Icons.photo_camera_rounded,
-      cameraText: 'Take a photo',
-    );
-    if (source == null) return;
-    try {
-      // Posts are uploaded exactly as taken; the bucket keeps the original.
-      final file = _mode == 1
-          ? await MediaService.pickClipImage(source)
-          : await MediaService.pickPostImage(source);
-      if (file == null) return;
-      await _useImage(file);
-    } catch (e) {
-      if (mounted) {
-        showToast(
-          context,
-          e is MediaException ? e.message : 'Could not open the picker.',
-        );
-      }
-    }
-  }
-
-  /// Clips: the user picks any photo or video, then adds audio in the preview.
-  Future<void> _pickClip() async {
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final o in const [
+              for (final o in [
                 (
                   'gallery',
                   Icons.perm_media_rounded,
-                  'Photo or video from gallery',
+                  multi
+                      ? 'Photos and videos from gallery'
+                      : 'Photo or video from gallery',
                 ),
                 ('photo', Icons.photo_camera_rounded, 'Take a photo'),
                 ('video', Icons.videocam_rounded, 'Record a video'),
               ])
                 ListTile(
+                  key: ValueKey('pick_${o.$1}'),
                   leading: Icon(o.$2),
                   title: Text(
                     o.$3,
@@ -209,31 +227,58 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         ),
       ),
     );
-    if (choice == null) return;
+  }
+
+  /// Opens the picker. In Post it adds to the strip (up to 10); in Clips it replaces the clip.
+  Future<void> _pick() async {
+    if (_busy) return;
+    final room = _mode == 0 ? kMaxPostItems - _items.length : 1;
+    if (room <= 0) {
+      showToast(
+        context,
+        'A post can have up to $kMaxPostItems photos and videos.',
+      );
+      return;
+    }
+    final choice = await _askSource();
+    if (choice == null || !mounted) return;
     try {
+      final picked = <_Item>[];
       if (choice == 'photo') {
-        final f = await MediaService.pickClipImage(ImageSource.camera);
-        if (f != null) await _useImage(f);
+        final f = await MediaService.pickPostImage(ImageSource.camera);
+        if (f != null) picked.add(await _photoItem(f));
       } else if (choice == 'video') {
         final v = await ImagePicker().pickVideo(
           source: ImageSource.camera,
           maxDuration: const Duration(seconds: kMaxVideoSeconds),
         );
-        if (v != null) await _useVideo(v.path);
+        if (v != null) {
+          final it = await _videoItem(v.path);
+          if (it != null) picked.add(it);
+        }
       } else {
-        final x = await ImagePicker().pickMedia(
-          maxWidth: 1600,
-          maxHeight: 2400,
-          imageQuality: 90,
-        );
-        if (x == null) return;
-        final f = File(x.path);
-        if (await MediaService.isSupportedImage(f)) {
-          await _useImage(f);
-        } else {
-          await _useVideo(x.path);
+        final files = await MediaService.pickGalleryMedia(limit: room);
+        for (final x in files.take(room)) {
+          final f = File(x.path);
+          if (await MediaService.isSupportedImage(f)) {
+            if (await f.length() > kMaxImageMb * 1024 * 1024) {
+              if (mounted) {
+                showToast(
+                  context,
+                  'A photo is larger than $kMaxImageMb MB and was skipped.',
+                );
+              }
+              continue;
+            }
+            picked.add(await _photoItem(f));
+          } else {
+            final it = await _videoItem(x.path);
+            if (it != null) picked.add(it);
+          }
         }
       }
+      if (picked.isEmpty || !mounted) return;
+      _add(picked);
     } catch (e) {
       if (mounted) {
         showToast(
@@ -244,38 +289,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  Future<void> _useImage(File file) async {
-    final bytes = await file.length();
-    if (!mounted) return;
-    _dropEditedCopy();
-    if (_mode == 1) await _dropVideo();
-    if (!mounted) return;
-    setState(() {
-      _image = file;
-      _imageOriginal = file;
-      _imageEdits = null;
-      _imageBytes = bytes;
-      if (_mode == 1) _clipPhoto = true;
-      _previewPaused = false;
-    });
-    _syncPreview();
+  Future<_Item> _photoItem(File f) async {
+    final it = _Item.photo(f, await f.length());
+    final size = await PhotoEditor.probeSize(f);
+    if (size != null) {
+      it.width = size.width.round();
+      it.height = size.height.round();
+    }
+    return it;
   }
 
-  /// Forgets the picked video (a clip is either a video or a photo).
-  Future<void> _dropVideo() async {
-    final old = _preview;
-    old?.removeListener(_previewTick);
-    _preview = null;
-    _video = null;
-    _videoThumb = null;
-    _videoEdits = null;
-    _videoSeconds = 0;
-    _videoSecondsFull = 0;
-    _videoBytes = 0;
-    await old?.dispose();
-  }
-
-  Future<void> _useVideo(String path) async {
+  /// Reads a video; null (with a message) when it is not usable.
+  Future<_Item?> _videoItem(String path) async {
     try {
       final bytes = await File(path).length();
       final info = await VideoCompress.getMediaInfo(path);
@@ -284,10 +309,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         if (mounted) {
           showToast(
             context,
-            'Clips can be up to $kMaxVideoSeconds seconds. This one is $seconds s.',
+            'Videos can be up to $kMaxVideoSeconds seconds. This one is $seconds s.',
           );
         }
-        return;
+        return null;
       }
       var w = info.width ?? 0;
       var h = info.height ?? 0;
@@ -300,51 +325,120 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       try {
         thumb = await VideoCompress.getFileThumbnail(path, quality: 70);
       } catch (_) {
-        // a thumbnail is nice to have; the clip works without one
+        // a thumbnail is nice to have; the video works without one
       }
-      if (!mounted) return;
-      _dropEditedCopy();
-      setState(() {
-        _image = null;
-        _imageOriginal = null;
-        _imageEdits = null;
-        _imageBytes = 0;
-        _clipPhoto = false;
-        _video = File(path);
-        _videoThumb = thumb;
-        _videoSeconds = seconds;
-        _videoSecondsFull = seconds;
-        _videoBytes = bytes;
-        _videoW = w;
-        _videoH = h;
-        _videoEdits = null;
-        _previewPaused = false;
-        // Heavy files (high bitrate) buffer for viewers on mobile data, so they are saved as a
-        // lighter 720p copy by default. "Original quality" is one tap away.
-        _original = !(seconds > 0 && bytes * 8 / seconds / 1e6 > kSmoothMbps);
-      });
-      await _startPreview(File(path));
-    } catch (e) {
+      return _Item.video(File(path), bytes)
+        ..thumb = thumb
+        ..seconds = seconds
+        ..secondsFull = seconds
+        ..width = w
+        ..height = h;
+    } catch (_) {
       if (mounted) showToast(context, 'Could not open that video.');
+      return null;
+    }
+  }
+
+  void _add(List<_Item> picked) {
+    final hadVideo = _items.any((i) => i.video);
+    setState(() {
+      if (_mode == 1) {
+        for (final i in _items) {
+          _dropEditedCopy(i);
+        }
+        _items
+          ..clear()
+          ..add(picked.first);
+        _sel = 0;
+      } else {
+        _items.addAll(picked);
+        _sel = _items.length - picked.length; // show the first new one
+      }
+      _previewPaused = false;
+      // Heavy files (high bitrate) buffer for viewers on mobile data, so they are saved as a
+      // lighter 720p copy by default. "Original quality" is one tap away.
+      final v = picked.where((i) => i.video).toList();
+      if (v.isNotEmpty && !hadVideo) {
+        final f = v.first;
+        _original =
+            !(f.seconds > 0 && f.bytes * 8 / f.seconds / 1e6 > kSmoothMbps);
+      }
+    });
+    unawaited(_ensurePreview());
+  }
+
+  void _remove(int i) {
+    if (_busy) return;
+    final gone = _items[i];
+    setState(() {
+      _items.removeAt(i);
+      _dropEditedCopy(gone);
+      var s = _sel;
+      if (i < s) s--;
+      _sel = _items.isEmpty ? 0 : s.clamp(0, _items.length - 1);
+    });
+    unawaited(_ensurePreview());
+  }
+
+  void _select(int i) {
+    if (i == _sel) return;
+    setState(() {
+      _sel = i;
+      _previewPaused = false;
+    });
+    unawaited(_ensurePreview());
+  }
+
+  void _dropEditedCopy(_Item i, {File? except}) {
+    if (!i.video &&
+        i.file.path != i.original.path &&
+        i.file.path != except?.path) {
+      i.file.delete().ignore();
     }
   }
 
   // ------------------------------------------------------------ video preview
 
-  Future<void> _startPreview(File file) async {
+  Future<void> _disposePreview() async {
+    _previewGen++;
     final old = _preview;
-    if (mounted) setState(() => _preview = null);
+    old?.removeListener(_previewTick);
+    _preview = null;
+    _previewFor = null;
     await old?.dispose();
-    final c = VideoPlayerController.file(file);
+  }
+
+  /// Makes the preview player match the selected item (none for a photo).
+  Future<void> _ensurePreview() async {
+    final it = _active;
+    if (it == null || !it.video) {
+      if (_preview != null || _previewFor != null) {
+        await _disposePreview();
+        if (mounted) setState(() {});
+      }
+      _syncPreview();
+      return;
+    }
+    if (identical(_previewFor, it)) {
+      _syncPreview();
+      return;
+    }
+    await _disposePreview();
+    final gen = _previewGen;
+    _previewFor = it;
+    final c = VideoPlayerController.file(
+      it.file,
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+    );
     try {
       await c.initialize();
       await c.setLooping(true);
-      await c.setVolume(_videoPreviewVolume);
-      c.addListener(_previewTick);
-      if (!mounted || _video?.path != file.path) {
+      await c.setVolume(_previewVolume(it));
+      if (!mounted || gen != _previewGen) {
         await c.dispose();
         return;
       }
+      c.addListener(_previewTick);
       setState(() => _preview = c);
       _syncPreview();
     } catch (_) {
@@ -355,7 +449,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   /// Keeps the preview inside the trimmed part of the clip.
   void _previewTick() {
     final c = _preview;
-    final e = _videoEdits;
+    final e = _previewFor?.videoEdits;
     if (c == null || e == null || !e.trimmed) return;
     final pos = c.value.position;
     if (pos >= Duration(seconds: e.end) ||
@@ -364,104 +458,61 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  void _dropEditedCopy({File? except}) {
-    final i = _image;
-    final o = _imageOriginal;
-    if (i != null && o != null && i.path != o.path && i.path != except?.path) {
-      i.delete().ignore();
-    }
-  }
-
-  Future<void> _edit() async {
-    if (_isImageMode) {
-      final src = _imageOriginal;
-      if (src == null) return;
-      final r = await Navigator.of(context).push<PhotoEditResult>(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) =>
-              PhotoEditorScreen(original: src, initial: _imageEdits),
-        ),
-      );
-      if (r == null || !mounted) return;
-      final bytes = await r.file.length();
-      _dropEditedCopy(except: r.file);
-      if (!mounted) return;
-      setState(() {
-        _image = r.file;
-        _imageEdits = r.edits.isEmpty ? null : r.edits;
-        _imageBytes = bytes;
-      });
-    } else {
-      final f = _video;
-      if (f == null) return;
-      _preview?.pause();
-      final r = await Navigator.of(context).push<VideoEdits>(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => VideoEditorScreen(file: f, initial: _videoEdits),
-        ),
-      );
-      if (!mounted) return;
-      if (r != null) {
-        setState(() {
-          _videoEdits = r.isEmpty ? null : r;
-          _videoSeconds = r.isEmpty ? _videoSecondsFull : r.length;
-        });
-        final c = _preview;
-        if (c != null) {
-          await c.setVolume(_videoPreviewVolume);
-          await c.seekTo(Duration(seconds: r.trimmed ? r.start : 0));
-        }
-      }
-      _syncPreview();
-    }
-  }
-
-  /// Sound of the clip in the preview: off when it was muted, or when the audio you added
+  /// Sound of the video in the preview: off when it was muted, or when the music you added
   /// should replace it.
-  double get _videoPreviewVolume =>
-      (_videoEdits?.mute == true || (_music != null && !_keepSound)) ? 0 : 1;
+  double _previewVolume(_Item it) =>
+      (it.videoEdits?.mute == true || (_music != null && !_keepSound)) ? 0 : 1;
 
   void _syncPreview() {
     final showing = _step == 0 && !_busy && !_previewPaused && _hasMedia;
     final c = _preview;
-    if (c != null) {
-      if (showing && _mode == 1 && !_clipPhoto) {
-        c.setVolume(_videoPreviewVolume);
-        c.play();
-      } else {
-        c.pause();
-      }
+    final it = _previewFor;
+    if (c != null && it != null) {
+      c.setVolume(_previewVolume(it));
+      showing ? c.play() : c.pause();
     }
     final m = _previewMusic;
     if (m != null) {
-      m.setVolume(_musicVol);
+      m.setVolume(kMusicVolume);
       showing ? m.play() : m.pause();
     }
   }
 
   void _togglePreview() {
-    final canToggle =
-        (_mode == 1 && !_clipPhoto && _preview != null) ||
-        _previewMusic != null;
-    if (!canToggle) return;
+    if (!_canPlay) return;
     setState(() => _previewPaused = !_previewPaused);
     _syncPreview();
   }
 
-  /// Chooses (or removes) the audio and starts playing it in the preview.
+  // -------------------------------------------------------------------- music
+
+  /// Opens the music picker; the chosen track plays in the preview.
+  Future<void> _chooseMusic() async {
+    if (_busy) return;
+    _previewMusic?.pause();
+    final t = await pickMusic(context, currentId: _music?.id);
+    if (!mounted) return;
+    if (t != null) {
+      await _setMusic(t);
+    } else {
+      _syncPreview();
+    }
+  }
+
   Future<void> _setMusic(MusicTrack? t) async {
     final old = _previewMusic;
     _previewMusic = null;
-    setState(() => _music = t);
+    setState(() {
+      _music = t;
+      _previewPaused = false;
+    });
     await old?.dispose();
     if (t == null) {
       _syncPreview();
       return;
     }
     final p = MusicPlayer(t);
-    await p.init(volume: _musicVol);
+    await p.init(volume: kMusicVolume);
     if (!mounted || _music?.id != t.id) {
       await p.dispose();
       return;
@@ -470,21 +521,90 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _syncPreview();
   }
 
-  // --------------------------------------------------------------- publishing
+  // --------------------------------------------------------------------- edit
 
-  bool get _hasMedia => _isImageMode ? _image != null : _video != null;
+  Future<void> _edit() async {
+    final it = _active;
+    if (it == null || _busy) return;
+    if (!it.video) {
+      final r = await Navigator.of(context).push<PhotoEditResult>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) =>
+              PhotoEditorScreen(original: it.original, initial: it.edits),
+        ),
+      );
+      if (r == null || !mounted) return;
+      final bytes = await r.file.length();
+      _dropEditedCopy(it, except: r.file);
+      final size = await PhotoEditor.probeSize(r.file);
+      if (!mounted) return;
+      setState(() {
+        it.file = r.file;
+        it.edits = r.edits.isEmpty ? null : r.edits;
+        it.bytes = bytes;
+        if (size != null) {
+          it.width = size.width.round();
+          it.height = size.height.round();
+        }
+      });
+    } else {
+      _preview?.pause();
+      final r = await Navigator.of(context).push<VideoEdits>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) =>
+              VideoEditorScreen(file: it.file, initial: it.videoEdits),
+        ),
+      );
+      if (!mounted) return;
+      if (r != null) {
+        setState(() {
+          it.videoEdits = r.isEmpty ? null : r;
+          it.seconds = r.isEmpty ? it.secondsFull : r.length;
+        });
+        final c = _preview;
+        if (c != null) {
+          await c.setVolume(_previewVolume(it));
+          await c.seekTo(Duration(seconds: r.trimmed ? r.start : 0));
+        }
+      }
+      _syncPreview();
+    }
+  }
 
-  /// A title is required; a photo clip also needs audio (that is what makes it a clip).
-  bool get _canShare =>
-      !_busy &&
-      _hasMedia &&
-      _caption.text.trim().isNotEmpty &&
-      (!_photoClip || _music != null);
+  // --------------------------------------------------------------- navigation
+
+  void _next() {
+    if (_mode == 1 && _first != null && !_first!.video && _music == null) {
+      showToast(context, 'Add music to make a clip from a photo.');
+      unawaited(_chooseMusic());
+      return;
+    }
+    if (_mode == 0 && !_hasPhoto) {
+      showToast(context, 'A post needs at least one photo.');
+      return;
+    }
+    _go(1);
+  }
 
   void _go(int step) {
+    FocusScope.of(context).unfocus();
     setState(() => _step = step);
     _syncPreview();
   }
+
+  void _setMode(int i) {
+    if (i == _mode || _busy) return;
+    setState(() {
+      _mode = i;
+      _sel = 0;
+      _previewPaused = false;
+    });
+    unawaited(_ensurePreview());
+  }
+
+  // --------------------------------------------------------------- publishing
 
   void _onProgress(double p) {
     if (!mounted) return;
@@ -502,38 +622,85 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     });
   }
 
+  bool _willShrink(_Item it) =>
+      !_original ||
+      it.bytes > kMaxVideoMb * 1024 * 1024 ||
+      it.videoEdits != null;
+
   Future<void> _share() async {
     FocusScope.of(context).unfocus();
+    final chosen = _chosen;
+    if (chosen.isEmpty) return;
     setState(() {
       _busy = true;
       _progress = null;
       _totalBytes = 0;
-      _stage = (!_isImageMode && _willShrink)
-          ? 'Processing video...'
-          : (!_isImageMode ? 'Getting ready...' : 'Uploading...');
+      _sentBytes = 0;
+      _stage = 'Getting ready...';
     });
     _syncPreview();
+    final caption = _caption.text.trim();
+    final music = _music;
+    final title = (music?.remote ?? false) ? music!.title : null;
+    final artist = (music?.remote ?? false) && music!.artist.isNotEmpty
+        ? music.artist
+        : null;
     try {
-      if (_isImageMode) {
-        _totalBytes = _imageBytes;
+      if (chosen.length == 1 && !chosen.first.video) {
+        // one photo (a post, or a photo clip that plays for 5 seconds)
+        final it = chosen.first;
+        _totalBytes = it.bytes;
         _clock
           ..reset()
           ..start();
-        setState(() => _progress = 0);
-        final dims = await PhotoEditor.probeSize(_image!);
+        setState(() {
+          _stage = 'Uploading...';
+          _progress = 0;
+        });
+        final dims = it.width > 0 && it.height > 0
+            ? null
+            : await PhotoEditor.probeSize(it.file);
         await PostService.instance.createImagePost(
-          image: _image!,
-          caption: _caption.text.trim(),
+          image: it.file,
+          caption: caption,
           onProgress: _onProgress,
-          width: dims?.width.round() ?? 0,
-          height: dims?.height.round() ?? 0,
-          musicId: _music?.id,
-          musicVolume: _musicVol,
+          width: dims?.width.round() ?? it.width,
+          height: dims?.height.round() ?? it.height,
+          musicId: music?.id,
+          musicTitle: title,
+          musicArtist: artist,
+          musicVolume: kMusicVolume,
           clip: _photoClip,
-          clipSeconds: _clipSeconds,
+          clipSeconds: kPhotoClipSeconds,
         );
       } else {
-        await _publishVideo();
+        final up = await _uploadAll(chosen);
+        if (mounted) setState(() => _stage = 'Publishing...');
+        if (_mode == 1) {
+          final r = up.first;
+          await PostService.instance.createVideoPost(
+            media: UploadedMedia(ref: r.ref, thumbRef: r.thumbRef),
+            caption: caption,
+            duration: r.seconds,
+            width: r.width,
+            height: r.height,
+            musicId: music?.id,
+            musicTitle: title,
+            musicArtist: artist,
+            musicVolume: kMusicVolume,
+            keepSound: _keepSound,
+          );
+        } else {
+          await PostService.instance.createCarouselPost(
+            items: up,
+            caption: caption,
+            musicId: music?.id,
+            musicTitle: title,
+            musicArtist: artist,
+            musicVolume: kMusicVolume,
+            keepSound: _keepSound,
+          );
+        }
       }
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -545,30 +712,125 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  bool get _willShrink =>
-      !_original ||
-      _videoBytes > kMaxVideoMb * 1024 * 1024 ||
-      _videoEdits != null;
+  /// Saves the videos again where needed (one at a time), then sends everything up, three
+  /// files at the same time.
+  Future<List<PostItem>> _uploadAll(List<_Item> items) async {
+    // 1) videos: only saved again (up to 1080p, or 720p when "Original quality" is off) when
+    //    they were edited, when the switch is off or when they are bigger than the service
+    //    accepts. The index of the video goes to the front so it starts at once for viewers;
+    //    nothing is re-encoded for that.
+    final ready = <int, _Ready>{};
+    try {
+      var n = 0;
+      final videoCount = items.where((i) => i.video).length;
+      for (var i = 0; i < items.length; i++) {
+        final it = items[i];
+        if (!it.video) continue;
+        n++;
+        final tag = videoCount > 1 ? ' $n of $videoCount' : '';
+        ready[i] = await _prepareVideo(it, tag);
+      }
 
-  static String _mb(int bytes) => bytes >= 1024 * 1024
-      ? '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB'
-      : '${(bytes / 1024).round()} KB';
+      // 2) upload
+      var total = 0;
+      for (var i = 0; i < items.length; i++) {
+        total += items[i].video
+            ? await ready[i]!.file.length()
+            : items[i].bytes;
+      }
+      _totalBytes = total;
+      _clock
+        ..reset()
+        ..start();
+      if (mounted) {
+        setState(() {
+          _stage = 'Uploading...';
+          _progress = 0;
+        });
+      }
+      final sent = List<double>.filled(items.length, 0);
+      final sizes = [
+        for (var i = 0; i < items.length; i++)
+          items[i].video ? ready[i]!.file.lengthSync() : items[i].bytes,
+      ];
+      void report(int i, double p) {
+        sent[i] = p;
+        var done = 0.0;
+        for (var k = 0; k < items.length; k++) {
+          done += sent[k] * sizes[k];
+        }
+        _sentBytes = done.round();
+        _onProgress(total == 0 ? 0 : done / total);
+      }
 
-  Future<void> _publishVideo() async {
-    // 1) Original quality: the file is uploaded untouched. It is only saved again (at up to
-    //    1080p, or 720p when "Original quality" is off) when the clip was edited, when the
-    //    user turned the switch off, or when it is bigger than the service accepts.
-    File out = _video!;
+      final out = List<PostItem?>.filled(items.length, null);
+      var next = 0;
+      Future<void> worker() async {
+        while (true) {
+          final i = next++;
+          if (i >= items.length) return;
+          final it = items[i];
+          if (it.video) {
+            final r = ready[i]!;
+            final media = await MediaServer.instance.uploadVideo(
+              file: r.file,
+              thumb: it.thumb,
+              onProgress: (p) => report(i, p),
+            );
+            out[i] = PostItem(
+              video: true,
+              ref: media.ref,
+              thumbRef: media.thumbRef,
+              width: r.width,
+              height: r.height,
+              seconds: it.seconds,
+            );
+          } else {
+            final media = await MediaServer.instance.uploadImage(
+              it.file,
+              onProgress: (p) => report(i, p),
+            );
+            out[i] = PostItem(
+              video: false,
+              ref: media.ref,
+              width: it.width,
+              height: it.height,
+            );
+          }
+          report(i, 1);
+        }
+      }
+
+      await Future.wait([
+        for (var w = 0; w < math.min(3, items.length); w++) worker(),
+      ]);
+      return [for (final o in out) o!];
+    } finally {
+      for (final r in ready.values) {
+        r.temp?.delete().ignore();
+      }
+      VideoCompress.deleteAllCache();
+    }
+  }
+
+  Future<_Ready> _prepareVideo(_Item it, String tag) async {
+    var file = it.file;
     MediaInfo? info;
-    if (_willShrink) {
+    if (_willShrink(it)) {
+      if (mounted) {
+        setState(() {
+          _stage = 'Processing video$tag...';
+          _progress = null;
+        });
+      }
       final sub = VideoCompress.compressProgress$.subscribe((p) {
         if (mounted) setState(() => _progress = (p / 100).clamp(0.0, 1.0));
       });
-      final ve = _videoEdits;
+      final ve = it.videoEdits;
       final cut = ve != null && ve.trimmed;
       try {
         info = await VideoCompress.compressVideo(
-          _video!.path,
+          it.file.path,
           quality: _original
               ? VideoQuality.Res1920x1080Quality
               : VideoQuality.Res1280x720Quality,
@@ -586,67 +848,31 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           'Could not process that video. Try another one.',
         );
       }
-      out = shrunk;
+      file = shrunk;
     }
-
-    // 2) Put the index of the video at the front so it starts playing straight away for
-    //    viewers. Nothing is re-encoded; the picture and sound bytes stay identical.
     if (mounted) {
       setState(() {
         _stage = 'Getting ready...';
         _progress = null;
       });
     }
-    final fast = await Mp4FastStart.run(out);
-    final tempCopy = fast.path != out.path ? fast : null;
-    out = fast;
-
-    try {
-      // 3) upload straight to the Tigris bucket
-      _totalBytes = await out.length();
-      _clock
-        ..reset()
-        ..start();
-      if (mounted) {
-        setState(() {
-          _stage = 'Uploading...';
-          _progress = 0;
-        });
-      }
-      // proportions: the picked file's (already turned upright); a saved copy keeps them
-      var w = _videoW;
-      var h = _videoH;
-      if (w == 0 || h == 0) {
-        w = info?.width ?? 0;
-        h = info?.height ?? 0;
-      }
-      final media = await MediaServer.instance.uploadVideo(
-        file: out,
-        thumb: _videoThumb,
-        onProgress: _onProgress,
-      );
-      if (mounted) setState(() => _stage = 'Publishing...');
-      await PostService.instance.createVideoPost(
-        media: media,
-        caption: _caption.text.trim(),
-        duration: _videoSeconds,
-        width: w,
-        height: h,
-        musicId: _music?.id,
-        musicVolume: _musicVol,
-        keepSound: _keepSound,
-      );
-    } finally {
-      tempCopy?.delete().ignore();
+    final fast = await Mp4FastStart.run(file);
+    final temp = fast.path != file.path ? fast : null;
+    // proportions: the picked file's (already turned upright); a saved copy keeps them
+    var w = it.width;
+    var h = it.height;
+    if (w == 0 || h == 0) {
+      w = info?.width ?? 0;
+      h = info?.height ?? 0;
     }
-    VideoCompress.deleteAllCache();
+    return _Ready(fast, temp, w, h);
   }
 
   /// "31.2 of 74.0 MB  ·  2.8 MB/s"
   String get _uploadDetail {
     final p = _progress;
     if (p == null || _totalBytes <= 0 || _stage != 'Uploading...') return '';
-    final sent = (p * _totalBytes).round();
+    final sent = _sentBytes > 0 ? _sentBytes : (p * _totalBytes).round();
     final secs = _clock.elapsedMilliseconds / 1000;
     final speed = (secs >= 1 && sent > 0)
         ? '  \u00b7  ${(sent / secs / (1024 * 1024)).toStringAsFixed(1)} MB/s'
@@ -654,7 +880,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     return '${_mb(sent)} of ${_mb(_totalBytes)}$speed';
   }
 
+  static String _mb(int bytes) => bytes >= 1024 * 1024
+      ? '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB'
+      : '${(bytes / 1024).round()} KB';
+
   // --------------------------------------------------------------------- build
+
+  String get _title => _mode == 1 ? 'New clip' : 'New post';
 
   @override
   Widget build(BuildContext context) {
@@ -666,6 +898,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       child: Scaffold(
         appBar: AppBar(
           leading: IconButton(
+            key: const ValueKey('createBack'),
             icon: Icon(
               _step == 0 ? Icons.close_rounded : Icons.arrow_back_rounded,
             ),
@@ -673,7 +906,21 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ? null
                 : () => _step == 0 ? Navigator.of(context).pop(false) : _go(0),
           ),
-          title: Text(_step == 0 ? 'Create' : 'Details'),
+          title: Text(_title),
+          actions: [
+            if (_step == 0)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: TextButton(
+                  key: const ValueKey('nextButton'),
+                  onPressed: _hasMedia ? _next : null,
+                  child: const Text(
+                    'Next',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ),
+          ],
         ),
         body: ContentWidth(
           maxWidth: 640,
@@ -688,119 +935,131 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   Widget _previewStep(BuildContext context) {
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-          child: PillTabs(
-            labels: const ['Post', 'Clips'],
-            icons: const [Icons.image_rounded, Icons.smart_display_rounded],
-            index: _mode,
-            onChanged: (i) {
-              setState(() {
-                _mode = i;
-                // a photo picked in Post becomes a photo clip in Clips
-                if (i == 1) _clipPhoto = _image != null;
-              });
-              _syncPreview();
-            },
-          ),
-        ),
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _hasMedia ? _togglePreview : (_pickMedia),
-              child: _frame(context, _previewContent(context)),
-            ),
+            padding: const EdgeInsets.fromLTRB(0, 4, 0, 8),
+            child: _frame(context),
           ),
         ),
-        SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
-            child: _hasMedia
-                ? Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _audioBar(context),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _pickMedia,
-                              icon: const Icon(Icons.swap_horiz_rounded),
-                              label: const Text('Change'),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _edit,
-                              icon: const Icon(Icons.tune_rounded),
-                              label: const Text('Edit'),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: () {
-                            if (_photoClip && _music == null) {
-                              showToast(
-                                context,
-                                'Add audio to make a clip from a photo.',
-                              );
-                              _audioSheet();
-                              return;
-                            }
-                            _go(1);
-                          },
-                          icon: const Icon(Icons.arrow_forward_rounded),
-                          label: const Text('Next'),
-                        ),
-                      ),
-                    ],
-                  )
-                : SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _pickMedia,
-                      icon: Icon(
-                        _mode == 0
-                            ? Icons.add_photo_alternate_rounded
-                            : Icons.video_call_rounded,
-                      ),
-                      label: Text(
-                        _mode == 0
-                            ? 'Choose a photo'
-                            : 'Choose a video or photo',
-                      ),
-                    ),
-                  ),
-          ),
-        ),
+        if (_mode == 0 && _hasMedia) _strip(context),
+        if (_hasMedia) _toolbar(context) else _chooseButton(context),
+        _modeTabs(context),
       ],
     );
   }
 
-  /// The biggest 9:16 frame that fits the space. Nothing is drawn on top of the media.
-  Widget _frame(BuildContext context, Widget child, {double? maxWidth}) {
+  Widget _chooseButton(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
+    child: SizedBox(
+      width: double.infinity,
+      child: FilledButton.icon(
+        key: const ValueKey('chooseMedia'),
+        onPressed: _pick,
+        icon: Icon(
+          _mode == 0
+              ? Icons.add_photo_alternate_rounded
+              : Icons.video_call_rounded,
+        ),
+        label: Text(
+          _mode == 0 ? 'Choose photos or videos' : 'Choose a video or photo',
+        ),
+      ),
+    ),
+  );
+
+  /// The biggest frame with the post's proportions that fits the space. Besides the media it
+  /// only holds the play / pause sign and the "2/5" counter.
+  Widget _frame(BuildContext context) {
     return LayoutBuilder(
       builder: (context, c) {
-        final w = math.min(
-          math.min(c.maxWidth, maxWidth ?? double.infinity),
-          c.maxHeight * 9 / 16,
-        );
+        final a = _frameAspect;
+        var w = c.maxWidth;
+        var h = w / a;
+        if (h > c.maxHeight) {
+          h = c.maxHeight;
+          w = h * a;
+        }
         return Center(
           child: SizedBox(
             key: const ValueKey('previewFrame'),
             width: w,
-            height: w * 16 / 9,
+            height: h,
             child: ClipRect(
-              child: ColoredBox(color: const Color(0xFF0A0A0A), child: child),
+              child: ColoredBox(
+                color: const Color(0xFF0A0A0A),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _hasMedia ? _togglePreview : _pick,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _previewContent(context),
+                      if (_mode == 0 && _items.length > 1)
+                        Positioned(
+                          right: 10,
+                          top: 10,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              '${_sel + 1}/${_items.length}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (_hasMedia && _canPlay) ...[
+                        if (_previewPaused)
+                          const IgnorePointer(
+                            child: Center(
+                              child: Icon(
+                                Icons.play_arrow_rounded,
+                                size: 84,
+                                color: Colors.white,
+                                shadows: [
+                                  Shadow(blurRadius: 16, color: Colors.black54),
+                                ],
+                              ),
+                            ),
+                          ),
+                        Positioned(
+                          left: 10,
+                          bottom: 10,
+                          child: GestureDetector(
+                            key: const ValueKey('previewPlayPause'),
+                            behavior: HitTestBehavior.opaque,
+                            onTap: _togglePreview,
+                            child: Container(
+                              width: 42,
+                              height: 42,
+                              decoration: const BoxDecoration(
+                                color: Colors.black54,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                _previewPaused
+                                    ? Icons.play_arrow_rounded
+                                    : Icons.pause_rounded,
+                                color: Colors.white,
+                                size: 28,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
         );
@@ -809,7 +1068,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   Widget _previewContent(BuildContext context) {
-    if (!_hasMedia) {
+    final it = _active;
+    if (it == null) {
       return Center(
         child: Icon(
           _mode == 0 ? Icons.image_outlined : Icons.smart_display_outlined,
@@ -818,23 +1078,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         ),
       );
     }
-    if (_isImageMode) {
+    if (!it.video) {
       return SizedBox.expand(
         child: Image.file(
-          _image!,
+          it.file,
           fit: BoxFit.contain,
           cacheWidth: 1600,
           filterQuality: FilterQuality.medium,
         ),
       );
     }
-    return _videoContent();
-  }
-
-  /// The clip, fitted inside the frame (never stretched or cropped).
-  Widget _videoContent() {
     final c = _preview;
-    if (c != null && c.value.isInitialized) {
+    if (c != null && c.value.isInitialized && identical(_previewFor, it)) {
       return SizedBox.expand(
         child: FittedBox(
           fit: BoxFit.contain,
@@ -846,126 +1101,351 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         ),
       );
     }
-    final t = _videoThumb;
+    final t = it.thumb;
     return t == null
-        ? const SizedBox.shrink()
+        ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
         : SizedBox.expand(child: Image.file(t, fit: BoxFit.contain));
+  }
+
+  /// The chosen photos and videos, like the strip under the picture on Instagram.
+  Widget _strip(BuildContext context) {
+    return SizedBox(
+      height: 78,
+      child: ListView(
+        key: const ValueKey('mediaStrip'),
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        children: [
+          for (var i = 0; i < _items.length; i++) _tile(context, i),
+          if (_items.length < kMaxPostItems)
+            GestureDetector(
+              key: const ValueKey('addMore'),
+              onTap: _pick,
+              child: Container(
+                width: 64,
+                height: 64,
+                margin: const EdgeInsets.only(left: 2),
+                decoration: BoxDecoration(
+                  color: context.cardHigh,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.add_rounded, size: 30),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tile(BuildContext context, int i) {
+    final it = _items[i];
+    final selected = i == _sel;
+    final cover = it.video ? it.thumb : it.file;
+    return GestureDetector(
+      key: ValueKey('tile$i'),
+      onTap: () => _select(i),
+      child: Container(
+        width: 64,
+        height: 64,
+        margin: const EdgeInsets.only(right: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? AppTheme.volt : Colors.transparent,
+            width: 2.5,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(7),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (cover != null)
+                Image.file(cover, fit: BoxFit.cover, cacheWidth: 200)
+              else
+                ColoredBox(color: context.cardHigh),
+              if (!selected) const ColoredBox(color: Color(0x55000000)),
+              if (it.video)
+                const Center(
+                  child: Icon(
+                    Icons.play_arrow_rounded,
+                    color: Colors.white,
+                    size: 24,
+                  ),
+                ),
+              Positioned(
+                right: 0,
+                top: 0,
+                child: GestureDetector(
+                  key: ValueKey('remove$i'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _remove(i),
+                  child: Container(
+                    width: 22,
+                    height: 22,
+                    alignment: Alignment.center,
+                    child: Container(
+                      width: 16,
+                      height: 16,
+                      decoration: const BoxDecoration(
+                        color: Colors.black87,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.close_rounded,
+                        size: 11,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Edit, Music and (in Clips) Change.
+  Widget _toolbar(BuildContext context) {
+    Widget tool(Key key, IconData icon, String label, VoidCallback? onTap) =>
+        Expanded(
+          child: InkWell(
+            key: key,
+            borderRadius: BorderRadius.circular(14),
+            onTap: _busy ? null : onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 24),
+                  const SizedBox(height: 4),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+    final m = _music;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
+      child: Row(
+        children: [
+          tool(const ValueKey('editButton'), Icons.tune_rounded, 'Edit', _edit),
+          tool(
+            const ValueKey('audioBar'),
+            Icons.music_note_rounded,
+            m == null ? (_photoClip ? 'Add music (needed)' : 'Music') : m.title,
+            _chooseMusic,
+          ),
+          if (_mode == 1)
+            tool(
+              const ValueKey('changeButton'),
+              Icons.swap_horiz_rounded,
+              'Change',
+              _pick,
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Post | Clips, as plain words with an underline (like the bottom of Instagram's picker).
+  Widget _modeTabs(BuildContext context) {
+    Widget tab(int i, String label) {
+      final on = _mode == i;
+      return Expanded(
+        child: GestureDetector(
+          key: ValueKey('mode$i'),
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _setMode(i),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Column(
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w900,
+                    color: on ? null : context.muted,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  height: 3,
+                  width: on ? 34 : 0,
+                  decoration: BoxDecoration(
+                    color: AppTheme.volt,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SafeArea(
+      top: false,
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: context.hairline)),
+        ),
+        child: Row(children: [tab(0, 'Post'), tab(1, 'Clips')]),
+      ),
+    );
   }
 
   // ---- step 2: details ----
 
   Widget _detailsStep(BuildContext context) {
-    final isVideo = !_isImageMode;
-    final thumb = isVideo
-        ? (_videoThumb == null
-              ? const SizedBox.shrink()
-              : SizedBox.expand(
-                  child: Image.file(_videoThumb!, fit: BoxFit.contain),
-                ))
-        : SizedBox.expand(
-            child: Image.file(_image!, fit: BoxFit.contain, cacheWidth: 400),
-          );
-
+    final first = _chosen.isEmpty ? null : _chosen.first;
+    final cover = first == null
+        ? null
+        : (first.video ? first.thumb : first.file);
+    final needsPhoto = _mode == 0 && !_hasPhoto;
+    final m = _music;
     return Column(
       children: [
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+            padding: const EdgeInsets.fromLTRB(0, 8, 0, 20),
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 96,
-                    height: 96 * 16 / 9,
-                    child: _frame(context, thumb, maxWidth: 96),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _mode == 1 ? 'Clip' : 'Photo',
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.high_quality_rounded,
-                              size: 16,
-                              color: AppTheme.volt,
-                            ),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                _summary(),
-                                style: TextStyle(
-                                  color: context.muted,
-                                  fontWeight: FontWeight.w700,
-                                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: SizedBox(
+                        key: const ValueKey('detailsThumb'),
+                        width: 76,
+                        height: 76,
+                        child: cover == null
+                            ? ColoredBox(color: context.cardHigh)
+                            : Image.file(
+                                cover,
+                                fit: BoxFit.cover,
+                                cacheWidth: 300,
                               ),
-                            ),
-                          ],
-                        ),
-                        if (_music != null) ...[
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.music_note_rounded,
-                                size: 16,
-                                color: AppTheme.volt,
-                              ),
-                              const SizedBox(width: 6),
-                              Flexible(
-                                child: Text(
-                                  _music!.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: context.muted,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              TextField(
-                controller: _caption,
-                enabled: !_busy,
-                maxLines: 3,
-                minLines: 2,
-                maxLength: 200,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'Title',
-                  hintText: 'Give it a title',
-                  helperText: 'Required',
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        key: const ValueKey('captionField'),
+                        controller: _caption,
+                        enabled: !_busy,
+                        maxLines: 5,
+                        minLines: 3,
+                        maxLength: 200,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: InputDecoration(
+                          hintText: 'Write a caption...',
+                          helperText: _caption.text.trim().isEmpty
+                              ? 'A caption is required'
+                              : null,
+                          filled: false,
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          disabledBorder: InputBorder.none,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              if (isVideo) ...[
-                const SizedBox(height: 12),
-                _qualityTile(context),
-              ],
+              Divider(height: 1, color: context.hairline),
+              ListTile(
+                key: const ValueKey('musicRow'),
+                leading: const Icon(Icons.music_note_rounded),
+                title: Text(
+                  m == null ? 'Add music' : m.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: Text(
+                  m == null
+                      ? (_photoClip
+                            ? 'A photo clip needs music'
+                            : 'InstantGram and Epidemic Sound')
+                      : (m.artist.isEmpty ? m.mood : m.artist),
+                ),
+                trailing: m == null
+                    ? const Icon(Icons.chevron_right_rounded)
+                    : IconButton(
+                        key: const ValueKey('removeMusic'),
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: _busy ? null : () => _setMusic(null),
+                      ),
+                onTap: _busy ? null : _chooseMusic,
+              ),
+              if (m != null && _hasVideo)
+                SwitchListTile(
+                  key: const ValueKey('keepSoundRow'),
+                  value: _keepSound,
+                  onChanged: _busy
+                      ? null
+                      : (v) => setState(() {
+                          _keepSound = v;
+                          _syncPreview();
+                        }),
+                  activeTrackColor: AppTheme.volt,
+                  secondary: const Icon(Icons.volume_up_rounded),
+                  title: const Text(
+                    "Keep the video's own sound",
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              if (_photoClip)
+                ListTile(
+                  key: const ValueKey('clipLengthRow'),
+                  leading: const Icon(Icons.timer_outlined),
+                  title: const Text(
+                    'Plays for $kPhotoClipSeconds seconds',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              if (_hasVideo) _qualityTile(context),
+              ListTile(
+                leading: const Icon(Icons.high_quality_rounded),
+                title: Text(
+                  _summary(),
+                  style: TextStyle(
+                    color: context.muted,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+              if (needsPhoto)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: Text('A post needs at least one photo.'),
+                ),
             ],
           ),
         ),
         SafeArea(
           top: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -993,25 +1473,33 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ],
                 SizedBox(
                   width: double.infinity,
-                  child: FilledButton.icon(
+                  child: FilledButton(
+                    key: const ValueKey('shareButton'),
                     onPressed: _canShare ? _share : null,
-                    icon: _busy
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: AppTheme.ink,
-                            ),
+                    child: _busy
+                        ? Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  color: AppTheme.ink,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Flexible(
+                                child: Text(
+                                  _progress == null
+                                      ? _stage
+                                      : '$_stage ${(_progress! * 100).round()}%',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
                           )
-                        : const Icon(Icons.bolt_rounded),
-                    label: Text(
-                      _busy
-                          ? (_progress == null
-                                ? _stage
-                                : '$_stage ${(_progress! * 100).round()}%')
-                          : 'Publish',
-                    ),
+                        : const Text('Share'),
                   ),
                 ),
               ],
@@ -1023,296 +1511,72 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   String _summary() {
-    if (_isImageMode) {
-      final base =
-          '${_imageEdits != null ? 'Edited' : 'Original'}  \u00b7  ${_mb(_imageBytes)}';
-      return _photoClip ? '$base  \u00b7  ${_clipSeconds}s' : base;
-    }
-    final e = _videoEdits;
-    final tags = <String>[
-      formatDuration(_videoSeconds),
-      _mb(_videoBytes),
-      if (e != null && e.trimmed) 'Trimmed',
-      if (e != null && e.mute) 'No sound',
+    final list = _chosen;
+    final photos = list.where((i) => !i.video).length;
+    final videos = list.length - photos;
+    final bytes = list.fold<int>(0, (s, i) => s + i.bytes);
+    final parts = <String>[
+      if (photos > 0) '$photos photo${photos == 1 ? '' : 's'}',
+      if (videos > 0) '$videos video${videos == 1 ? '' : 's'}',
+      _mb(bytes),
     ];
-    return tags.join('  \u00b7  ');
-  }
-
-  /// The audio row under the preview: tap it to choose music, set the volume and more.
-  Widget _audioBar(BuildContext context) {
-    final m = _music;
-    final needed = _photoClip && m == null;
-    return Material(
-      color: context.card,
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        key: const ValueKey('audioBar'),
-        borderRadius: BorderRadius.circular(18),
-        onTap: _busy ? null : _audioSheet,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-          child: Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: const BoxDecoration(
-                  color: AppTheme.volt,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.music_note_rounded,
-                  size: 18,
-                  color: AppTheme.ink,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  m == null
-                      ? (needed ? 'Add audio to make this a clip' : 'Add audio')
-                      : '${m.title}  \u00b7  ${(_musicVol * 100).round()}%',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-              Icon(
-                m == null ? Icons.add_rounded : Icons.tune_rounded,
-                color: context.muted,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _audioSheet() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          final m = _music;
-          void both(VoidCallback f) {
-            setState(f);
-            setSheet(() {});
-          }
-
-          return SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Audio',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Container(
-                        width: 42,
-                        height: 42,
-                        decoration: const BoxDecoration(
-                          color: AppTheme.volt,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.music_note_rounded,
-                          color: AppTheme.ink,
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              m == null ? 'No audio yet' : m.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 16,
-                              ),
-                            ),
-                            Text(
-                              m == null
-                                  ? (_photoClip
-                                        ? 'A photo clip needs audio'
-                                        : 'Pick a track from InstantGram music')
-                                  : '${m.mood}  \u00b7  ${m.bpm} BPM',
-                              style: TextStyle(
-                                color: context.muted,
-                                fontSize: 12.5,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      FilledButton.tonal(
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size(0, 44),
-                          padding: const EdgeInsets.symmetric(horizontal: 18),
-                        ),
-                        onPressed: () async {
-                          _previewMusic?.pause();
-                          final t = await pickMusic(ctx, currentId: m?.id);
-                          if (t != null && mounted) {
-                            await _setMusic(t);
-                            setSheet(() {});
-                          } else {
-                            _syncPreview();
-                          }
-                        },
-                        child: Text(m == null ? 'Choose' : 'Change'),
-                      ),
-                    ],
-                  ),
-                  if (m != null) ...[
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.volume_up_rounded,
-                          size: 20,
-                          color: context.muted,
-                        ),
-                        Expanded(
-                          child: Slider(
-                            value: _musicVol,
-                            min: 0.1,
-                            onChanged: (v) {
-                              both(() => _musicVol = v);
-                              _previewMusic?.setVolume(v);
-                            },
-                          ),
-                        ),
-                        Text(
-                          '${(_musicVol * 100).round()}%',
-                          style: const TextStyle(fontWeight: FontWeight.w800),
-                        ),
-                      ],
-                    ),
-                    if (!_isImageMode)
-                      SwitchListTile(
-                        value: _keepSound,
-                        onChanged: (v) {
-                          both(() => _keepSound = v);
-                          _preview?.setVolume(_videoPreviewVolume);
-                        },
-                        activeTrackColor: AppTheme.volt,
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text(
-                          "Keep the clip's own sound",
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                  ],
-                  if (_photoClip) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      'Length',
-                      style: TextStyle(
-                        color: context.muted,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        for (final sec in const [5, 10, 15, 20, 30])
-                          ChoiceChip(
-                            label: Text('${sec}s'),
-                            selected: _clipSeconds == sec,
-                            onSelected: (_) => both(() => _clipSeconds = sec),
-                          ),
-                      ],
-                    ),
-                  ],
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      if (m != null)
-                        TextButton.icon(
-                          onPressed: () async {
-                            await _setMusic(null);
-                            setSheet(() {});
-                          },
-                          icon: const Icon(Icons.delete_outline_rounded),
-                          label: const Text('Remove audio'),
-                        ),
-                      const Spacer(),
-                      FilledButton(
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size(110, 50),
-                        ),
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text('Done'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-    _syncPreview();
+    if (list.length == 1) {
+      final it = list.first;
+      if (it.video) {
+        final e = it.videoEdits;
+        return [
+          formatDuration(it.seconds),
+          _mb(it.bytes),
+          if (e != null && e.trimmed) 'Trimmed',
+          if (e != null && e.mute) 'No sound',
+        ].join('  \u00b7  ');
+      }
+      return '${it.edits != null ? 'Edited' : 'Original'}  \u00b7  ${_mb(it.bytes)}';
+    }
+    return parts.join('  \u00b7  ');
   }
 
   String _qualityText(bool big) {
+    final videos = _chosen.where((i) => i.video).toList();
+    final it = videos.first;
+    final secs = it.secondsFull;
     if (big && _original) {
-      return 'This file is over $kMaxVideoMb MB, so it will be shrunk to fit.';
+      return 'A video is over $kMaxVideoMb MB, so it will be shrunk to fit.';
     }
     if (!_original) {
-      final heavy =
-          _videoSecondsFull > 0 &&
-          _videoBytes * 8 / _videoSecondsFull / 1e6 > kSmoothMbps;
+      final heavy = secs > 0 && it.bytes * 8 / secs / 1e6 > kSmoothMbps;
       return heavy
-          ? 'This clip is very heavy (${(_videoBytes * 8 / _videoSecondsFull / 1e6).round()} Mbps) and would buffer for viewers, so it is saved as a smooth 720p copy first. Turn on Original quality to upload it as recorded.'
+          ? 'This video is very heavy (${(it.bytes * 8 / secs / 1e6).round()} Mbps) and would buffer for viewers, so it is saved as a smooth 720p copy first. Turn on Original quality to upload it as recorded.'
           : 'Saved at 720p on your phone first. Smaller, so it uploads and plays faster.';
     }
-    final mbps = _videoSecondsFull > 0
-        ? _videoBytes * 8 / _videoSecondsFull / 1e6
-        : 0;
-    final edited = _videoEdits != null
-        ? ' Edited clips are saved again at up to 1080p.'
+    final mbps = secs > 0 ? it.bytes * 8 / secs / 1e6 : 0;
+    final edited = videos.any((v) => v.videoEdits != null)
+        ? ' Edited videos are saved again at up to 1080p.'
         : '';
     if (mbps > 15) {
-      return 'Uploaded as recorded (${mbps.round()} Mbps). Heavy clips like this can '
+      return 'Uploaded as recorded (${mbps.round()} Mbps). Heavy videos like this can '
           'buffer on slow connections: turn this off for smoother playback.$edited';
     }
     return 'Uploaded exactly as recorded. Big files take longer to upload and to load for viewers.$edited';
   }
 
   Widget _qualityTile(BuildContext context) {
-    final big = _videoBytes > kMaxVideoMb * 1024 * 1024;
-    return Container(
-      decoration: BoxDecoration(
-        color: context.card,
-        borderRadius: BorderRadius.circular(24),
+    final big = _chosen.any(
+      (i) => i.video && i.bytes > kMaxVideoMb * 1024 * 1024,
+    );
+    return SwitchListTile(
+      key: const ValueKey('qualityRow'),
+      value: _original,
+      onChanged: _busy ? null : (v) => setState(() => _original = v),
+      activeTrackColor: AppTheme.volt,
+      secondary: const Icon(Icons.hd_rounded),
+      title: const Text(
+        'Original quality',
+        style: TextStyle(fontWeight: FontWeight.w800),
       ),
-      child: SwitchListTile(
-        value: _original,
-        onChanged: _busy ? null : (v) => setState(() => _original = v),
-        activeTrackColor: AppTheme.volt,
-        contentPadding: const EdgeInsets.fromLTRB(18, 4, 12, 4),
-        title: const Text(
-          'Original quality',
-          style: TextStyle(fontWeight: FontWeight.w800),
-        ),
-        subtitle: Text(
-          _qualityText(big),
-          style: TextStyle(color: context.muted, fontSize: 12.5, height: 1.3),
-        ),
+      subtitle: Text(
+        _qualityText(big),
+        style: TextStyle(color: context.muted, fontSize: 12.5, height: 1.3),
       ),
     );
   }

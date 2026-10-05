@@ -235,11 +235,11 @@ void main() {
     expect(find.text('Crop'), findsOneWidget);
     expect(find.text('Filters'), findsOneWidget);
     expect(find.text('Adjust'), findsOneWidget);
-    expect(find.byType(CropOverlay), findsOneWidget);
-
-    await t.tap(find.text('Filters'));
-    await t.pump(const Duration(milliseconds: 300));
+    // opens on Filters, like Instagram
     expect(find.text('Mono'), findsOneWidget);
+    expect(find.byType(CropOverlay), findsNothing);
+    expect(find.byKey(const ValueKey('editorDone')), findsOneWidget);
+    expect(find.byKey(const ValueKey('editorClose')), findsOneWidget);
     await t.tap(find.text('Adjust'));
     await t.pump(const Duration(milliseconds: 300));
     expect(find.text('Brightness'), findsOneWidget);
@@ -247,6 +247,7 @@ void main() {
 
     await t.tap(find.text('Crop'));
     await t.pump(const Duration(milliseconds: 300));
+    expect(find.byType(CropOverlay), findsOneWidget);
     await t.tap(find.byIcon(Icons.rotate_right_rounded));
     await t.pump(const Duration(milliseconds: 300));
     await t.tap(find.text('Done'));

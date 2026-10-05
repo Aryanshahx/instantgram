@@ -87,6 +87,8 @@ class _PostDetailsSheetState extends State<PostDetailsSheet> {
       ? 'Photo clip'
       : _post.isVideo
       ? 'Video clip'
+      : _post.isCarousel
+      ? 'Carousel (${_post.media.length} items)'
       : 'Photo post';
 
   @override
@@ -115,9 +117,9 @@ class _PostDetailsSheetState extends State<PostDetailsSheet> {
         Icons.music_note_rounded,
         'Audio',
         track != null
-            ? (p.isVideo
-                  ? '${track.title}${p.keepSound ? ' + original sound' : ''}'
-                  : track.title)
+            ? ((p.isVideo || p.media.any((m) => m.video))
+                  ? '${track.label}${p.keepSound ? ' + original sound' : ''}'
+                  : track.label)
             : (p.isVideo ? 'Original sound' : 'None'),
       ),
     ];

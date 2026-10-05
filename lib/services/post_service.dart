@@ -87,9 +87,11 @@ class PostService {
     int width = 0,
     int height = 0,
     String? musicId,
+    String? musicTitle,
+    String? musicArtist,
     double musicVolume = 0.8,
     bool clip = false,
-    int clipSeconds = 10,
+    int clipSeconds = kPhotoClipSeconds,
   }) async {
     // Look up the profile while the photo is uploading (saves a round trip).
     final meFuture = _me();
@@ -112,9 +114,58 @@ class PostService {
       'imageUrl': uploaded.ref,
       if (clip) 'videoDuration': clipSeconds,
       'musicId': ?musicId,
+      'musicTitle': ?musicTitle,
+      'musicArtist': ?musicArtist,
       if (musicId != null) 'musicVolume': musicVolume,
       if (width > 0 && height > 0) 'imageWidth': width,
       if (width > 0 && height > 0) 'imageHeight': height,
+      'likeCount': 0,
+      'commentCount': 0,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    batch.update(_db.collection('users').doc(me.uid), {
+      'postsCount': FieldValue.increment(1),
+    });
+    await batch.commit();
+  }
+
+  /// A post with several photos and videos (at least one photo), swiped sideways. [items]
+  /// are already uploaded. It is stored as a normal 'image' post (so older versions of the app
+  /// still show its first photo) plus a `media` list.
+  Future<void> createCarouselPost({
+    required List<PostItem> items,
+    required String caption,
+    String? musicId,
+    String? musicTitle,
+    String? musicArtist,
+    double musicVolume = 0.8,
+    bool keepSound = true,
+  }) async {
+    final photos = items.where((i) => !i.video).toList();
+    if (items.length < 2 || items.length > kMaxPostItems || photos.isEmpty) {
+      throw ArgumentError(
+        'A carousel needs 2-$kMaxPostItems items with a photo.',
+      );
+    }
+    final me = await _me();
+    final ref = _posts.doc();
+    final first = photos.first;
+    final batch = _db.batch();
+    batch.set(ref, {
+      'authorId': me.uid,
+      'authorUsername': me.username,
+      'authorPhotoUrl': me.photoUrl,
+      'type': 'image',
+      'caption': caption.trim(),
+      'imageUrl': first.ref,
+      if (first.width > 0 && first.height > 0) 'imageWidth': first.width,
+      if (first.width > 0 && first.height > 0) 'imageHeight': first.height,
+      'media': [for (final i in items) i.toMap()],
+      'musicId': ?musicId,
+      'musicTitle': ?musicTitle,
+      'musicArtist': ?musicArtist,
+      if (musicId != null) 'musicVolume': musicVolume,
+      if (musicId != null) 'keepSound': keepSound,
       'likeCount': 0,
       'commentCount': 0,
       'createdAt': FieldValue.serverTimestamp(),
@@ -133,6 +184,8 @@ class PostService {
     required int width,
     required int height,
     String? musicId,
+    String? musicTitle,
+    String? musicArtist,
     double musicVolume = 0.8,
     bool keepSound = true,
   }) async {
@@ -151,6 +204,8 @@ class PostService {
       'videoWidth': width,
       'videoHeight': height,
       'musicId': ?musicId,
+      'musicTitle': ?musicTitle,
+      'musicArtist': ?musicArtist,
       if (musicId != null) 'musicVolume': musicVolume,
       if (musicId != null) 'keepSound': keepSound,
       'likeCount': 0,
@@ -183,10 +238,11 @@ class PostService {
     });
     await batch.commit();
     // Free the space in the bucket (best effort).
-    await MediaServer.instance.deleteQuietly(
-      p.isVideo ? p.videoRef : p.imageRef,
-      p.thumbRef,
-    );
+    await MediaServer.instance.deleteRefs([
+      if (p.media.isNotEmpty)
+        for (final m in p.media) ...[m.ref, m.thumbRef]
+      else ...[p.isVideo ? p.videoRef : p.imageRef, p.thumbRef],
+    ]);
   }
 
   // ------------------------------------------------------------------- saved

@@ -1,9 +1,66 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../core/media_url.dart';
+import 'music.dart';
 
 int _int(Object? v) => v is num ? v.toInt() : 0;
 String _str(Object? v) => v is String ? v : '';
+
+/// One photo or video of a post. A post with several of these is a carousel.
+class PostItem {
+  const PostItem({
+    required this.video,
+    required this.ref,
+    this.thumbRef = '',
+    this.width = 0,
+    this.height = 0,
+    this.seconds = 0,
+  });
+
+  final bool video;
+
+  /// `m:<key>` of the photo or video.
+  final String ref;
+
+  /// `m:<key>` of the video's cover ('' for photos).
+  final String thumbRef;
+  final int width;
+  final int height;
+  final int seconds;
+
+  String get url => resolveMediaUrl(ref);
+  String get thumbUrl => resolveMediaUrl(video ? thumbRef : ref);
+  double get aspect => (width > 0 && height > 0) ? width / height : 0;
+
+  Map<String, Object> toMap() => {
+    't': video ? 'video' : 'image',
+    'u': ref,
+    if (thumbRef.isNotEmpty) 'th': thumbRef,
+    if (width > 0 && height > 0) 'w': width,
+    if (width > 0 && height > 0) 'h': height,
+    if (seconds > 0) 'd': seconds,
+  };
+
+  static PostItem? fromMap(Object? e) {
+    if (e is! Map) return null;
+    final u = _str(e['u']);
+    if (u.isEmpty) return null;
+    return PostItem(
+      video: e['t'] == 'video',
+      ref: u,
+      thumbRef: _str(e['th']),
+      width: _int(e['w']),
+      height: _int(e['h']),
+      seconds: _int(e['d']),
+    );
+  }
+}
+
+/// A photo clip always plays for this many seconds.
+const int kPhotoClipSeconds = 5;
+
+/// Most photos and videos one post can hold.
+const int kMaxPostItems = 10;
 
 class Post {
   const Post({
@@ -28,6 +85,7 @@ class Post {
     this.musicId = '',
     this.musicVolume = 0.8,
     this.keepSound = true,
+    this.media = const [],
   });
 
   final String id;
@@ -65,6 +123,35 @@ class Post {
   final double musicVolume;
   final bool keepSound;
 
+  /// The photos and videos of a carousel (empty for a normal one-photo or one-video post).
+  final List<PostItem> media;
+
+  /// Everything in the post, in order (a normal post has exactly one item).
+  List<PostItem> get items {
+    if (media.isNotEmpty) return media;
+    return [
+      if (isVideo)
+        PostItem(
+          video: true,
+          ref: videoRef,
+          thumbRef: thumbRef,
+          width: videoWidth,
+          height: videoHeight,
+          seconds: videoDuration,
+        )
+      else
+        PostItem(
+          ref: imageRef,
+          width: imageWidth,
+          height: imageHeight,
+          video: false,
+        ),
+    ];
+  }
+
+  /// Several photos / videos swiped sideways.
+  bool get isCarousel => media.length > 1;
+
   bool get isVideo => type == 'video';
 
   /// A photo shown as a clip: the picture for [videoDuration] seconds with music.
@@ -95,6 +182,11 @@ class Post {
   factory Post.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? const <String, dynamic>{};
     final ts = m['createdAt'];
+    rememberMusic(
+      _str(m['musicId']),
+      _str(m['musicTitle']),
+      _str(m['musicArtist']),
+    );
     return Post(
       id: d.id,
       authorId: _str(m['authorId']),
@@ -119,6 +211,9 @@ class Post {
           ? (m['musicVolume'] as num).toDouble().clamp(0.0, 1.0)
           : 0.8,
       keepSound: m['keepSound'] is bool ? m['keepSound'] as bool : true,
+      media: m['media'] is List
+          ? [for (final e in m['media'] as List) ?PostItem.fromMap(e)]
+          : const [],
     );
   }
 }

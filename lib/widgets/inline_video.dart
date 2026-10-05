@@ -117,14 +117,22 @@ class InlineVideoHub {
 
 /// The player that lies on top of a clip's thumbnail in the feed. It only exists while its clip
 /// is the one the hub picked, so at most one native player is alive in the feed.
+///
+/// It also plays the music of a photo post (no video, only the speaker button): [videoUrl] is
+/// then empty. For a video inside a carousel [videoUrl] is that video's address; swiping to
+/// another page changes it while the music keeps playing.
 class InlineVideoLayer extends StatefulWidget {
   const InlineVideoLayer({
     super.key,
     required this.post,
     this.showSound = true,
+    this.videoUrl,
   });
   final Post post;
   final bool showSound;
+
+  /// null = the post's own video; '' = no video (music only).
+  final String? videoUrl;
 
   @override
   State<InlineVideoLayer> createState() => _InlineVideoLayerState();
@@ -142,6 +150,10 @@ class _InlineVideoLayerState extends State<InlineVideoLayer>
   Timer? _startTimer;
   ScrollPosition? _pos;
 
+  String get _url => widget.videoUrl ?? widget.post.videoUrl;
+  bool get _hasVideo => _url.isNotEmpty;
+  bool get _hasSpeaker => _hasVideo || widget.post.hasMusic;
+
   @override
   void initState() {
     super.initState();
@@ -150,6 +162,13 @@ class _InlineVideoLayerState extends State<InlineVideoLayer>
     InlineAudio.muted.addListener(_applyVolume);
     WidgetsBinding.instance.addObserver(this);
     _hub.poke();
+  }
+
+  @override
+  void didUpdateWidget(InlineVideoLayer old) {
+    super.didUpdateWidget(old);
+    final oldUrl = old.videoUrl ?? old.post.videoUrl;
+    if (oldUrl != _url && _ready) _swapVideo();
   }
 
   @override
@@ -173,7 +192,7 @@ class _InlineVideoLayerState extends State<InlineVideoLayer>
 
   @override
   InlineSpot? spot() {
-    if (!mounted || !_ticking) return null;
+    if (!mounted || !_ticking || !_hasSpeaker) return null;
     final ro = context.findRenderObject();
     if (ro is! RenderBox || !ro.attached || !ro.hasSize) return null;
     final top = ro.localToGlobal(Offset.zero).dy;
@@ -189,7 +208,7 @@ class _InlineVideoLayerState extends State<InlineVideoLayer>
   void _onActive() {
     final on = _hub.active.value == widget.post.id;
     if (on) {
-      if (_c == null && _startTimer == null) {
+      if (!_ready && _startTimer == null) {
         // wait a moment so a quick fling past the clip does not start a player
         _startTimer = Timer(const Duration(milliseconds: 350), () {
           _startTimer = null;
@@ -203,45 +222,79 @@ class _InlineVideoLayerState extends State<InlineVideoLayer>
     }
   }
 
-  Future<void> _start() async {
-    final gen = ++_gen;
-    final post = widget.post;
+  Future<VideoPlayerController?> _openVideo(Post post, String url) async {
     final opts = post.hasMusic ? VideoPlayerOptions(mixWithOthers: true) : null;
-    final File? local = ClipCache.instance.cached(post.videoUrl);
+    final File? local = ClipCache.instance.cached(url);
     final c = local != null
         ? VideoPlayerController.file(local, videoPlayerOptions: opts)
         : VideoPlayerController.networkUrl(
-            Uri.parse(post.videoUrl),
+            Uri.parse(url),
             videoPlayerOptions: opts,
           );
-    MusicPlayer? music;
     try {
       await c.initialize();
       await c.setLooping(true);
-      final track = musicById(post.musicId);
-      if (track != null) {
-        music = MusicPlayer(track);
-        await music.init();
-      }
+      return c;
     } catch (_) {
       await c.dispose();
-      await music?.dispose();
-      return;
+      return null;
+    }
+  }
+
+  Future<void> _start() async {
+    final gen = ++_gen;
+    final post = widget.post;
+    final url = _url;
+    VideoPlayerController? c;
+    MusicPlayer? music;
+    if (url.isNotEmpty) {
+      c = await _openVideo(post, url);
+      if (c == null) return;
+    }
+    final track = musicById(post.musicId);
+    if (track != null) {
+      music = MusicPlayer(track);
+      await music.init();
     }
     if (!mounted || gen != _gen || _hub.active.value != post.id) {
-      await c.dispose();
+      await c?.dispose();
       await music?.dispose();
       return;
     }
-    c.addListener(_onTick);
+    c?.addListener(_onTick);
     setState(() {
       _c = c;
       _music = music;
       _ready = true;
     });
     _applyVolume();
-    await c.play();
+    await c?.play();
     await _music?.play();
+  }
+
+  /// The page of a carousel changed: another video (or none) while the music goes on.
+  Future<void> _swapVideo() async {
+    final gen = ++_gen;
+    final old = _c;
+    old?.removeListener(_onTick);
+    setState(() => _c = null);
+    await old?.dispose();
+    final url = _url;
+    if (url.isEmpty) {
+      _applyVolume();
+      return;
+    }
+    final c = await _openVideo(widget.post, url);
+    if (c == null) return;
+    if (!mounted || gen != _gen || _hub.active.value != widget.post.id) {
+      await c.dispose();
+      return;
+    }
+    c.addListener(_onTick);
+    setState(() => _c = c);
+    _lastPos = Duration.zero;
+    _applyVolume();
+    await c.play();
   }
 
   Duration _lastPos = Duration.zero;
@@ -287,48 +340,55 @@ class _InlineVideoLayerState extends State<InlineVideoLayer>
     super.dispose();
   }
 
+  Widget _speaker() => Positioned(
+    right: 10,
+    bottom: 10,
+    child: ValueListenableBuilder<bool>(
+      valueListenable: InlineAudio.muted,
+      builder: (_, muted, _) => GestureDetector(
+        key: const ValueKey('inlineSound'),
+        behavior: HitTestBehavior.opaque,
+        onTap: () => InlineAudio.muted.value = !muted,
+        child: SizedBox(
+          width: 40,
+          height: 40,
+          child: Icon(
+            muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+            color: Colors.white,
+            size: 24,
+            shadows: const [Shadow(blurRadius: 8, color: Colors.black87)],
+          ),
+        ),
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final c = _c;
-    if (!_ready || c == null) return const SizedBox.shrink();
+    final showVideo = _ready && c != null && _hasVideo;
     return Stack(
       fit: StackFit.expand,
       children: [
-        ColoredBox(
-          color: Colors.black,
-          child: FittedBox(
-            fit: BoxFit.contain,
-            child: SizedBox(
-              width: c.value.size.width,
-              height: c.value.size.height,
-              child: VideoPlayer(c),
-            ),
-          ),
-        ),
-        if (widget.showSound)
-          Positioned(
-            right: 10,
-            bottom: 10,
-            child: ValueListenableBuilder<bool>(
-              valueListenable: InlineAudio.muted,
-              builder: (_, muted, _) => GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => InlineAudio.muted.value = !muted,
+        if (showVideo)
+          // touches go through to what is below (the carousel is swiped over a playing video)
+          IgnorePointer(
+            child: ColoredBox(
+              color: Colors.black,
+              child: FittedBox(
+                fit: BoxFit.contain,
                 child: SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: Icon(
-                    muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                    color: Colors.white,
-                    size: 24,
-                    shadows: const [
-                      Shadow(blurRadius: 8, color: Colors.black87),
-                    ],
-                  ),
+                  width: c.value.size.width,
+                  height: c.value.size.height,
+                  child: VideoPlayer(c),
                 ),
               ),
             ),
           ),
+        // the speaker is always there for a photo with music (it is how people turn the music on)
+        if (widget.showSound &&
+            (showVideo || (!_hasVideo && widget.post.hasMusic)))
+          _speaker(),
       ],
     );
   }
