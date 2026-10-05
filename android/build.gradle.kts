@@ -1,3 +1,8 @@
+// InstantGram: the call plugin (agora) reads this to compile against a modern Android API.
+if (!extra.has("compileSdkVersion")) {
+    extra["compileSdkVersion"] = 36
+}
+
 allprojects {
     repositories {
         google()
