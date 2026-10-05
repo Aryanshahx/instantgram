@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../core/media_url.dart';
+import 'call.dart';
 
 /// The id of the chat between two people: both uids, in alphabetical order. The same two
 /// people always get the same chat, whoever writes first.
@@ -81,7 +82,10 @@ class MsgType {
   static const voice = 'voice';
   static const location = 'location';
   static const post = 'post';
-  static const all = [text, image, gif, voice, location, post];
+
+  /// A line in the chat about a voice or video call.
+  static const call = 'call';
+  static const all = [text, image, gif, voice, location, post, call];
 }
 
 /// The emoji people can react with.
@@ -100,9 +104,14 @@ String messagePreview(
   String text, {
   bool postIsClip = false,
   bool deleted = false,
+  bool callVideo = false,
+  String callStatus = '',
 }) {
   if (deleted) return 'Message deleted';
   switch (type) {
+    case MsgType.call:
+      return (callVideo ? '\u{1F4F9} ' : '\u{1F4DE} ') +
+          callLabel(video: callVideo, status: callStatus);
     case MsgType.image:
       return '\u{1F4F7} Photo';
     case MsgType.gif:
@@ -180,6 +189,8 @@ class ChatMessage {
     this.deleted = false,
     this.pinned = false,
     this.pinnedBy = '',
+    this.callVideo = false,
+    this.callStatus = '',
   });
 
   final String id;
@@ -222,12 +233,22 @@ class ChatMessage {
   final bool pinned;
   final String pinnedBy;
 
+  /// For [MsgType.call]: a video call, and how it ended (ended, missed or declined).
+  final bool callVideo;
+  final String callStatus;
+
   String get mediaUrl => resolveMediaUrl(mediaRef);
   String get postThumbUrl => resolveMediaUrl(postThumbRef);
   double get aspect => (width > 0 && height > 0) ? width / height : 1;
 
-  String get preview =>
-      messagePreview(type, text, postIsClip: postIsClip, deleted: deleted);
+  String get preview => messagePreview(
+    type,
+    text,
+    postIsClip: postIsClip,
+    deleted: deleted,
+    callVideo: callVideo,
+    callStatus: callStatus,
+  );
 
   bool visibleFor(String uid) => !hiddenFor.contains(uid);
 
@@ -287,6 +308,8 @@ class ChatMessage {
       deleted: m['deleted'] == true,
       pinned: m['pinned'] == true,
       pinnedBy: s(m['pinnedBy']),
+      callVideo: m['callVideo'] == true,
+      callStatus: s(m['callStatus']),
     );
   }
 }

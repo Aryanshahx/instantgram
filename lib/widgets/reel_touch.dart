@@ -204,13 +204,11 @@ class _ReelTouchState extends State<ReelTouch> {
             ),
           if (_hud)
             Positioned(
+              top: MediaQuery.of(context).padding.top + 62,
               left: 0,
               right: 0,
-              top: 0,
-              bottom: 0,
               child: IgnorePointer(
-                child: Align(
-                  alignment: const Alignment(0, -0.1),
+                child: Center(
                   child: ValueListenableBuilder<double>(
                     valueListenable: ReelAudio.volume,
                     builder: (_, v, _) => _VolumeBar(value: v),
@@ -252,23 +250,39 @@ class _SpeedChip extends StatelessWidget {
   );
 }
 
-/// Volume while sliding: just the percentage, big white text, no background.
+/// Volume while sliding: a speaker icon and the percentage near the top, white, no background.
 class _VolumeBar extends StatelessWidget {
   const _VolumeBar({required this.value});
   final double value;
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      '${(value * 100).round()}%',
-      key: const ValueKey('volumeBar'),
-      style: const TextStyle(
-        color: Colors.white,
-        fontWeight: FontWeight.w900,
-        fontSize: 40,
-        letterSpacing: -1,
-        shadows: kReelShadow,
-      ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          value <= 0
+              ? Icons.volume_off_rounded
+              : value < 0.5
+              ? Icons.volume_down_rounded
+              : Icons.volume_up_rounded,
+          color: Colors.white,
+          size: 30,
+          shadows: kReelShadow,
+        ),
+        const SizedBox(width: 6),
+        Text(
+          '${(value * 100).round()}%',
+          key: const ValueKey('volumeBar'),
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w900,
+            fontSize: 30,
+            letterSpacing: -0.5,
+            shadows: kReelShadow,
+          ),
+        ),
+      ],
     );
   }
 }

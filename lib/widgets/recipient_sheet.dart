@@ -24,6 +24,7 @@ Future<RecipientPick?> pickRecipients(
   bool withNote = false,
   Future<List<AppUser>> Function()? loadSuggestions,
   Future<List<AppUser>> Function(String query)? search,
+  VoidCallback? onShareLink,
 }) {
   return showModalBottomSheet<RecipientPick>(
     context: context,
@@ -38,6 +39,7 @@ Future<RecipientPick?> pickRecipients(
         withNote: withNote,
         loadSuggestions: loadSuggestions ?? defaultSuggestions,
         search: search ?? UserService.instance.searchUsers,
+        onShareLink: onShareLink,
       ),
     ),
   );
@@ -78,7 +80,12 @@ class RecipientSheet extends StatefulWidget {
     required this.withNote,
     required this.loadSuggestions,
     required this.search,
+    this.onShareLink,
   });
+
+  /// Shows a "Share link" row at the top (WhatsApp, Messages... through the phone's share
+  /// menu), so people and link sharing are on the same screen.
+  final VoidCallback? onShareLink;
 
   final String title;
   final String actionLabel;
@@ -177,6 +184,25 @@ class _RecipientSheetState extends State<RecipientSheet> {
               ),
             ),
           ),
+          if (widget.onShareLink != null)
+            ListTile(
+              key: const ValueKey('shareLink'),
+              leading: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppTheme.volt.withValues(alpha: 0.25),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.ios_share_rounded),
+              ),
+              title: const Text(
+                'Share link',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: const Text('WhatsApp, Messages and other apps'),
+              onTap: widget.onShareLink,
+            ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())

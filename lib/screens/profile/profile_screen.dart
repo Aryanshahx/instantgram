@@ -221,105 +221,113 @@ class _ProfileScreenState extends State<ProfileScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // ---- banner with aurora colours + floating avatar
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              height: 150 + top,
-              margin: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-              decoration: BoxDecoration(
-                borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(36),
-                ),
-                gradient: AppTheme.auroraGradient,
-                image: user.bannerUrl.isEmpty
-                    ? null
-                    : DecorationImage(
-                        image: CachedNetworkImageProvider(
-                          resolveMediaUrl(user.bannerUrl),
-                          maxWidth: 1400,
-                        ),
-                        fit: BoxFit.cover,
-                      ),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.violet.withValues(alpha: 0.25),
-                    blurRadius: 30,
-                    offset: const Offset(0, 14),
-                  ),
-                ],
-              ),
-            ),
-            Positioned(
-              top: top + 10,
-              left: 24,
-              right: 24,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  if (widget.isTab)
-                    const SizedBox(width: 44)
-                  else
-                    GlassIconButton(
-                      icon: Icons.arrow_back_rounded,
-                      onTap: () => Navigator.of(context).maybePop(),
-                    ),
-                  if (widget.isTab)
-                    GlassIconButton(
-                      icon: Icons.logout_rounded,
-                      tooltip: 'Log out',
-                      onTap: _logout,
-                    ),
-                ],
-              ),
-            ),
-            Positioned(
-              left: 30,
-              bottom: -44,
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: context.bg,
-                  shape: BoxShape.circle,
-                ),
-                child: UserAvatar(
-                  url: user.photoUrl,
-                  name: user.username,
-                  radius: 42,
-                ),
-              ),
-            ),
-            if (_isMe)
+        SizedBox(
+          height: 150 + top + 44,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
               Positioned(
-                left: 30 + 4 + 84 - 24,
-                bottom: -44 + 4,
-                child: GestureDetector(
-                  key: const ValueKey('avatarPlus'),
-                  onTap: _addStory,
-                  child: Container(
-                    padding: const EdgeInsets.all(2),
-                    decoration: BoxDecoration(
-                      color: context.bg,
-                      shape: BoxShape.circle,
+                left: 0,
+                right: 0,
+                top: 0,
+                child: Container(
+                  height: 150 + top,
+                  margin: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+                  decoration: BoxDecoration(
+                    borderRadius: const BorderRadius.vertical(
+                      bottom: Radius.circular(36),
                     ),
+                    gradient: AppTheme.auroraGradient,
+                    image: user.bannerUrl.isEmpty
+                        ? null
+                        : DecorationImage(
+                            image: CachedNetworkImageProvider(
+                              resolveMediaUrl(user.bannerUrl),
+                              maxWidth: 1400,
+                            ),
+                            fit: BoxFit.cover,
+                          ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.violet.withValues(alpha: 0.25),
+                        blurRadius: 30,
+                        offset: const Offset(0, 14),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Positioned(
+                top: top + 10,
+                left: 24,
+                right: 24,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    if (widget.isTab)
+                      const SizedBox(width: 44)
+                    else
+                      GlassIconButton(
+                        icon: Icons.arrow_back_rounded,
+                        onTap: () => Navigator.of(context).maybePop(),
+                      ),
+                    if (widget.isTab)
+                      GlassIconButton(
+                        icon: Icons.logout_rounded,
+                        tooltip: 'Log out',
+                        onTap: _logout,
+                      ),
+                  ],
+                ),
+              ),
+              Positioned(
+                left: 30,
+                bottom: 0,
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: context.bg,
+                    shape: BoxShape.circle,
+                  ),
+                  child: UserAvatar(
+                    url: user.photoUrl,
+                    name: user.username,
+                    radius: 42,
+                  ),
+                ),
+              ),
+              if (_isMe)
+                Positioned(
+                  left: 30 + 4 + 84 - 24,
+                  bottom: 4,
+                  child: GestureDetector(
+                    key: const ValueKey('avatarPlus'),
+                    onTap: _addStory,
                     child: Container(
-                      decoration: const BoxDecoration(
-                        color: AppTheme.volt,
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: context.bg,
                         shape: BoxShape.circle,
                       ),
-                      padding: const EdgeInsets.all(3),
-                      child: const Icon(
-                        Icons.add_rounded,
-                        size: 20,
-                        color: AppTheme.ink,
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: AppTheme.volt,
+                          shape: BoxShape.circle,
+                        ),
+                        padding: const EdgeInsets.all(3),
+                        child: const Icon(
+                          Icons.add_rounded,
+                          size: 20,
+                          color: AppTheme.ink,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
-        const SizedBox(height: 54),
+        const SizedBox(height: 10),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
@@ -387,22 +395,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             openScreen(context, EditProfileScreen(user: user)),
                         icon: const Icon(Icons.edit_rounded, size: 18),
                         label: const Text('Edit profile'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    SizedBox(
-                      width: 56,
-                      child: Tooltip(
-                        message: 'Add to your story',
-                        child: OutlinedButton(
-                          key: const ValueKey('addStoryButton'),
-                          style: OutlinedButton.styleFrom(
-                            padding: EdgeInsets.zero,
-                            minimumSize: const Size(56, 56),
-                          ),
-                          onPressed: _addStory,
-                          child: const Icon(Icons.auto_stories_rounded),
-                        ),
                       ),
                     ),
                     const SizedBox(width: 10),

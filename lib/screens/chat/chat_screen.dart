@@ -27,6 +27,7 @@ import '../../widgets/share_sheet.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/swipe_to_reply.dart';
 import '../../core/media_url.dart' show formatDuration;
+import '../call/call_screen.dart';
 import '../profile/profile_screen.dart';
 import 'gif_picker.dart';
 import 'image_viewer.dart';
@@ -471,6 +472,8 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       case MsgType.post:
         openSharedPost(context, m);
+      case MsgType.call:
+        _call(video: m.callVideo);
     }
   }
 
@@ -506,6 +509,14 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void _call({required bool video}) => startCall(
+    context,
+    peerUid: widget.otherUid,
+    peerName: _user?.username ?? 'Call',
+    peerPhoto: _user?.photoUrl ?? '',
+    video: video,
+  );
+
   void _openProfile() =>
       openScreen(context, ProfileScreen(uid: widget.otherUid));
 
@@ -539,6 +550,21 @@ class _ChatScreenState extends State<ChatScreen> {
             ],
           ),
         ),
+        actions: [
+          IconButton(
+            key: const ValueKey('voiceCall'),
+            tooltip: 'Voice call',
+            icon: const Icon(Icons.call_rounded),
+            onPressed: () => _call(video: false),
+          ),
+          IconButton(
+            key: const ValueKey('videoCall'),
+            tooltip: 'Video call',
+            icon: const Icon(Icons.videocam_rounded),
+            onPressed: () => _call(video: true),
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
       body: ContentWidth(
         maxWidth: 680,
@@ -715,7 +741,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return KeyedSubtree(
       key: _keys.putIfAbsent(m.id, GlobalKey.new),
       child: SwipeToReply(
-        enabled: !m.deleted,
+        enabled: !m.deleted && m.type != MsgType.call,
         onReply: () => _startReply(m),
         child: GestureDetector(
           behavior: HitTestBehavior.translucent,

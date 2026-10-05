@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../core/app_events.dart';
 import '../../services/auth_service.dart';
+import '../../services/call_service.dart';
 import '../../services/chat_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/app_nav_bar.dart';
+import '../call/incoming_call_screen.dart';
 import '../chat/inbox_screen.dart';
 import '../feed/feed_screen.dart';
 import '../post/create_post_screen.dart';
@@ -22,6 +24,7 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   /// 0 Discover, 1 Explore, 2 Clips, 3 Chats, 4 Me
   int _index = 0;
+  String _lastCallId = '';
 
   @override
   void initState() {
@@ -31,6 +34,23 @@ class _MainShellState extends State<MainShell> {
     AuthService.instance
         .linkLoginEmail(); // lets the username be used to log in
     AppEvents.searchRequest.addListener(_onSearchRequest);
+    CallService.instance
+        .start(); // rings when someone calls (while the app is open)
+    CallService.instance.incoming.addListener(_onIncomingCall);
+  }
+
+  /// Someone is calling: show the full-screen Accept / Decline.
+  void _onIncomingCall() {
+    final c = CallService.instance.incoming.value;
+    if (c == null || c.id == _lastCallId || !mounted) return;
+    if (CallService.instance.busy || !c.isFresh(DateTime.now())) return;
+    _lastCallId = c.id;
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => IncomingCallScreen(call: c),
+      ),
+    );
   }
 
   /// A #hashtag was tapped somewhere: show Explore (the search screen picks the request up).
@@ -43,6 +63,8 @@ class _MainShellState extends State<MainShell> {
   @override
   void dispose() {
     AppEvents.searchRequest.removeListener(_onSearchRequest);
+    CallService.instance.incoming.removeListener(_onIncomingCall);
+    CallService.instance.stop();
     ChatService.instance.stop();
     super.dispose();
   }

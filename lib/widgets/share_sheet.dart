@@ -15,47 +15,21 @@ import 'recipient_sheet.dart';
 String shareThumbRef(Post p) =>
     p.isVideo ? (p.thumbRef.isNotEmpty ? p.thumbRef : '') : p.imageRef;
 
-/// "Send to people" or "Share link" for a post or clip.
+/// One screen: people to send to (with a message box), and a "Share link" row on top.
 Future<void> showShareSheet(BuildContext context, Post post) async {
-  final choice = await showModalBottomSheet<String>(
-    context: context,
-    showDragHandle: true,
-    builder: (ctx) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            key: const ValueKey('shareToChat'),
-            leading: const Icon(Icons.send_rounded),
-            title: const Text('Send to people'),
-            subtitle: const Text('In InstantGram chats'),
-            onTap: () => Navigator.pop(ctx, 'chat'),
-          ),
-          ListTile(
-            key: const ValueKey('shareLink'),
-            leading: const Icon(Icons.ios_share_rounded),
-            title: const Text('Share link'),
-            subtitle: const Text('WhatsApp, Messages and other apps'),
-            onTap: () => Navigator.pop(ctx, 'link'),
-          ),
-          const SizedBox(height: 8),
-        ],
-      ),
-    ),
-  );
-  if (choice == null || !context.mounted) return;
-  if (choice == 'link') {
-    try {
-      await sharePost(post);
-    } catch (_) {
-      if (context.mounted) showToast(context, 'Could not open the share menu.');
-    }
-    return;
-  }
   final pick = await pickRecipients(
     context,
     title: post.isClip ? 'Send this clip' : 'Send this post',
     withNote: true,
+    onShareLink: () async {
+      try {
+        await sharePost(post);
+      } catch (_) {
+        if (context.mounted) {
+          showToast(context, 'Could not open the share menu.');
+        }
+      }
+    },
   );
   if (pick == null || !context.mounted) return;
   try {

@@ -70,11 +70,12 @@ class _MessageMenu extends StatelessWidget {
       onTap: () => Navigator.pop(context, MessageChoice.action(a)),
     );
 
+    final isCall = m.type == MsgType.call;
     return SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (!deleted)
+          if (!deleted && !isCall)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
               child: Row(
@@ -101,12 +102,13 @@ class _MessageMenu extends StatelessWidget {
                 ],
               ),
             ),
-          if (!deleted) tile(Icons.reply_rounded, 'Reply', MessageAction.reply),
-          if (!deleted)
+          if (!deleted && !isCall)
+            tile(Icons.reply_rounded, 'Reply', MessageAction.reply),
+          if (!deleted && !isCall)
             tile(Icons.shortcut_rounded, 'Forward', MessageAction.forward),
           if (!deleted && m.type == MsgType.text && m.text.isNotEmpty)
             tile(Icons.copy_rounded, 'Copy', MessageAction.copy),
-          if (!deleted)
+          if (!deleted && !isCall)
             m.pinned
                 ? tile(Icons.push_pin_outlined, 'Unpin', MessageAction.unpin)
                 : tile(Icons.push_pin_rounded, 'Pin to top', MessageAction.pin),
@@ -115,7 +117,7 @@ class _MessageMenu extends StatelessWidget {
             'Delete for me',
             MessageAction.deleteForMe,
           ),
-          if (mine && !deleted)
+          if (mine && !deleted && !isCall)
             tile(
               Icons.delete_forever_rounded,
               'Delete for everyone',

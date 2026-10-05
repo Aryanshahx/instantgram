@@ -9,5 +9,6 @@ String shareLinkFor(Post post) => post.isVideo ? post.videoUrl : post.imageUrl;
 Future<void> sharePost(Post post) async {
   final link = shareLinkFor(post);
   if (link.isEmpty) return;
+  // ignore: deprecated_member_use
   await Share.share(link);
 }

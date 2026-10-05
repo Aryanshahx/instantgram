@@ -94,10 +94,7 @@ class GiphyClient {
       final data = r.data;
       final list = data is Map ? data['data'] : null;
       if (list is! List) return const [];
-      return [
-        for (final e in list)
-          ?GifItem.fromJson(e),
-      ];
+      return [for (final e in list) ?GifItem.fromJson(e)];
     } on DioException catch (e) {
       final code = e.response?.statusCode;
       if (code == 401 || code == 403) {

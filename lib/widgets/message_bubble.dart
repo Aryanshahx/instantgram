@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
+import '../models/call.dart';
 import '../models/chat.dart';
 import 'location_card.dart';
 import 'voice_bubble.dart';
@@ -313,8 +314,72 @@ class MessageBubble extends StatelessWidget {
         );
       case MsgType.post:
         return _PostShareCard(message: m, fg: fg, onTap: onOpen);
+      case MsgType.call:
+        return _callLine(m, fg);
     }
     return const SizedBox.shrink();
+  }
+
+  /// "Voice call 2:31" / "Missed video call"; tap to call again.
+  Widget _callLine(ChatMessage m, Color fg) {
+    final missed =
+        m.callStatus == CallStatus.missed ||
+        m.callStatus == CallStatus.declined;
+    final label = callLabel(video: m.callVideo, status: m.callStatus);
+    return InkWell(
+      key: const ValueKey('callMessage'),
+      onTap: onOpen,
+      borderRadius: BorderRadius.circular(12),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: fg.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              m.callVideo
+                  ? (missed
+                        ? Icons.videocam_off_rounded
+                        : Icons.videocam_rounded)
+                  : (missed ? Icons.phone_missed_rounded : Icons.call_rounded),
+              size: 20,
+              color: missed ? AppTheme.coral : fg,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: fg,
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  m.duration > 0
+                      ? formatCallTime(m.duration)
+                      : 'Tap to call back',
+                  style: TextStyle(
+                    color: fg.withValues(alpha: 0.65),
+                    fontSize: 12.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+        ],
+      ),
+    );
   }
 
   Widget _reactions(BuildContext context, Map<String, int> rx, String? mine) {

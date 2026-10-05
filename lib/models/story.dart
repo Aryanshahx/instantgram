@@ -151,10 +151,7 @@ class Story {
       thumbRef: s(m['thumbnailUrl']),
       duration: m['duration'] is num ? (m['duration'] as num).toInt() : 0,
       overlays: ov is List
-          ? [
-              for (final e in ov)
-                ?StoryOverlay.fromMap(e),
-            ]
+          ? [for (final e in ov) ?StoryOverlay.fromMap(e)]
           : const [],
       musicId: s(m['musicId']),
       musicVolume: m['musicVolume'] is num

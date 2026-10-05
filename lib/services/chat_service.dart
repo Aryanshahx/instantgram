@@ -178,6 +178,25 @@ class ChatService {
     replyTo: replyTo,
   );
 
+  /// The line "Voice call 2:31" / "Missed video call" in the chat. Only the caller writes it.
+  Future<void> sendCallLog(
+    String otherUid, {
+    required bool video,
+    required String status,
+    int seconds = 0,
+  }) => _write(
+    otherUid,
+    {
+      'type': MsgType.call,
+      'text': '',
+      'callVideo': video,
+      'callStatus': status,
+      'duration': seconds,
+    },
+    messagePreview(MsgType.call, '', callVideo: video, callStatus: status),
+    ensureChat: true,
+  );
+
   /// Shares a post or clip with [otherUid]; [note] is an optional line sent with it.
   Future<void> sendPost(
     String otherUid, {

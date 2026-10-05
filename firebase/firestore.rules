@@ -50,12 +50,19 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
       // author edits anything; anyone may change like/comment counters
       allow update: if signedIn() && (resource.data.authorId == request.auth.uid
-                                      || onlyChanges(['likeCount', 'commentCount']));
+                                      || onlyChanges(['likeCount', 'commentCount', 'viewCount']));
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
 
       match /likes/{uid} {
         allow read: if signedIn();
         allow write: if signedIn() && request.auth.uid == uid;
+      }
+
+      // one document per person who viewed the post (so everybody counts once)
+      match /views/{uid} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.auth.uid == uid;
+        allow update, delete: if false;
       }
 
       match /comments/{commentId} {
@@ -89,14 +96,14 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow read: if signedIn()
           && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.members;
-        // text, photo, GIF, voice note, location or a shared post (+ reply / forwarded)
+        // text, photo, GIF, voice note, location, a shared post or a call line (+ reply / forwarded)
         allow create: if signedIn()
           && request.resource.data.senderId == request.auth.uid
           && request.resource.data.keys().hasOnly([
             'senderId', 'type', 'text', 'createdAt', 'mediaUrl', 'width', 'height',
             'duration', 'lat', 'lng', 'postId', 'postThumb', 'postTitle',
-            'postAuthor', 'postIsClip', 'replyTo', 'forwarded'])
-          && request.resource.data.get('type', 'text') in ['text', 'image', 'gif', 'voice', 'location', 'post']
+            'postAuthor', 'postIsClip', 'replyTo', 'forwarded', 'callVideo', 'callStatus'])
+          && request.resource.data.get('type', 'text') in ['text', 'image', 'gif', 'voice', 'location', 'post', 'call']
           && request.resource.data.text is string
           && request.resource.data.text.size() <= 2000
           && (request.resource.data.get('type', 'text') != 'text' || request.resource.data.text.size() > 0)
@@ -121,6 +128,25 @@ service cloud.firestore {
           );
         allow delete: if false;
       }
+    }
+
+    // voice and video calls: the ring. Both people watch the document; the audio and
+    // video go through the call provider, never through Firestore.
+    match /calls/{callId} {
+      allow get, list: if signedIn()
+        && (resource.data.callerId == request.auth.uid || resource.data.calleeId == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.callerId == request.auth.uid
+        && request.resource.data.calleeId is string
+        && request.resource.data.calleeId != request.auth.uid
+        && request.resource.data.status == 'ringing'
+        && request.resource.data.keys().hasOnly(['callerId', 'calleeId', 'video', 'status', 'createdAt']);
+      // caller or callee: move the call along (ringing -> accepted / declined / ended / missed)
+      allow update: if signedIn()
+        && (resource.data.callerId == request.auth.uid || resource.data.calleeId == request.auth.uid)
+        && onlyChanges(['status', 'answeredAt', 'endedAt'])
+        && request.resource.data.status in ['ringing', 'accepted', 'declined', 'ended', 'missed'];
+      allow delete: if false;
     }
 
     match /stories/{storyId} {
