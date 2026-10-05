@@ -155,6 +155,7 @@ class _InlineVideoLayerState extends State<InlineVideoLayer>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // ignore: deprecated_member_use
     _ticking = TickerMode.of(
       context,
     ); // false when the feed is hidden (other tab or screen)
