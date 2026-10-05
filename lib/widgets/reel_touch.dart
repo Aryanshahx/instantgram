@@ -1,25 +1,49 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../services/system_volume.dart';
 import 'reel_actions.dart' show kReelShadow;
 
 /// App-wide sound settings for clips.
+///
+/// The level is the phone's real media volume (see [SystemVolume]), so it does not depend on
+/// where the volume buttons were left: sliding to 100% is as loud as the phone can be. The
+/// players themselves always run at full volume (their own mix is set per clip).
 class ReelAudio {
   /// Sound switch (the speaker button).
   static final ValueNotifier<bool> muted = ValueNotifier<bool>(false);
 
-  /// Loudness from 0 to 1, set by holding a finger on a clip and sliding up or down.
+  /// Phone volume from 0 to 1, set by holding a finger on a clip and sliding up or down.
   static final ValueNotifier<double> volume = ValueNotifier<double>(1);
 
-  /// What the players should use right now.
-  static double get effective => muted.value ? 0 : volume.value;
+  /// What the players should use right now (the phone's volume does the rest).
+  static double get effective => muted.value ? 0 : 1;
+
+  /// Sets the phone's media volume.
+  static void setLevel(double v) {
+    volume.value = v.clamp(0.0, 1.0);
+    SystemVolume.instance.set(volume.value);
+  }
+
+  static bool _attached = false;
+
+  /// Starts following the phone's volume (also when the buttons are used).
+  static void attachSystem() {
+    if (_attached) return;
+    _attached = true;
+    SystemVolume.instance.level.addListener(() {
+      final v = SystemVolume.instance.level.value;
+      if (v != null && (v - volume.value).abs() > 0.001) volume.value = v;
+    });
+    SystemVolume.instance.start();
+  }
 }
 
 /// Touch handling shared by every clip on the Clips screen:
 ///  * tap: [onTap] (pause / resume)
 ///  * double tap: [onDoubleTap] with a heart popping up under the finger
 ///  * hold: [onSpeed] (true = 2x speed) while the finger stays still
-///  * hold and slide up / down: volume (a bar shows the level). Sliding replaces the 2x speed.
+///  * hold and slide up / down: the phone's real media volume (the level shows as a percentage). Sliding replaces the 2x speed.
 class ReelTouch extends StatefulWidget {
   const ReelTouch({
     super.key,
@@ -39,6 +63,12 @@ class ReelTouch extends StatefulWidget {
 }
 
 class _ReelTouchState extends State<ReelTouch> {
+  @override
+  void initState() {
+    super.initState();
+    ReelAudio.attachSystem();
+  }
+
   /// How far the finger has to slide before it counts as "volume" (not "2x").
   static const double _slop = 14;
 
@@ -87,7 +117,7 @@ class _ReelTouchState extends State<ReelTouch> {
       // sliding up raises the volume; the full height of the screen is about 100%
       final delta = -(dy - (dy.isNegative ? -_slop : _slop)) / (height * 0.4);
       final v = (_startVolume + delta).clamp(0.0, 1.0);
-      ReelAudio.volume.value = v;
+      ReelAudio.setLevel(v);
       if (v > 0 && ReelAudio.muted.value) ReelAudio.muted.value = false;
     }
   }
@@ -180,7 +210,7 @@ class _ReelTouchState extends State<ReelTouch> {
               bottom: 0,
               child: IgnorePointer(
                 child: Align(
-                  alignment: const Alignment(-0.82, 0),
+                  alignment: const Alignment(0, -0.1),
                   child: ValueListenableBuilder<double>(
                     valueListenable: ReelAudio.volume,
                     builder: (_, v, _) => _VolumeBar(value: v),
@@ -222,63 +252,22 @@ class _SpeedChip extends StatelessWidget {
   );
 }
 
-/// Volume while sliding: speaker icon, a thin level line and the number. No background.
+/// Volume while sliding: just the percentage, big white text, no background.
 class _VolumeBar extends StatelessWidget {
   const _VolumeBar({required this.value});
   final double value;
 
   @override
   Widget build(BuildContext context) {
-    final icon = value <= 0
-        ? Icons.volume_off_rounded
-        : value < 0.5
-        ? Icons.volume_down_rounded
-        : Icons.volume_up_rounded;
-    return SizedBox(
+    return Text(
+      '${(value * 100).round()}%',
       key: const ValueKey('volumeBar'),
-      width: 46,
-      height: 200,
-      child: Column(
-        children: [
-          Icon(icon, color: Colors.white, size: 28, shadows: kReelShadow),
-          const SizedBox(height: 8),
-          Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(3),
-                boxShadow: const [
-                  BoxShadow(blurRadius: 6, color: Colors.black38),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(3),
-                child: SizedBox(
-                  width: 5,
-                  child: Stack(
-                    alignment: Alignment.bottomCenter,
-                    children: [
-                      const ColoredBox(color: Colors.white38),
-                      FractionallySizedBox(
-                        heightFactor: value.clamp(0.0, 1.0),
-                        child: const ColoredBox(color: Colors.white),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '${(value * 100).round()}',
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-              fontSize: 14,
-              shadows: kReelShadow,
-            ),
-          ),
-        ],
+      style: const TextStyle(
+        color: Colors.white,
+        fontWeight: FontWeight.w900,
+        fontSize: 40,
+        letterSpacing: -1,
+        shadows: kReelShadow,
       ),
     );
   }

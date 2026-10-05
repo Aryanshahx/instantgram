@@ -54,6 +54,24 @@ class MediaService {
     return file;
   }
 
+  /// Photo sent in a chat: up to 1920 px, JPEG quality 88 (sends fast).
+  static Future<File?> pickChatImage(ImageSource source) async {
+    final x = await _picker.pickImage(
+      source: source,
+      maxWidth: 1920,
+      maxHeight: 1920,
+      imageQuality: 88,
+    );
+    if (x == null) return null;
+    final file = File(x.path);
+    if (!await isSupportedImage(file)) {
+      throw const MediaException(
+        'This photo format is not supported. Use a JPEG, PNG or WebP photo.',
+      );
+    }
+    return file;
+  }
+
   /// Profile pictures: max 512 x 512, JPEG quality 75 (about 30-60 KB).
   static Future<File?> pickAvatar(ImageSource source) async {
     final x = await _picker.pickImage(

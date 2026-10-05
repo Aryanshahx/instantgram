@@ -30,10 +30,19 @@ class _MainShellState extends State<MainShell> {
         .start(); // keeps the unread dot on the Chats tab up to date
     AuthService.instance
         .linkLoginEmail(); // lets the username be used to log in
+    AppEvents.searchRequest.addListener(_onSearchRequest);
+  }
+
+  /// A #hashtag was tapped somewhere: show Explore (the search screen picks the request up).
+  void _onSearchRequest() {
+    if (AppEvents.searchRequest.value != null && _index != 1) {
+      setState(() => _index = 1);
+    }
   }
 
   @override
   void dispose() {
+    AppEvents.searchRequest.removeListener(_onSearchRequest);
     ChatService.instance.stop();
     super.dispose();
   }

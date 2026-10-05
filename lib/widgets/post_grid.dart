@@ -6,13 +6,25 @@ import '../core/ui.dart';
 import '../models/post.dart';
 import '../screens/post/post_detail_screen.dart';
 import '../screens/reels/reels_screen.dart';
+import 'post_details_sheet.dart' show compactCount;
 import 'post_media.dart';
 import 'reel_actions.dart';
 
 /// Masonry of posts. Every tile has the real proportions of its photo or clip (square corners).
 class PostGridSliver extends StatelessWidget {
-  const PostGridSliver({super.key, required this.posts});
+  const PostGridSliver({
+    super.key,
+    required this.posts,
+    this.showViews = false,
+    this.inline = false,
+  });
   final List<Post> posts;
+
+  /// Show how many people watched (profile pages) instead of the likes.
+  final bool showViews;
+
+  /// Clips play by themselves while they are on screen (Explore).
+  final bool inline;
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +36,8 @@ class PostGridSliver extends StatelessWidget {
           mainAxisSpacing: 4,
           crossAxisSpacing: 4,
           childCount: posts.length,
-          itemBuilder: (context, i) => _Tile(post: posts[i]),
+          itemBuilder: (context, i) =>
+              _Tile(post: posts[i], showViews: showViews, inline: inline),
         ),
       ),
     );
@@ -32,8 +45,14 @@ class PostGridSliver extends StatelessWidget {
 }
 
 class _Tile extends StatelessWidget {
-  const _Tile({required this.post});
+  const _Tile({
+    required this.post,
+    this.showViews = false,
+    this.inline = false,
+  });
   final Post post;
+  final bool showViews;
+  final bool inline;
 
   @override
   Widget build(BuildContext context) {
@@ -43,7 +62,12 @@ class _Tile extends StatelessWidget {
           : openScreen(context, PostDetailScreen(post: post)),
       child: Stack(
         children: [
-          PostMedia(post: post, playSize: 40),
+          PostMedia(
+            post: post,
+            playSize: 40,
+            inline: inline && post.isVideo,
+            showSound: false,
+          ),
           if (post.hasMusic)
             const Positioned(
               right: 8,
@@ -64,15 +88,17 @@ class _Tile extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(
-                    Icons.favorite_rounded,
+                  Icon(
+                    showViews
+                        ? Icons.visibility_rounded
+                        : Icons.favorite_rounded,
                     size: 16,
                     color: Colors.white,
                     shadows: kReelShadow,
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    '${post.likeCount}',
+                    compactCount(showViews ? post.viewCount : post.likeCount),
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 12,

@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/post.dart';
+import 'post_search.dart';
 import 'media_server.dart';
 import 'user_service.dart';
 
@@ -42,6 +43,33 @@ class PostService {
   Future<Post?> getPost(String id) async {
     final d = await _posts.doc(id).get();
     return d.exists ? Post.fromDoc(d) : null;
+  }
+
+  // ------------------------------------------------------------------ search
+
+  List<Post> _pool = const [];
+  DateTime? _poolAt;
+
+  /// Posts and clips whose title (caption), #hashtags or author match [query]. The newest
+  /// 300 posts are searched on the phone (and kept for a minute), so old posts work too and
+  /// nothing extra has to be stored.
+  Future<List<Post>> searchPosts(String query) async {
+    final at = _poolAt;
+    if (at == null || DateTime.now().difference(at).inSeconds > 60) {
+      final snap = await latestQuery().limit(300).get();
+      _pool = snap.docs
+          .map(Post.fromDoc)
+          .where((p) => !p.isLegacyLink)
+          .toList();
+      _poolAt = DateTime.now();
+    }
+    return filterPosts(_pool, query);
+  }
+
+  /// Popular hashtags among the newest posts.
+  Future<List<String>> trending() async {
+    await searchPosts(' '); // loads the pool
+    return trendingTags(_pool);
   }
 
   // ------------------------------------------------------------------ create
@@ -133,6 +161,18 @@ class PostService {
       'postsCount': FieldValue.increment(1),
     });
     await batch.commit();
+  }
+
+  /// Counts one view for [postId] by the signed-in person (once per person and post).
+  Future<void> registerView(String postId) async {
+    final me = _uid;
+    final post = _posts.doc(postId);
+    final seen = post.collection('views').doc(me);
+    await _db.runTransaction((tx) async {
+      if ((await tx.get(seen)).exists) return;
+      tx.set(seen, {'at': FieldValue.serverTimestamp()});
+      tx.update(post, {'viewCount': FieldValue.increment(1)});
+    });
   }
 
   Future<void> deletePost(Post p) async {

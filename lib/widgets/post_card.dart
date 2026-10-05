@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
 import '../core/errors.dart';
+import '../core/hashtags.dart';
+import '../services/view_tracker.dart';
 import '../core/theme.dart';
-import '../core/share.dart';
+import 'share_sheet.dart';
 import '../core/ui.dart';
 import '../models/post.dart';
 import '../screens/post/comments_screen.dart';
@@ -54,10 +56,14 @@ class _PostCardState extends State<PostCard> {
     _like = LikeController(post.id, post.likeCount);
     _save = SaveController(post.id);
     _comments = post.commentCount;
+    _unwatch = ViewTracker.instance.watch(post);
   }
+
+  VoidCallback? _unwatch;
 
   @override
   void dispose() {
+    _unwatch?.call();
     _like.dispose();
     _save.dispose();
     super.dispose();
@@ -105,7 +111,7 @@ class _PostCardState extends State<PostCard> {
 
   Future<void> _share() async {
     try {
-      await sharePost(post);
+      await showShareSheet(context, post);
     } catch (_) {
       if (mounted) showToast(context, 'Could not open the share menu.');
     }
@@ -154,14 +160,13 @@ class _PostCardState extends State<PostCard> {
                   maxHeight: maxMediaHeight,
                   inline: widget.inline,
                 ),
-                if (post.hasMusic)
+                // photos: a small button to hear the music (the name is under the username);
+                // nothing is drawn over a video
+                if (post.hasMusic && !post.isVideo)
                   Positioned(
                     left: 10,
                     bottom: 10,
-                    child: MusicToggleChip(
-                      post: post,
-                      interactive: !post.isVideo,
-                    ),
+                    child: MusicToggleChip(post: post, showName: false),
                   ),
                 Positioned.fill(
                   child: IgnorePointer(
@@ -323,16 +328,15 @@ class _PostCardState extends State<PostCard> {
           if (post.caption.isNotEmpty)
             GestureDetector(
               onTap: () => setState(() => _expanded = !_expanded),
-              child: Text.rich(
-                TextSpan(
-                  children: [
-                    TextSpan(
-                      text: post.authorUsername,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    TextSpan(text: '  ${post.caption}'),
-                  ],
-                ),
+              child: HashtagText(
+                '  ${post.caption}',
+                leading: [
+                  TextSpan(
+                    text: post.authorUsername,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ],
+                tagColor: context.accentInk,
                 maxLines: _expanded ? null : 3,
                 overflow: _expanded
                     ? TextOverflow.visible

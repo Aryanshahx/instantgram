@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../core/app_events.dart';
-import '../core/errors.dart';
 import '../core/story_images.dart';
 import '../core/theme.dart';
-import '../core/ui.dart';
 import '../models/app_user.dart';
 import '../models/story.dart';
+import '../screens/story/story_composer.dart';
 import '../screens/story/story_viewer.dart';
-import '../services/media_service.dart';
 import '../services/story_service.dart';
 import '../services/user_service.dart';
 import 'avatar.dart';
@@ -61,7 +58,7 @@ class _StoriesBarState extends State<StoriesBar> {
       // load the first picture of the first few people now, so a tap opens instantly
       for (final g in _groups.take(5)) {
         if (g.stories.isNotEmpty) {
-          warmStoryImage(context, g.stories.first.imageUrl);
+          warmStoryImage(context, g.stories.first.coverUrl);
         }
       }
     } catch (_) {
@@ -77,36 +74,10 @@ class _StoriesBarState extends State<StoriesBar> {
   }
 
   Future<void> _addStory() async {
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text('Take a photo'),
-              onTap: () => Navigator.pop(ctx, ImageSource.camera),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (source == null) return;
+    setState(() => _uploading = true);
     try {
-      final file = await MediaService.pickStoryImage(source);
-      if (file == null) return;
-      setState(() => _uploading = true);
-      await StoryService.instance.addStory(file);
-      await _load();
-      if (mounted) showToast(context, 'Moment shared (visible for 24 hours)');
-    } catch (e) {
-      if (mounted) showToast(context, friendlyError(e));
+      final done = await startStoryFlow(context);
+      if (done) await _load();
     } finally {
       if (mounted) setState(() => _uploading = false);
     }

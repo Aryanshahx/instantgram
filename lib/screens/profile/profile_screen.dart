@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../chat/chat_screen.dart';
+import '../story/story_composer.dart';
 import '../../core/app_events.dart';
 import '../../core/media_url.dart';
 import '../../core/theme.dart';
@@ -69,6 +70,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _scroll.dispose();
     _pager.dispose();
     super.dispose();
+  }
+
+  /// Opens the story editor (pick a photo or video, add text, stickers, music...).
+  Future<void> _addStory() async {
+    final done = await startStoryFlow(context);
+    if (done && mounted) AppEvents.refreshFeed();
   }
 
   Future<void> _logout() async {
@@ -190,7 +197,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 )
               else
-                PostGridSliver(posts: shown),
+                PostGridSliver(posts: shown, showViews: true),
               if (_pager.loading && _pager.posts.isNotEmpty)
                 const SliverToBoxAdapter(
                   child: Padding(
@@ -282,6 +289,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ),
+            if (_isMe)
+              Positioned(
+                left: 30 + 4 + 84 - 24,
+                bottom: -44 + 4,
+                child: GestureDetector(
+                  key: const ValueKey('avatarPlus'),
+                  onTap: _addStory,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: context.bg,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        color: AppTheme.volt,
+                        shape: BoxShape.circle,
+                      ),
+                      padding: const EdgeInsets.all(3),
+                      child: const Icon(
+                        Icons.add_rounded,
+                        size: 20,
+                        color: AppTheme.ink,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
         const SizedBox(height: 54),
@@ -312,7 +347,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: [for (final l in user.links) _LinkChip(url: l)],
+                  children: [
+                    for (var i = 0; i < user.links.length; i++)
+                      _LinkChip(url: user.links[i], name: user.linkLabel(i)),
+                  ],
                 ),
               ],
               const SizedBox(height: 18),
@@ -349,6 +387,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             openScreen(context, EditProfileScreen(user: user)),
                         icon: const Icon(Icons.edit_rounded, size: 18),
                         label: const Text('Edit profile'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    SizedBox(
+                      width: 56,
+                      child: Tooltip(
+                        message: 'Add to your story',
+                        child: OutlinedButton(
+                          key: const ValueKey('addStoryButton'),
+                          style: OutlinedButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            minimumSize: const Size(56, 56),
+                          ),
+                          onPressed: _addStory,
+                          child: const Icon(Icons.auto_stories_rounded),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -441,10 +495,15 @@ class _Stat extends StatelessWidget {
 
 /// A tappable link on a profile.
 class _LinkChip extends StatelessWidget {
-  const _LinkChip({required this.url});
+  const _LinkChip({required this.url, this.name = ''});
   final String url;
 
-  String get _label => url
+  /// The name the owner gave the link ('' = show the web address).
+  final String name;
+
+  String get _label => name.isNotEmpty ? name : _address;
+
+  String get _address => url
       .replaceFirst(RegExp(r'^https?://'), '')
       .replaceFirst(RegExp(r'^www\.'), '')
       .replaceFirst(RegExp(r'/+$'), '');

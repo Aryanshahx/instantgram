@@ -28,6 +28,9 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  volume_controller: 3.4.4
+  record: ^6.2.1
+  geolocator: ^14.0.2
   flutter:
     sdk: flutter
 
@@ -69,6 +72,11 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  fonts:
+    - family: Wordmark
+      fonts:
+        - asset: assets/fonts/Pacifico-Regular.ttf
 
   assets:
     - assets/music/

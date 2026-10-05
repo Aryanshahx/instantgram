@@ -61,7 +61,11 @@ void main() {
         await tester.pump();
         expect(find.text('Username', skipOffstage: false), findsOneWidget);
         expect(find.text('Add banner'), findsOneWidget);
-        expect(find.text('Link 1', skipOffstage: false), findsOneWidget);
+        expect(
+          find.text('Link 1 address', skipOffstage: false),
+          findsOneWidget,
+        );
+        expect(find.text('Link 1 name', skipOffstage: false), findsOneWidget);
         await tester.scrollUntilVisible(
           find.text('Save changes'),
           200,

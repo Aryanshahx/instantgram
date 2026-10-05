@@ -44,6 +44,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         text: i < widget.user.links.length ? widget.user.links[i] : '',
       ),
   ];
+  late final List<TextEditingController> _linkNames = [
+    for (var i = 0; i < 3; i++)
+      TextEditingController(text: widget.user.linkLabel(i)),
+  ];
   File? _photo;
   File? _banner;
   bool _removePhoto = false;
@@ -56,6 +60,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _username.dispose();
     _bio.dispose();
     for (final c in _links) {
+      c.dispose();
+    }
+    for (final c in _linkNames) {
       c.dispose();
     }
     super.dispose();
@@ -104,7 +111,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return;
     }
     final links = <String>[];
-    for (final c in _links) {
+    final names = <String>[];
+    for (var i = 0; i < _links.length; i++) {
+      final c = _links[i];
       if (c.text.trim().isEmpty) continue;
       final l = normalizeLink(c.text);
       if (l == null) {
@@ -112,6 +121,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         return;
       }
       links.add(l);
+      names.add(_linkNames[i].text.trim());
     }
     FocusScope.of(context).unfocus();
     setState(() => _saving = true);
@@ -125,6 +135,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         removeBanner: _removeBanner && _banner == null,
         username: uname,
         links: links,
+        linkNames: names,
       );
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
@@ -330,13 +341,32 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             _section(context, 'Links'),
             for (var i = 0; i < _links.length; i++) ...[
               TextField(
+                key: ValueKey('linkName$i'),
+                controller: _linkNames[i],
+                enabled: !_saving,
+                maxLength: 24,
+                buildCounter:
+                    (
+                      _, {
+                      required currentLength,
+                      required isFocused,
+                      maxLength,
+                    }) => null,
+                decoration: InputDecoration(
+                  labelText: 'Link ${i + 1} name',
+                  hintText: 'My shop, Portfolio, YouTube...',
+                  prefixIcon: const Icon(Icons.label_outline_rounded),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
                 controller: _links[i],
                 enabled: !_saving,
                 keyboardType: TextInputType.url,
                 autocorrect: false,
                 enableSuggestions: false,
                 decoration: InputDecoration(
-                  labelText: 'Link ${i + 1}',
+                  labelText: 'Link ${i + 1} address',
                   hintText: 'https://',
                   prefixIcon: const Icon(Icons.link_rounded),
                 ),

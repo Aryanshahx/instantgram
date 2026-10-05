@@ -15,7 +15,10 @@ class AppLogo extends StatelessWidget {
   );
 }
 
-/// "InstantGram" as plain bold text (same look as the header of the feed).
+/// The font family of the wordmark (registered in pubspec.yaml).
+const String kWordmarkFont = 'Wordmark';
+
+/// "InstantGram" as text in the brand font (Login, Create account and the feed header).
 class BrandWordmark extends StatelessWidget {
   const BrandWordmark({
     super.key,
@@ -30,9 +33,11 @@ class BrandWordmark extends StatelessWidget {
     'InstantGram',
     textAlign: align,
     style: TextStyle(
-      fontSize: size,
-      fontWeight: FontWeight.w900,
-      letterSpacing: -size * 0.046,
+      // Pacifico (assets/fonts, SIL Open Font License); falls back to the normal font
+      fontFamily: kWordmarkFont,
+      fontSize: size * 1.12,
+      fontWeight: FontWeight.w400,
+      height: 1.25,
     ),
   );
 }

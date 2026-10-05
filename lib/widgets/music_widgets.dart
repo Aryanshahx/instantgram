@@ -54,8 +54,12 @@ class MusicToggleChip extends StatefulWidget {
     super.key,
     required this.post,
     this.interactive = true,
+    this.showName = true,
   });
   final Post post;
+
+  /// false = only the round music button (the name is shown under the username).
+  final bool showName;
 
   /// false = only shows the track name (for clips that already play their music).
   final bool interactive;
@@ -112,7 +116,9 @@ class _MusicToggleChipState extends State<MusicToggleChip> {
     return GestureDetector(
       onTap: _toggle,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(10, 6, 12, 6),
+        padding: widget.showName
+            ? const EdgeInsets.fromLTRB(10, 6, 12, 6)
+            : const EdgeInsets.all(9),
         decoration: BoxDecoration(
           color: Colors.black54,
           borderRadius: BorderRadius.circular(18),
@@ -125,15 +131,17 @@ class _MusicToggleChipState extends State<MusicToggleChip> {
               size: 16,
               color: _playing ? AppTheme.volt : Colors.white,
             ),
-            const SizedBox(width: 6),
-            Text(
-              t.title,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
+            if (widget.showName) ...[
+              const SizedBox(width: 6),
+              Text(
+                t.title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ),

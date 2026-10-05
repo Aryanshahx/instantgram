@@ -15,6 +15,7 @@ class PostMedia extends StatefulWidget {
     this.playSize = 64,
     this.maxHeight,
     this.inline = false,
+    this.showSound = true,
   });
 
   final Post post;
@@ -27,6 +28,9 @@ class PostMedia extends StatefulWidget {
 
   /// Clips play by themselves while on screen (the Discover feed). Grids leave this off.
   final bool inline;
+
+  /// The speaker button on an inline clip (hidden in small grid tiles).
+  final bool showSound;
 
   /// Keeps the extremes sane (panoramas, very tall screenshots).
   static const double minAspect = 0.5;
@@ -115,7 +119,8 @@ class _PostMediaState extends State<PostMedia> {
               showPlay: !widget.inline,
             ),
             // in the feed the clip plays by itself while it is on screen
-            if (widget.inline) InlineVideoLayer(post: post),
+            if (widget.inline)
+              InlineVideoLayer(post: post, showSound: widget.showSound),
           ],
         ),
       );

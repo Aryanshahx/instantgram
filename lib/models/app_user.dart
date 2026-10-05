@@ -12,6 +12,7 @@ class AppUser {
     this.photoUrl = '',
     this.bannerUrl = '',
     this.links = const [],
+    this.linkNames = const [],
     this.followersCount = 0,
     this.followingCount = 0,
     this.postsCount = 0,
@@ -28,6 +29,15 @@ class AppUser {
 
   /// Web links shown on the profile (up to 3).
   final List<String> links;
+
+  /// The name shown for each link (same order as [links]; '' = show the web address).
+  final List<String> linkNames;
+
+  /// The name to show for link number [i].
+  String linkLabel(int i) =>
+      i < linkNames.length && linkNames[i].trim().isNotEmpty
+      ? linkNames[i].trim()
+      : '';
   final int followersCount;
   final int followingCount;
   final int postsCount;
@@ -44,7 +54,13 @@ class AppUser {
       links: m['links'] is List
           ? [
               for (final l in m['links'] as List)
-                if (l is String && l.trim().isNotEmpty) l.trim(),
+                if (l is String) l.trim(),
+            ]
+          : const [],
+      linkNames: m['linkNames'] is List
+          ? [
+              for (final l in m['linkNames'] as List)
+                l is String ? l.trim() : '',
             ]
           : const [],
       followersCount: _int(m['followersCount']),

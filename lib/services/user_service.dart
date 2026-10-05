@@ -126,6 +126,7 @@ class UserService {
     bool removeBanner = false,
     String? username,
     List<String>? links,
+    List<String>? linkNames,
   }) async {
     final uid = myUid;
     final before = await getUser(uid);
@@ -133,7 +134,14 @@ class UserService {
       'fullName': fullName.trim(),
       'bio': bio.trim(),
     };
-    if (links != null) data['links'] = links.take(3).toList();
+    if (links != null) {
+      data['links'] = links.take(3).toList();
+      data['linkNames'] = [
+        for (var i = 0; i < links.take(3).length; i++)
+          (linkNames != null && i < linkNames.length ? linkNames[i] : '')
+              .trim(),
+      ];
+    }
 
     final oldRefs = <String?>[];
     if (newPhoto != null) {

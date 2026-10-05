@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:timeago/timeago.dart' as timeago;
+import 'package:video_player/video_player.dart';
 
 import '../../core/app_events.dart';
 import '../../core/errors.dart';
 import '../../core/story_images.dart';
 import '../../core/ui.dart';
+import '../../models/music.dart';
 import '../../models/story.dart';
+import '../../services/music_player.dart';
 import '../../services/story_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/music_widgets.dart';
+import '../../widgets/story_overlays.dart';
 
 class StoryViewer extends StatefulWidget {
   const StoryViewer({
@@ -68,7 +73,7 @@ class _StoryViewerState extends State<StoryViewer> {
           key: ValueKey(widget.groups[i].authorId),
           group: widget.groups[i],
           nextFirstUrl: i + 1 < widget.groups.length
-              ? widget.groups[i + 1].stories.first.imageUrl
+              ? widget.groups[i + 1].stories.first.coverUrl
               : null,
           onFinished: _nextGroup,
           onBackFromFirst: _previousGroup,
@@ -112,6 +117,9 @@ class _GroupPlayerState extends State<_GroupPlayer>
   bool _failed = false;
   bool _holding = false;
   bool _started = false;
+  VideoPlayerController? _vc;
+  MusicPlayer? _music;
+  int _gen = 0;
 
   bool get _mine => widget.group.authorId == UserService.instance.myUid;
   Story get _story => widget.group.stories[_i];
@@ -132,9 +140,19 @@ class _GroupPlayerState extends State<_GroupPlayer>
     _prepare();
   }
 
-  /// Loads the current picture, then starts its timer. The next pictures load meanwhile.
+  Future<void> _stopMedia() async {
+    final v = _vc;
+    final m = _music;
+    _vc = null;
+    _music = null;
+    await v?.dispose();
+    await m?.dispose();
+  }
+
+  /// Loads the current moment (photo, or video), then starts its timer. The next ones load
+  /// meanwhile.
   Future<void> _prepare() async {
-    final index = _i;
+    final gen = ++_gen;
     final story = _story;
     if (_loaded || _failed) {
       setState(() {
@@ -144,23 +162,63 @@ class _GroupPlayerState extends State<_GroupPlayer>
     }
     _anim.stop();
     _anim.value = 0;
+    await _stopMedia();
+    if (!mounted || gen != _gen) return;
+    _anim.duration = Duration(seconds: story.seconds);
     var failed = false;
+    VideoPlayerController? vc;
+    MusicPlayer? mp;
     try {
-      await precacheImage(storyImageProvider(context, story.imageUrl), context);
+      if (story.isVideo) {
+        vc = VideoPlayerController.networkUrl(
+          Uri.parse(story.videoUrl),
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        );
+        await vc.initialize();
+        await vc.setVolume(story.keepSound ? 1 : 0);
+        final ms = vc.value.duration.inMilliseconds;
+        if (ms > 0) {
+          _anim.duration = Duration(
+            milliseconds: ms.clamp(1000, kMaxStorySeconds * 1000 + 1500),
+          );
+        }
+      } else {
+        await precacheImage(
+          storyImageProvider(context, story.imageUrl),
+          context,
+        );
+      }
     } catch (_) {
       failed = true;
+      await vc?.dispose();
+      vc = null;
     }
-    if (!mounted || index != _i) return;
+    final track = musicById(story.musicId);
+    if (!failed && track != null) {
+      mp = MusicPlayer(track);
+      await mp.init(volume: story.musicVolume);
+    }
+    if (!mounted || gen != _gen) {
+      await vc?.dispose();
+      await mp?.dispose();
+      return;
+    }
+    _vc = vc;
+    _music = mp;
     setState(() {
       _loaded = true;
       _failed = failed;
     });
-    if (!_holding) _anim.forward(from: 0);
+    if (!_holding) {
+      _anim.forward(from: 0);
+      _vc?.play();
+      _music?.play();
+    }
     // warm the next picture (this person's, or the next person's first)
     if (_i + 1 < widget.group.stories.length) {
-      warmStoryImage(context, widget.group.stories[_i + 1].imageUrl);
+      warmStoryImage(context, widget.group.stories[_i + 1].coverUrl);
       if (_i + 2 < widget.group.stories.length) {
-        warmStoryImage(context, widget.group.stories[_i + 2].imageUrl);
+        warmStoryImage(context, widget.group.stories[_i + 2].coverUrl);
       }
     } else if (widget.nextFirstUrl != null) {
       warmStoryImage(context, widget.nextFirstUrl!);
@@ -169,8 +227,31 @@ class _GroupPlayerState extends State<_GroupPlayer>
 
   @override
   void dispose() {
+    _gen++;
     _anim.dispose();
+    _vc?.dispose();
+    _music?.dispose();
     super.dispose();
+  }
+
+  Widget _media(Story story) {
+    final c = _vc;
+    if (story.isVideo && c != null && c.value.isInitialized) {
+      return FittedBox(
+        fit: BoxFit.contain,
+        child: SizedBox(
+          width: c.value.size.width,
+          height: c.value.size.height,
+          child: VideoPlayer(c),
+        ),
+      );
+    }
+    return Image(
+      key: ValueKey(story.id),
+      image: storyImageProvider(context, story.coverUrl),
+      fit: BoxFit.contain,
+      gaplessPlayback: true,
+    );
   }
 
   void _next() {
@@ -194,6 +275,8 @@ class _GroupPlayerState extends State<_GroupPlayer>
 
   Future<void> _delete() async {
     _anim.stop();
+    _vc?.pause();
+    _music?.pause();
     final ok = await confirm(
       context,
       title: 'Delete moment?',
@@ -201,7 +284,11 @@ class _GroupPlayerState extends State<_GroupPlayer>
       destructive: true,
     );
     if (!ok) {
-      if (mounted && _loaded) _anim.forward();
+      if (mounted && _loaded) {
+        _anim.forward();
+        _vc?.play();
+        _music?.play();
+      }
       return;
     }
     try {
@@ -240,10 +327,16 @@ class _GroupPlayerState extends State<_GroupPlayer>
       onLongPressStart: (_) {
         _holding = true;
         _anim.stop();
+        _vc?.pause();
+        _music?.pause();
       },
       onLongPressEnd: (_) {
         _holding = false;
-        if (_loaded) _anim.forward();
+        if (_loaded) {
+          _anim.forward();
+          _vc?.play();
+          _music?.play();
+        }
       },
       onVerticalDragEnd: (d) {
         if ((d.primaryVelocity ?? 0) > 300) widget.onClose();
@@ -262,12 +355,7 @@ class _GroupPlayerState extends State<_GroupPlayer>
               ),
             )
           else
-            Image(
-              key: ValueKey(story.id),
-              image: storyImageProvider(context, story.imageUrl),
-              fit: BoxFit.contain,
-              gaplessPlayback: true,
-            ),
+            StoryCanvas(media: _media(story), overlays: story.overlays),
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
@@ -320,17 +408,39 @@ class _GroupPlayerState extends State<_GroupPlayer>
                         radius: 16,
                       ),
                       const SizedBox(width: 10),
-                      Text(
-                        widget.group.username,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
+                      Flexible(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    widget.group.username,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  timeago.format(
+                                    story.createdAt,
+                                    locale: 'en_short',
+                                  ),
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+                              ],
+                            ),
+                            if (story.musicId.isNotEmpty)
+                              MusicLabel(musicId: story.musicId),
+                          ],
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        timeago.format(story.createdAt, locale: 'en_short'),
-                        style: const TextStyle(color: Colors.white70),
                       ),
                       const Spacer(),
                       if (_mine)

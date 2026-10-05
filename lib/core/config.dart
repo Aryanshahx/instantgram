@@ -1,8 +1,8 @@
 /// Where uploads are authorised (the signer on Vercel) and where files are read from
 /// (the public Tigris bucket address). Set both with:
 ///   bash tools/set_media_url.sh
-const String kMediaApiUrl = 'https://instantgram-signer.vercel.app/api';
-const String kMediaPublicUrl = 'https://instantgram-aryan-media.t3.tigrisfiles.io';
+const String kMediaApiUrl = 'https://CHANGE-ME.vercel.app/api';
+const String kMediaPublicUrl = 'https://CHANGE-ME.t3.tigrisfiles.io';
 
 /// Longest clip users may upload.
 const int kMaxVideoSeconds = 60;

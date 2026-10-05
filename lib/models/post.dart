@@ -24,6 +24,7 @@ class Post {
     this.imageHeight = 0,
     this.likeCount = 0,
     this.commentCount = 0,
+    this.viewCount = 0,
     this.musicId = '',
     this.musicVolume = 0.8,
     this.keepSound = true,
@@ -54,6 +55,9 @@ class Post {
 
   final int likeCount;
   final int commentCount;
+
+  /// People who watched it (counted once per person).
+  final int viewCount;
 
   /// Music chosen from the app's own library ('' = none), its volume (0-1) and, for videos,
   /// whether the clip's own sound is kept underneath it.
@@ -109,6 +113,7 @@ class Post {
       imageHeight: _int(m['imageHeight']),
       likeCount: _int(m['likeCount']),
       commentCount: _int(m['commentCount']),
+      viewCount: _int(m['viewCount']),
       musicId: _str(m['musicId']),
       musicVolume: m['musicVolume'] is num
           ? (m['musicVolume'] as num).toDouble().clamp(0.0, 1.0)

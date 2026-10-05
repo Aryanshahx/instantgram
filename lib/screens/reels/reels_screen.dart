@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/app_events.dart';
 import '../../core/errors.dart';
-import '../../core/share.dart';
+import '../../widgets/share_sheet.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/post.dart';
@@ -14,6 +14,9 @@ import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/like_button.dart';
+import '../../core/hashtags.dart';
+import '../../services/view_tracker.dart';
+import '../../widgets/post_details_sheet.dart';
 import '../../widgets/reel_actions.dart';
 import '../../widgets/music_widgets.dart';
 import '../../widgets/reel_photo.dart';
@@ -258,10 +261,30 @@ class _ReelPageState extends State<_ReelPage> {
   );
   late final SaveController _save = SaveController(widget.post.id);
   late int _comments = widget.post.commentCount;
-  bool _caption = false;
+  VoidCallback? _unwatch;
+
+  void _watch() {
+    _unwatch?.call();
+    _unwatch = widget.playing ? ViewTracker.instance.watch(widget.post) : null;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _watch();
+  }
+
+  @override
+  void didUpdateWidget(_ReelPage old) {
+    super.didUpdateWidget(old);
+    if (old.playing != widget.playing || old.post.id != widget.post.id) {
+      _watch();
+    }
+  }
 
   @override
   void dispose() {
+    _unwatch?.call();
     _progress.dispose();
     _like.dispose();
     _save.dispose();
@@ -288,7 +311,7 @@ class _ReelPageState extends State<_ReelPage> {
 
   Future<void> _share() async {
     try {
-      await sharePost(widget.post);
+      await showShareSheet(context, widget.post);
     } catch (_) {
       if (mounted) showToast(context, 'Could not open the share menu.');
     }
@@ -487,12 +510,16 @@ class _ReelPageState extends State<_ReelPage> {
                     ),
                     if (post.caption.isNotEmpty) ...[
                       const SizedBox(height: 10),
+                      // the title: tap it for views, likes, date and everything else
                       GestureDetector(
-                        onTap: () => setState(() => _caption = !_caption),
-                        child: Text(
+                        key: const ValueKey('clipTitle'),
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => showPostDetails(context, post),
+                        child: HashtagText(
                           post.caption,
-                          maxLines: _caption ? 8 : 2,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
+                          tagColor: AppTheme.volt,
                           style: const TextStyle(
                             color: Colors.white,
                             height: 1.3,

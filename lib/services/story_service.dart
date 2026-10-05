@@ -37,6 +37,7 @@ class StoryService {
       final s = Story.fromDoc(d);
       if (!allowed.contains(s.authorId)) continue;
       if (isRemovedStorageRef(s.imageRef)) continue;
+      if (!s.isVideo && s.imageRef.isEmpty) continue;
       byAuthor.putIfAbsent(s.authorId, () => []).add(s);
     }
 
@@ -59,25 +60,66 @@ class StoryService {
     return groups;
   }
 
-  Future<void> addStory(File image) async {
+  /// Shares a moment: a photo ([image]) or a video ([video] with its cover [thumb]), with
+  /// the texts and stickers placed on it and optional music.
+  Future<void> addStory({
+    File? image,
+    File? video,
+    File? thumb,
+    int duration = 0,
+    List<StoryOverlay> overlays = const [],
+    String musicId = '',
+    double musicVolume = 0.8,
+    bool keepSound = true,
+    void Function(double progress)? onProgress,
+  }) async {
+    if ((image == null) == (video == null)) {
+      throw ArgumentError('Give either an image or a video.');
+    }
     final me = await UserService.instance.getUser(_uid);
     if (me == null) throw StateError('Profile not found');
     final ref = _stories.doc();
-    final uploaded = await MediaServer.instance.uploadImage(image);
-    await ref.set({
+    final data = <String, dynamic>{
       'authorId': _uid,
       'authorUsername': me.username,
       'authorPhotoUrl': me.photoUrl,
-      'imageUrl': uploaded.ref,
       'createdAt': FieldValue.serverTimestamp(),
       'expiresAt': Timestamp.fromDate(
         DateTime.now().add(const Duration(hours: 24)),
       ),
-    });
+      if (overlays.isNotEmpty)
+        'overlays': [for (final o in overlays.take(20)) o.toMap()],
+      if (musicId.isNotEmpty) ...{
+        'musicId': musicId,
+        'musicVolume': musicVolume,
+      },
+    };
+    if (video != null) {
+      final up = await MediaServer.instance.uploadVideo(
+        file: video,
+        thumb: thumb,
+        onProgress: onProgress,
+      );
+      data['videoUrl'] = up.ref;
+      data['thumbnailUrl'] = up.thumbRef;
+      data['imageUrl'] = '';
+      data['duration'] = duration;
+      data['keepSound'] = keepSound;
+    } else {
+      final up = await MediaServer.instance.uploadImage(
+        image!,
+        onProgress: onProgress,
+      );
+      data['imageUrl'] = up.ref;
+    }
+    await ref.set(data);
   }
 
   Future<void> deleteStory(Story s) async {
     await _stories.doc(s.id).delete();
-    await MediaServer.instance.deleteQuietly(s.imageRef);
+    await MediaServer.instance.deleteQuietly(
+      s.isVideo ? s.videoRef : s.imageRef,
+      s.isVideo ? s.thumbRef : null,
+    );
   }
 }

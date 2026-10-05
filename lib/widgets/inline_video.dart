@@ -118,8 +118,13 @@ class InlineVideoHub {
 /// The player that lies on top of a clip's thumbnail in the feed. It only exists while its clip
 /// is the one the hub picked, so at most one native player is alive in the feed.
 class InlineVideoLayer extends StatefulWidget {
-  const InlineVideoLayer({super.key, required this.post});
+  const InlineVideoLayer({
+    super.key,
+    required this.post,
+    this.showSound = true,
+  });
   final Post post;
+  final bool showSound;
 
   @override
   State<InlineVideoLayer> createState() => _InlineVideoLayerState();
@@ -248,7 +253,7 @@ class _InlineVideoLayerState extends State<InlineVideoLayer>
   }
 
   void _applyVolume() {
-    final v = InlineAudio.muted.value ? 0.0 : 1.0;
+    final v = (InlineAudio.muted.value || !widget.showSound) ? 0.0 : 1.0;
     final post = widget.post;
     _c?.setVolume(post.hasMusic && !post.keepSound ? 0 : v);
     _music?.setVolume(v * post.musicVolume);
@@ -299,27 +304,30 @@ class _InlineVideoLayerState extends State<InlineVideoLayer>
             ),
           ),
         ),
-        Positioned(
-          right: 10,
-          bottom: 10,
-          child: ValueListenableBuilder<bool>(
-            valueListenable: InlineAudio.muted,
-            builder: (_, muted, _) => GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => InlineAudio.muted.value = !muted,
-              child: SizedBox(
-                width: 40,
-                height: 40,
-                child: Icon(
-                  muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                  color: Colors.white,
-                  size: 24,
-                  shadows: const [Shadow(blurRadius: 8, color: Colors.black87)],
+        if (widget.showSound)
+          Positioned(
+            right: 10,
+            bottom: 10,
+            child: ValueListenableBuilder<bool>(
+              valueListenable: InlineAudio.muted,
+              builder: (_, muted, _) => GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => InlineAudio.muted.value = !muted,
+                child: SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: Icon(
+                    muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                    color: Colors.white,
+                    size: 24,
+                    shadows: const [
+                      Shadow(blurRadius: 8, color: Colors.black87),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
       ],
     );
   }

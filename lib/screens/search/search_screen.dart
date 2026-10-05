@@ -2,14 +2,17 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/app_events.dart';
 import '../../core/theme.dart';
 import '../../core/responsive.dart';
 import '../../core/ui.dart';
 import '../../models/app_user.dart';
+import '../../models/post.dart';
 import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/pill_tabs.dart';
 import '../../widgets/post_grid.dart';
 import '../../widgets/state_views.dart';
 import '../profile/profile_screen.dart';
@@ -33,7 +36,12 @@ class _SearchScreenState extends State<SearchScreen> {
   String _query = '';
   bool _searching = false;
   Object? _searchError;
-  List<AppUser> _results = [];
+  List<AppUser> _people = [];
+  List<Post> _posts = [];
+  List<String> _trending = [];
+
+  /// 0 = Posts, 1 = Clips, 2 = People
+  int _tab = 0;
 
   @override
   void initState() {
@@ -44,10 +52,33 @@ class _SearchScreenState extends State<SearchScreen> {
         _explore.loadMore();
       }
     });
+    AppEvents.searchRequest.addListener(_onRequest);
+    _loadTrending();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onRequest());
+  }
+
+  Future<void> _loadTrending() async {
+    try {
+      final t = await PostService.instance.trending();
+      if (mounted) setState(() => _trending = t);
+    } catch (_) {
+      // the chips are optional
+    }
+  }
+
+  /// Something else in the app asked for a search (a tapped #hashtag).
+  void _onRequest() {
+    final q = AppEvents.searchRequest.value;
+    if (q == null) return;
+    AppEvents.searchRequest.value = null;
+    _controller.text = q;
+    _tab = 0;
+    _onChanged(q);
   }
 
   @override
   void dispose() {
+    AppEvents.searchRequest.removeListener(_onRequest);
     _debounce?.cancel();
     _controller.dispose();
     _scroll.dispose();
@@ -61,7 +92,8 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() => _query = q);
     if (q.isEmpty) {
       setState(() {
-        _results = [];
+        _people = [];
+        _posts = [];
         _searching = false;
         _searchError = null;
       });
@@ -70,10 +102,17 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() => _searching = true);
     _debounce = Timer(const Duration(milliseconds: 350), () async {
       try {
-        final users = await UserService.instance.searchUsers(q);
+        final tagOnly = q.startsWith('#');
+        final results = await Future.wait<Object>([
+          PostService.instance.searchPosts(q),
+          tagOnly
+              ? Future<List<AppUser>>.value(const [])
+              : UserService.instance.searchUsers(q),
+        ]);
         if (!mounted || _query != q) return;
         setState(() {
-          _results = users;
+          _posts = results[0] as List<Post>;
+          _people = results[1] as List<AppUser>;
           _searching = false;
           _searchError = null;
         });
@@ -85,6 +124,12 @@ class _SearchScreenState extends State<SearchScreen> {
         });
       }
     });
+  }
+
+  void _useTag(String tag) {
+    _controller.text = '#$tag';
+    _tab = 0;
+    _onChanged('#$tag');
   }
 
   @override
@@ -110,12 +155,13 @@ class _SearchScreenState extends State<SearchScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: TextField(
+                key: const ValueKey('exploreSearch'),
                 controller: _controller,
                 onChanged: _onChanged,
                 textInputAction: TextInputAction.search,
                 autocorrect: false,
                 decoration: InputDecoration(
-                  hintText: 'Find people by username',
+                  hintText: 'Search people, clips, posts or #tags',
                   prefixIcon: const Icon(Icons.search_rounded),
                   suffixIcon: _query.isEmpty
                       ? null
@@ -129,58 +175,84 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
               ),
             ),
-            Expanded(child: _query.isEmpty ? _exploreGrid() : _userResults()),
+            if (_query.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: PillTabs(
+                  labels: const ['Posts', 'Clips', 'People'],
+                  index: _tab,
+                  onChanged: (i) => setState(() => _tab = i),
+                ),
+              ),
+            Expanded(child: _query.isEmpty ? _exploreGrid() : _results()),
           ],
         ),
       ),
     );
   }
 
-  Widget _userResults() {
-    if (_searching && _results.isEmpty) return const CenteredLoader();
+  Widget _results() {
+    if (_searching && _posts.isEmpty && _people.isEmpty) {
+      return const CenteredLoader();
+    }
     if (_searchError != null) {
       return ErrorState(
         error: _searchError!,
         onRetry: () => _onChanged(_query),
       );
     }
-    if (_results.isEmpty) {
+    if (_tab == 2) return _peopleList();
+    final clips = _tab == 1;
+    final shown = [
+      for (final p in _posts)
+        if (p.isClip == clips) p,
+    ];
+    if (shown.isEmpty) {
+      return EmptyState(
+        icon: clips ? Icons.smart_display_outlined : Icons.photo_outlined,
+        title: clips ? 'No clips found' : 'No posts found',
+        subtitle:
+            'Nothing matches "$_query". Try a #hashtag or a word from the title.',
+      );
+    }
+    return CustomScrollView(
+      key: ValueKey('results$_tab'),
+      slivers: [
+        PostGridSliver(posts: shown, inline: clips),
+        const SliverToBoxAdapter(child: SizedBox(height: kNavSpace)),
+      ],
+    );
+  }
+
+  /// People: plain rows, no card behind them.
+  Widget _peopleList() {
+    if (_people.isEmpty) {
       return EmptyState(
         icon: Icons.person_search_rounded,
         title: 'No one found',
-        subtitle: 'Nobody matches "$_query".',
+        subtitle: _query.startsWith('#')
+            ? 'People are searched by username, not by #tag.'
+            : 'Nobody matches "$_query".',
       );
     }
     return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, kNavSpace),
-      itemCount: _results.length,
+      key: const ValueKey('peopleResults'),
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, kNavSpace),
+      itemCount: _people.length,
       itemBuilder: (context, i) {
-        final u = _results[i];
-        return Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          decoration: BoxDecoration(
-            color: context.card,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: context.hairline.withValues(alpha: 0.7)),
+        final u = _people[i];
+        return ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 2,
           ),
-          child: ListTile(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-            ),
-            contentPadding: const EdgeInsets.all(10),
-            leading: UserAvatar(url: u.photoUrl, name: u.username, radius: 25),
-            title: Text(
-              u.username,
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-            subtitle: u.fullName.isEmpty ? null : Text(u.fullName),
-            trailing: Icon(
-              Icons.arrow_forward_ios_rounded,
-              size: 16,
-              color: context.muted,
-            ),
-            onTap: () => openScreen(context, ProfileScreen(uid: u.uid)),
+          leading: UserAvatar(url: u.photoUrl, name: u.username, radius: 25),
+          title: Text(
+            u.username,
+            style: const TextStyle(fontWeight: FontWeight.w800),
           ),
+          subtitle: u.fullName.isEmpty ? null : Text(u.fullName),
+          onTap: () => openScreen(context, ProfileScreen(uid: u.uid)),
         );
       },
     );
@@ -202,12 +274,36 @@ class _SearchScreenState extends State<SearchScreen> {
           );
         }
         return RefreshIndicator(
-          onRefresh: _explore.refresh,
+          onRefresh: () async {
+            _loadTrending();
+            await _explore.refresh();
+          },
           child: CustomScrollView(
             controller: _scroll,
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
-              PostGridSliver(posts: _explore.posts),
+              if (_trending.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: 46,
+                    child: ListView(
+                      key: const ValueKey('trendingTags'),
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      children: [
+                        for (final t in _trending)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ActionChip(
+                              label: Text('#$t'),
+                              onPressed: () => _useTag(t),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              PostGridSliver(posts: _explore.posts, inline: true),
               if (_explore.loading)
                 const SliverToBoxAdapter(
                   child: Padding(
