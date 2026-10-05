@@ -153,7 +153,7 @@ class Story {
       overlays: ov is List
           ? [
               for (final e in ov)
-                if (StoryOverlay.fromMap(e) case final o?) o,
+                ?StoryOverlay.fromMap(e),
             ]
           : const [],
       musicId: s(m['musicId']),

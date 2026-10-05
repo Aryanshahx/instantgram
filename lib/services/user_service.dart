@@ -223,8 +223,8 @@ class UserService {
         final batch = _db.batch();
         for (final d in snap.docs.skip(i).take(400)) {
           batch.update(d.reference, {
-            if (username != null) 'authorUsername': username,
-            if (photo != null) 'authorPhotoUrl': photo,
+            'authorUsername': ?username,
+            'authorPhotoUrl': ?photo,
           });
         }
         await batch.commit();

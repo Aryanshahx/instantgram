@@ -96,7 +96,7 @@ class GiphyClient {
       if (list is! List) return const [];
       return [
         for (final e in list)
-          if (GifItem.fromJson(e) case final g?) g,
+          ?GifItem.fromJson(e),
       ];
     } on DioException catch (e) {
       final code = e.response?.statusCode;
