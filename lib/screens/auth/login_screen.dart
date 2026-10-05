@@ -10,6 +10,9 @@ import '../../widgets/brand_logo.dart';
 import 'signup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
+  /// Filled in by "Switch account": the username to log in with.
+  static String prefill = '';
+
   const LoginScreen({super.key});
 
   @override
@@ -20,6 +23,13 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _email = TextEditingController();
   final _password = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _email.text = LoginScreen.prefill;
+    LoginScreen.prefill = '';
+  }
   bool _loading = false;
   bool _obscure = true;
 

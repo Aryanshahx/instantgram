@@ -85,6 +85,7 @@ class _FollowListScreenState extends State<FollowListScreen> {
                       url: u.photoUrl,
                       name: u.username,
                       radius: 24,
+                      uid: u.uid,
                     ),
                     title: Text(
                       u.username,

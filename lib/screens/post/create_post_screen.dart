@@ -15,12 +15,14 @@ import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/music.dart';
 import '../../models/post.dart';
+import '../../models/story.dart' show kMaxStorySeconds;
 import '../../services/media_server.dart';
 import '../../services/media_service.dart';
 import '../../services/mp4_faststart.dart';
 import '../../services/music_player.dart';
 import '../../services/photo_edit.dart';
 import '../../services/post_service.dart';
+import '../../services/story_service.dart';
 import '../../widgets/music_widgets.dart';
 import '../../widgets/post_media.dart';
 import 'photo_editor_screen.dart';
@@ -126,6 +128,21 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   double? _progress;
   int _totalBytes = 0;
   int _sentBytes = 0;
+
+  // details: who sees it, which numbers are shown, and also sharing it as a moment
+  String _audience = kAudienceEveryone;
+  bool _hideLikes = false;
+  bool _hideComments = false;
+  bool _hideShares = false;
+  bool _alsoStory = false;
+  int _coverVer = 0;
+
+  PostOptions get _options => PostOptions(
+    audience: _audience,
+    hideLikes: _hideLikes,
+    hideComments: _hideComments,
+    hideShares: _hideShares,
+  );
   final Stopwatch _clock = Stopwatch();
   DateTime _lastTick = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -646,6 +663,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         ? music.artist
         : null;
     try {
+      // what a moment made from this post would show
+      String storyImage = '';
+      String storyVideo = '';
+      String storyThumb = '';
+      int storySecs = 0;
       if (chosen.length == 1 && !chosen.first.video) {
         // one photo (a post, or a photo clip that plays for 5 seconds)
         final it = chosen.first;
@@ -660,7 +682,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         final dims = it.width > 0 && it.height > 0
             ? null
             : await PhotoEditor.probeSize(it.file);
-        await PostService.instance.createImagePost(
+        storyImage = await PostService.instance.createImagePost(
+          options: _options,
           image: it.file,
           caption: caption,
           onProgress: _onProgress,
@@ -689,9 +712,22 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             musicArtist: artist,
             musicVolume: kMusicVolume,
             keepSound: _keepSound,
+            options: _options,
           );
+          storyVideo = r.ref;
+          storyThumb = r.thumbRef;
+          storySecs = r.seconds;
         } else {
+          final f = up.first;
+          if (f.video) {
+            storyVideo = f.ref;
+            storyThumb = f.thumbRef;
+            storySecs = f.seconds;
+          } else {
+            storyImage = f.ref;
+          }
           await PostService.instance.createCarouselPost(
+            options: _options,
             items: up,
             caption: caption,
             musicId: music?.id,
@@ -702,6 +738,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           );
         }
       }
+      if (_alsoStory) {
+        await _addToStory(
+          image: storyImage,
+          video: storyVideo,
+          thumb: storyThumb,
+          seconds: storySecs,
+        );
+      }
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
@@ -709,6 +753,42 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     } finally {
       _clock.stop();
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// The same photo or clip as a moment for 24 hours (a failure never undoes the post).
+  Future<void> _addToStory({
+    required String image,
+    required String video,
+    required String thumb,
+    required int seconds,
+  }) async {
+    try {
+      if (video.isNotEmpty && seconds > kMaxStorySeconds) {
+        if (mounted) {
+          showToast(
+            context,
+            'Posted. The video is longer than $kMaxStorySeconds s, so it was not added to your moments.',
+          );
+        }
+        return;
+      }
+      final m = _music;
+      await StoryService.instance.addStoryFromRefs(
+        imageRef: image,
+        videoRef: video,
+        thumbRef: thumb,
+        duration: seconds,
+        musicId: m?.id ?? '',
+        musicTitle: (m?.remote ?? false) ? m!.title : '',
+        musicArtist: (m?.remote ?? false) ? m!.artist : '',
+        musicVolume: kMusicVolume,
+        keepSound: _keepSound,
+      );
+    } catch (e) {
+      if (mounted) {
+        showToast(context, 'Posted, but not added to your moments. ${friendlyError(e)}');
+      }
     }
   }
 
@@ -1318,56 +1398,78 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         : (first.video ? first.thumb : first.file);
     final needsPhoto = _mode == 0 && !_hasPhoto;
     final m = _music;
+    final screen = MediaQuery.sizeOf(context);
+    // the cover takes at least half of the screen
+    final coverHeight = math.max(300.0, screen.height * 0.5);
     return Column(
       children: [
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(0, 8, 0, 20),
+            padding: const EdgeInsets.fromLTRB(0, 0, 0, 20),
             children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              SizedBox(
+                key: const ValueKey('detailsThumb'),
+                height: coverHeight,
+                child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: SizedBox(
-                        key: const ValueKey('detailsThumb'),
-                        width: 76,
-                        height: 76,
-                        child: cover == null
-                            ? ColoredBox(color: context.cardHigh)
-                            : Image.file(
-                                cover,
-                                fit: BoxFit.cover,
-                                cacheWidth: 300,
-                              ),
-                      ),
+                    ColoredBox(
+                      color: Colors.black,
+                      child: cover == null
+                          ? const SizedBox.expand()
+                          : Image.file(
+                              cover,
+                              key: ValueKey('cover$_coverVer'),
+                              fit: BoxFit.contain,
+                              cacheWidth: 1200,
+                            ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextField(
-                        key: const ValueKey('captionField'),
-                        controller: _caption,
-                        enabled: !_busy,
-                        maxLines: 5,
-                        minLines: 3,
-                        maxLength: 200,
-                        textCapitalization: TextCapitalization.sentences,
-                        decoration: InputDecoration(
-                          hintText: 'Write a caption...',
-                          helperText: _caption.text.trim().isEmpty
-                              ? 'A caption is required'
-                              : null,
-                          filled: false,
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          disabledBorder: InputBorder.none,
+                    if (_chosen.length > 1)
+                      Positioned(
+                        left: 12,
+                        top: 12,
+                        child: _coverPill(
+                          Icons.collections_rounded,
+                          '${_chosen.length} items',
                         ),
                       ),
-                    ),
+                    if (first != null && first.video)
+                      Positioned(
+                        right: 12,
+                        bottom: 12,
+                        child: GestureDetector(
+                          key: const ValueKey('changeCover'),
+                          onTap: _busy ? null : _pickCover,
+                          child: _coverPill(
+                            Icons.photo_size_select_actual_rounded,
+                            'Change cover',
+                          ),
+                        ),
+                      ),
                   ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: TextField(
+                  key: const ValueKey('captionField'),
+                  controller: _caption,
+                  enabled: !_busy,
+                  maxLines: 4,
+                  minLines: 2,
+                  maxLength: 200,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: InputDecoration(
+                    hintText: 'Write a caption...',
+                    helperText: _caption.text.trim().isEmpty
+                        ? 'A caption is required'
+                        : null,
+                    filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                  ),
                 ),
               ),
               Divider(height: 1, color: context.hairline),
@@ -1413,6 +1515,29 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     style: TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
+              ListTile(
+                key: const ValueKey('audienceRow'),
+                leading: Icon(_audienceIcon(_audience)),
+                title: const Text(
+                  'Audience',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: Text(_audienceName(_audience)),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: _busy ? null : _chooseAudience,
+              ),
+              SwitchListTile(
+                key: const ValueKey('storyRow'),
+                value: _alsoStory,
+                onChanged: _busy ? null : (v) => setState(() => _alsoStory = v),
+                activeTrackColor: AppTheme.volt,
+                secondary: const Icon(Icons.auto_awesome_rounded),
+                title: const Text(
+                  'Also share to your moments',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: const Text('It stays there for 24 hours.'),
+              ),
               if (_photoClip)
                 ListTile(
                   key: const ValueKey('clipLengthRow'),
@@ -1423,6 +1548,46 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   ),
                 ),
               if (_hasVideo) _qualityTile(context),
+              ExpansionTile(
+                key: const ValueKey('advancedRow'),
+                leading: const Icon(Icons.tune_rounded),
+                title: const Text(
+                  'Advanced settings',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                shape: const Border(),
+                collapsedShape: const Border(),
+                children: [
+                  SwitchListTile(
+                    key: const ValueKey('hideLikesRow'),
+                    value: _hideLikes,
+                    onChanged: _busy
+                        ? null
+                        : (v) => setState(() => _hideLikes = v),
+                    activeTrackColor: AppTheme.volt,
+                    title: const Text('Hide like count'),
+                    subtitle: const Text('Only you see the number.'),
+                  ),
+                  SwitchListTile(
+                    key: const ValueKey('hideCommentsRow'),
+                    value: _hideComments,
+                    onChanged: _busy
+                        ? null
+                        : (v) => setState(() => _hideComments = v),
+                    activeTrackColor: AppTheme.volt,
+                    title: const Text('Hide comment count'),
+                  ),
+                  SwitchListTile(
+                    key: const ValueKey('hideSharesRow'),
+                    value: _hideShares,
+                    onChanged: _busy
+                        ? null
+                        : (v) => setState(() => _hideShares = v),
+                    activeTrackColor: AppTheme.volt,
+                    title: const Text('Hide share count'),
+                  ),
+                ],
+              ),
               ListTile(
                 leading: const Icon(Icons.high_quality_rounded),
                 title: Text(
@@ -1510,6 +1675,99 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
+  Widget _coverPill(IconData icon, String text) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    decoration: BoxDecoration(
+      color: Colors.black.withValues(alpha: 0.6),
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: Colors.white),
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+            fontSize: 13,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  static IconData _audienceIcon(String a) => a == kAudienceMe
+      ? Icons.lock_outline_rounded
+      : a == kAudienceFollowers
+      ? Icons.group_outlined
+      : Icons.public_rounded;
+
+  static String _audienceName(String a) => a == kAudienceMe
+      ? 'Only me'
+      : a == kAudienceFollowers
+      ? 'Followers'
+      : 'Everyone';
+
+  Future<void> _chooseAudience() async {
+    final pick = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final a in const [
+              kAudienceEveryone,
+              kAudienceFollowers,
+              kAudienceMe,
+            ])
+              ListTile(
+                key: ValueKey('audience_$a'),
+                leading: Icon(_audienceIcon(a)),
+                title: Text(
+                  _audienceName(a),
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: Text(
+                  a == kAudienceEveryone
+                      ? 'Anyone on InstantGram'
+                      : a == kAudienceFollowers
+                      ? 'Only people who follow you'
+                      : 'Only you can see it',
+                ),
+                trailing: _audience == a
+                    ? const Icon(Icons.check_rounded, color: AppTheme.volt)
+                    : null,
+                onTap: () => Navigator.pop(ctx, a),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (pick != null && mounted) setState(() => _audience = pick);
+  }
+
+  /// Choose the picture that stands for the clip: slide to a moment of the video.
+  Future<void> _pickCover() async {
+    final it = _first;
+    if (it == null || !it.video || _busy) return;
+    final total = math.max(1, it.secondsFull > 0 ? it.secondsFull : it.seconds);
+    final File? f = await showModalBottomSheet<File>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _CoverSheet(path: it.original.path, seconds: total),
+    );
+    if (f == null || !mounted) return;
+    await FileImage(f).evict();
+    setState(() {
+      it.thumb = f;
+      _coverVer++;
+    });
+  }
+
   String _summary() {
     final list = _chosen;
     final photos = list.where((i) => !i.video).length;
@@ -1577,6 +1835,103 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       subtitle: Text(
         _qualityText(big),
         style: TextStyle(color: context.muted, fontSize: 12.5, height: 1.3),
+      ),
+    );
+  }
+}
+
+
+/// Slide through the video and use the frame you like as the cover.
+class _CoverSheet extends StatefulWidget {
+  const _CoverSheet({required this.path, required this.seconds});
+  final String path;
+  final int seconds;
+
+  @override
+  State<_CoverSheet> createState() => _CoverSheetState();
+}
+
+class _CoverSheetState extends State<_CoverSheet> {
+  double _t = 0;
+  File? _frame;
+  bool _loading = false;
+  int _gen = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final gen = ++_gen;
+    setState(() => _loading = true);
+    try {
+      final f = await VideoCompress.getFileThumbnail(
+        widget.path,
+        quality: 85,
+        position: (_t * 1000).round(),
+      );
+      if (!mounted || gen != _gen) return;
+      await FileImage(f).evict();
+      setState(() => _frame = f);
+    } catch (_) {
+      // keep the previous frame
+    } finally {
+      if (mounted && gen == _gen) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final h = MediaQuery.sizeOf(context).height;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              height: h * 0.45,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: ColoredBox(
+                  color: Colors.black,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (_frame != null)
+                        Image.file(
+                          _frame!,
+                          key: ValueKey('f${_frame!.path}$_gen'),
+                          fit: BoxFit.contain,
+                        ),
+                      if (_loading)
+                        const Center(child: CircularProgressIndicator()),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Slider(
+              key: const ValueKey('coverSlider'),
+              value: _t,
+              max: widget.seconds.toDouble(),
+              onChanged: (v) => setState(() => _t = v),
+              onChangeEnd: (_) => _load(),
+            ),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                key: const ValueKey('useCover'),
+                onPressed: _frame == null
+                    ? null
+                    : () => Navigator.pop(context, _frame),
+                child: const Text('Use this cover'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

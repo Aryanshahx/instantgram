@@ -40,7 +40,7 @@ class _SearchScreenState extends State<SearchScreen> {
   List<Post> _posts = [];
   List<String> _trending = [];
 
-  /// 0 = Posts, 1 = Clips, 2 = People
+  /// 0 = Clips, 1 = People (photo posts are not shown in Explore or search)
   int _tab = 0;
 
   @override
@@ -161,7 +161,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 textInputAction: TextInputAction.search,
                 autocorrect: false,
                 decoration: InputDecoration(
-                  hintText: 'Search people, clips, posts or #tags',
+                  hintText: 'Search people, clips or #tags',
                   prefixIcon: const Icon(Icons.search_rounded),
                   suffixIcon: _query.isEmpty
                       ? null
@@ -179,7 +179,7 @@ class _SearchScreenState extends State<SearchScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: PillTabs(
-                  labels: const ['Posts', 'Clips', 'People'],
+                  labels: const ['Clips', 'People'],
                   index: _tab,
                   onChanged: (i) => setState(() => _tab = i),
                 ),
@@ -201,16 +201,16 @@ class _SearchScreenState extends State<SearchScreen> {
         onRetry: () => _onChanged(_query),
       );
     }
-    if (_tab == 2) return _peopleList();
-    final clips = _tab == 1;
+    if (_tab == 1) return _peopleList();
+    const clips = true;
     final shown = [
       for (final p in _posts)
-        if (p.isClip == clips) p,
+        if (p.isClip) p,
     ];
     if (shown.isEmpty) {
       return EmptyState(
-        icon: clips ? Icons.smart_display_outlined : Icons.photo_outlined,
-        title: clips ? 'No clips found' : 'No posts found',
+        icon: Icons.smart_display_outlined,
+        title: 'No clips found',
         subtitle:
             'Nothing matches "$_query". Try a #hashtag or a word from the title.',
       );
@@ -246,7 +246,12 @@ class _SearchScreenState extends State<SearchScreen> {
             horizontal: 12,
             vertical: 2,
           ),
-          leading: UserAvatar(url: u.photoUrl, name: u.username, radius: 25),
+          leading: UserAvatar(
+            url: u.photoUrl,
+            name: u.username,
+            radius: 25,
+            uid: u.uid,
+          ),
           title: Text(
             u.username,
             style: const TextStyle(fontWeight: FontWeight.w800),
@@ -262,15 +267,27 @@ class _SearchScreenState extends State<SearchScreen> {
     return ListenableBuilder(
       listenable: _explore,
       builder: (context, _) {
+        // only clips are shown here; photo posts stay in Discover and on profiles
+        final clips = [
+          for (final p in _explore.posts)
+            if (p.isClip) p,
+        ];
+        if (clips.length < 9 &&
+            _explore.hasMore &&
+            !_explore.loading &&
+            _explore.error == null &&
+            _explore.posts.isNotEmpty) {
+          Future.microtask(_explore.loadMore);
+        }
         if (_explore.initialLoading) return const CenteredLoader();
         if (_explore.error != null && _explore.posts.isEmpty) {
           return ErrorState(error: _explore.error!, onRetry: _explore.retry);
         }
-        if (_explore.isEmpty) {
+        if (clips.isEmpty && !_explore.hasMore && !_explore.loading) {
           return const EmptyState(
             icon: Icons.explore_rounded,
             title: 'Nothing to explore yet',
-            subtitle: 'Posts from everyone will show up here.',
+            subtitle: 'Clips from everyone will show up here.',
           );
         }
         return RefreshIndicator(
@@ -303,7 +320,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     ),
                   ),
                 ),
-              PostGridSliver(posts: _explore.posts, inline: true),
+              PostGridSliver(posts: clips, inline: true),
               if (_explore.loading)
                 const SliverToBoxAdapter(
                   child: Padding(

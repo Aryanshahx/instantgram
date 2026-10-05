@@ -7,6 +7,7 @@ import '../core/media_url.dart';
 import '../models/story.dart';
 import 'mp4_faststart.dart';
 import 'media_server.dart';
+import 'story_ring.dart';
 import 'user_service.dart';
 
 class StoryService {
@@ -53,6 +54,7 @@ class StoryService {
       );
     }).toList();
 
+    StoryRing.instance.setAll(byAuthor.keys);
     groups.sort((a, b) {
       if (a.authorId == _uid) return -1;
       if (b.authorId == _uid) return 1;
@@ -126,10 +128,52 @@ class StoryService {
       data['imageUrl'] = up.ref;
     }
     await ref.set(data);
+    StoryRing.instance.add(_uid);
+  }
+
+  /// Puts an already uploaded post photo or clip in my moments (nothing is uploaded again).
+  Future<void> addStoryFromRefs({
+    String imageRef = '',
+    String videoRef = '',
+    String thumbRef = '',
+    int duration = 0,
+    String musicId = '',
+    String musicTitle = '',
+    String musicArtist = '',
+    double musicVolume = 0.8,
+    bool keepSound = true,
+  }) async {
+    final me = await UserService.instance.getUser(_uid);
+    if (me == null) throw StateError('Profile not found');
+    await _stories.doc().set({
+      'authorId': _uid,
+      'authorUsername': me.username,
+      'authorPhotoUrl': me.photoUrl,
+      'createdAt': FieldValue.serverTimestamp(),
+      'expiresAt': Timestamp.fromDate(
+        DateTime.now().add(const Duration(hours: 24)),
+      ),
+      'sharedFromPost': true,
+      'imageUrl': videoRef.isEmpty ? imageRef : '',
+      if (videoRef.isNotEmpty) ...{
+        'videoUrl': videoRef,
+        'thumbnailUrl': thumbRef,
+        'duration': duration,
+        'keepSound': keepSound,
+      },
+      if (musicId.isNotEmpty) ...{
+        'musicId': musicId,
+        if (musicTitle.isNotEmpty) 'musicTitle': musicTitle,
+        if (musicArtist.isNotEmpty) 'musicArtist': musicArtist,
+        'musicVolume': musicVolume,
+      },
+    });
+    StoryRing.instance.add(_uid);
   }
 
   Future<void> deleteStory(Story s) async {
     await _stories.doc(s.id).delete();
+    if (s.shared) return; // the post still uses these files
     await MediaServer.instance.deleteQuietly(
       s.isVideo ? s.videoRef : s.imageRef,
       s.isVideo ? s.thumbRef : null,

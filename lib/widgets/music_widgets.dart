@@ -431,7 +431,10 @@ class _MusicSheetState extends State<_MusicSheet> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(_searchError!, textAlign: TextAlign.center),
+                        if (isMusicSetupError(_searchError!))
+                          const MusicSetupGuide()
+                        else
+                          Text(_searchError!, textAlign: TextAlign.center),
                         const SizedBox(height: 12),
                         OutlinedButton(
                           onPressed: _search,
@@ -500,6 +503,74 @@ class _MusicSheetState extends State<_MusicSheet> {
           ],
         ),
       ),
+    );
+  }
+}
+
+
+/// True for the signer's "Epidemic Sound is not set up" answer.
+bool isMusicSetupError(String message) =>
+    message.contains('not set up') || message.contains('EPIDEMIC_API_KEY');
+
+/// Step by step: what to do once so that Epidemic Sound search works.
+class MusicSetupGuide extends StatelessWidget {
+  const MusicSetupGuide({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    Widget step(String n, String text) => Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              color: AppTheme.volt,
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              n,
+              style: const TextStyle(
+                color: AppTheme.ink,
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: const TextStyle(height: 1.3))),
+        ],
+      ),
+    );
+    return Column(
+      key: const ValueKey('musicSetupGuide'),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Epidemic Sound needs one setup step',
+          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Your Epidemic key is not on the server yet. It takes two minutes:',
+          style: TextStyle(color: context.muted),
+        ),
+        const SizedBox(height: 12),
+        step('1', 'Open vercel.com and your signer project.'),
+        step('2', 'Settings > Environment Variables.'),
+        step('3', 'Name: EPIDEMIC_API_KEY. Value: your Epidemic Sound key. Save.'),
+        step('4', 'Deployments > the top one > the three dots > Redeploy.'),
+        step('5', 'Come back here and press Try again.'),
+        const SizedBox(height: 4),
+        Text(
+          'The InstantGram tab works without this.',
+          style: TextStyle(color: context.muted, fontSize: 12.5),
+        ),
+      ],
     );
   }
 }

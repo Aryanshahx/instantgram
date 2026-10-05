@@ -224,6 +224,7 @@ class _CommentsPanelState extends State<CommentsPanel> {
               url: c.authorPhotoUrl,
               name: c.authorUsername,
               radius: 18,
+              uid: c.authorId,
             ),
           ),
           const SizedBox(width: 12),

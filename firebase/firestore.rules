@@ -38,6 +38,25 @@ service cloud.firestore {
       match /saved/{postId} {
         allow read, write: if signedIn() && request.auth.uid == uid;
       }
+      // people I blocked: private to the owner
+      match /blocked/{targetId} {
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
+      // private accounts: a person asks (requests), the owner approves (approved),
+      // and the asker then follows (sent_requests is the asker's own list)
+      match /requests/{requesterId} {
+        allow read: if signedIn() && (request.auth.uid == uid || request.auth.uid == requesterId);
+        allow create: if signedIn() && request.auth.uid == requesterId;
+        allow delete: if signedIn() && (request.auth.uid == uid || request.auth.uid == requesterId);
+      }
+      match /approved/{requesterId} {
+        allow read: if signedIn();
+        allow create, update: if signedIn() && request.auth.uid == uid;
+        allow delete: if signedIn() && (request.auth.uid == uid || request.auth.uid == requesterId);
+      }
+      match /sent_requests/{targetId} {
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
       // people {uid} follows: only the owner writes
       match /following/{targetId} {
         allow read: if signedIn();
@@ -50,7 +69,7 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
       // author edits anything; anyone may change like/comment counters
       allow update: if signedIn() && (resource.data.authorId == request.auth.uid
-                                      || onlyChanges(['likeCount', 'commentCount', 'viewCount']));
+                                      || onlyChanges(['likeCount', 'commentCount', 'viewCount', 'shareCount']));
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
 
       match /likes/{uid} {

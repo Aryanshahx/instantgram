@@ -12,6 +12,7 @@ import '../../models/post.dart';
 import '../../services/clip_cache.dart';
 import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
+import '../../services/safety_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/like_button.dart';
@@ -484,6 +485,7 @@ class _ReelPageState extends State<_ReelPage> {
                             url: post.authorPhotoUrl,
                             name: post.authorUsername,
                             radius: 17,
+                            uid: post.authorId,
                           ),
                           const SizedBox(width: 10),
                           Flexible(
@@ -572,14 +574,15 @@ class _Rail extends StatelessWidget {
       children: [
         if (!mine) ...[
           ReelFollowPill(uid: post.authorId),
-          // the three dots sit right under the Follow button
+          // Report sits right under the Follow button
           ReelIconButton(
             key: const ValueKey('clipMore'),
-            icon: Icons.more_horiz_rounded,
-            size: 30,
+            icon: Icons.flag_outlined,
+            size: 28,
+            label: 'Report',
             onTap: () => showReportSheet(context, post),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
         ],
         ListenableBuilder(
           listenable: like,
@@ -590,14 +593,18 @@ class _Rail extends StatelessWidget {
             color: like.liked ? _heart : Colors.white,
             pop: like.liked,
             size: 34,
-            label: '${like.count}',
+            label: SafetyService.instance.showsNumber(post, post.hideLikes)
+                ? '${like.count}'
+                : 'Like',
             onTap: onLike,
           ),
         ),
         const SizedBox(height: 8),
         ReelIconButton(
           icon: Icons.chat_bubble_outline_rounded,
-          label: '$comments',
+          label: SafetyService.instance.showsNumber(post, post.hideComments)
+              ? '$comments'
+              : 'Comment',
           onTap: onComments,
         ),
         const SizedBox(height: 8),
@@ -615,7 +622,11 @@ class _Rail extends StatelessWidget {
         const SizedBox(height: 8),
         ReelIconButton(
           icon: Icons.ios_share_rounded,
-          label: 'Share',
+          label:
+              post.shareCount > 0 &&
+                  SafetyService.instance.showsNumber(post, post.hideShares)
+              ? compactCount(post.shareCount)
+              : 'Share',
           onTap: onShare,
         ),
       ],

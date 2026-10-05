@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/app_user.dart';
+import 'safety_service.dart';
 import '../core/errors.dart';
 import 'media_server.dart';
 
@@ -41,7 +42,10 @@ class UserService {
         .endAt(['$p\uf8ff'])
         .limit(20)
         .get();
-    return snap.docs.map(AppUser.fromDoc).toList();
+    return [
+      for (final d in snap.docs)
+        if (!SafetyService.instance.isBlocked(d.id)) AppUser.fromDoc(d),
+    ];
   }
 
   Future<List<AppUser>> suggestedUsers() async {
@@ -50,6 +54,13 @@ class UserService {
         .limit(20)
         .get();
     return snap.docs.map(AppUser.fromDoc).where((u) => u.uid != myUid).toList();
+  }
+
+  /// Saves the chosen language on my profile (best effort; it is also kept on the phone).
+  Future<void> setLanguage(String code) async {
+    try {
+      await _users.doc(myUid).update({'language': code});
+    } catch (_) {}
   }
 
   // ---------------------------------------------------------------- follows
@@ -78,6 +89,7 @@ class UserService {
       'followersCount': FieldValue.increment(1),
     });
     await batch.commit();
+    SafetyService.instance.following.add(targetUid);
   }
 
   Future<void> unfollow(String targetUid) async {
@@ -90,6 +102,7 @@ class UserService {
       'followersCount': FieldValue.increment(-1),
     });
     await batch.commit();
+    SafetyService.instance.following.remove(targetUid);
   }
 
   /// ids of the people [uid] follows (max 100)

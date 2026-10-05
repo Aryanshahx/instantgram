@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_events.dart';
+import '../../core/l10n.dart';
+import '../../services/app_prefs.dart';
+import '../../services/safety_service.dart';
+import '../../services/usage_tracker.dart';
 import '../../services/auth_service.dart';
 import '../../services/call_service.dart';
 import '../../services/chat_service.dart';
@@ -37,6 +41,54 @@ class _MainShellState extends State<MainShell> {
     CallService.instance
         .start(); // rings when someone calls (while the app is open)
     CallService.instance.incoming.addListener(_onIncomingCall);
+    SafetyService.instance.load().then((_) {
+      if (mounted) AppEvents.refreshFeed(); // hide posts of people I blocked
+    });
+    UsageTracker.instance.start();
+    UsageTracker.instance.limitReached.addListener(_onLimit);
+    _syncProfile();
+  }
+
+  /// Remembers this account on the phone and takes the language saved on the profile.
+  Future<void> _syncProfile() async {
+    try {
+      final me = await UserService.instance.getUser(UserService.instance.myUid);
+      if (me == null) return;
+      AppPrefs.instance.rememberAccount(
+        SavedAccount(
+          uid: me.uid,
+          username: me.username,
+          photoUrl: me.photoUrl,
+          email: AuthService.instance.currentUser?.email ?? '',
+        ),
+      );
+      if (me.language.isNotEmpty && me.language != Language.instance.value) {
+        Language.instance.choose(me.language);
+      }
+    } catch (_) {
+      // best effort
+    }
+  }
+
+  /// Today's time in the app passed the daily limit (Settings > Manage time).
+  void _onLimit() {
+    if (!UsageTracker.instance.limitReached.value || !mounted) return;
+    UsageTracker.instance.limitReached.value = false;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Daily limit reached'),
+        content: Text(
+          'You have spent ${AppPrefs.instance.dailyLimitMinutes} minutes in InstantGram today. Time for a break?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Keep going'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Someone is calling: show the full-screen Accept / Decline.
@@ -64,6 +116,7 @@ class _MainShellState extends State<MainShell> {
   void dispose() {
     AppEvents.searchRequest.removeListener(_onSearchRequest);
     CallService.instance.incoming.removeListener(_onIncomingCall);
+    UsageTracker.instance.limitReached.removeListener(_onLimit);
     CallService.instance.stop();
     ChatService.instance.stop();
     super.dispose();

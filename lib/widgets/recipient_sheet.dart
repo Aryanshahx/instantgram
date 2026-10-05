@@ -230,6 +230,7 @@ class _RecipientSheetState extends State<RecipientSheet> {
                           url: u.photoUrl,
                           name: u.username,
                           radius: 22,
+                          uid: u.uid,
                         ),
                         title: Text(
                           u.username,

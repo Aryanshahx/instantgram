@@ -63,10 +63,14 @@ class HeartButton extends StatelessWidget {
     required this.controller,
     this.size = 28,
     this.onError,
+    this.showCount = true,
   });
 
   final LikeController controller;
   final double size;
+
+  /// False when the author hid the like count (the author still sees it).
+  final bool showCount;
   final void Function(Object error)? onError;
 
   @override
@@ -98,14 +102,16 @@ class HeartButton extends StatelessWidget {
                     color: liked ? kHeartColor : null,
                   ),
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  '${controller.count}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 14.5,
+                if (showCount) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    '${controller.count}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14.5,
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),

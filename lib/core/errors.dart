@@ -7,6 +7,13 @@ class UsernameTakenException implements Exception {
   String toString() => 'That username is already taken.';
 }
 
+/// Someone younger than the minimum age tried to make an account.
+class AgeException implements Exception {
+  const AgeException();
+  @override
+  String toString() => 'You must be at least 13 years old to make an account.';
+}
+
 /// A username could not be turned into an email (unknown name, nothing linked yet).
 class LoginLookupException implements Exception {
   const LoginLookupException(this.message);
@@ -25,6 +32,7 @@ class MediaException implements Exception {
 /// Turns any error into a short, user-friendly message.
 String friendlyError(Object e) {
   if (e is UsernameTakenException ||
+      e is AgeException ||
       e is MediaException ||
       e is LoginLookupException) {
     return e.toString();

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show VoidCallback;
 
 import '../models/post.dart';
+import 'app_prefs.dart';
 import 'post_service.dart';
 import 'user_service.dart';
 
@@ -30,6 +31,7 @@ class ViewTracker {
       return;
     }
     if (post.authorId == me || post.id.isEmpty) return;
+    AppPrefs.instance.addHistory(post.id); // Settings > History
     if (!_done.add(post.id)) return;
     try {
       await PostService.instance.registerView(post.id);

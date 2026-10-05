@@ -571,6 +571,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 url: u?.photoUrl ?? '',
                 name: u?.username ?? '',
                 radius: 18,
+                uid: widget.otherUid,
               ),
               const SizedBox(width: 10),
               Expanded(

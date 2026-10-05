@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/errors.dart';
+import '../core/l10n.dart';
 import '../core/theme.dart';
 import '../core/ui.dart';
 import '../models/post.dart';
@@ -11,15 +12,17 @@ import '../services/user_service.dart';
 const String kReportEmail = 'techlabs.hyper@gmail.com';
 
 /// The email that opens when someone reports a clip.
-Uri reportUri(Post post) {
+Uri reportUri(Post post, {String reason = '', String details = ''}) {
   final kind = post.isClip ? 'clip' : 'post';
-  final subject = 'Report: $kind ${post.id}';
+  final subject = 'Report: $kind ${post.id}${reason.isEmpty ? '' : ' ($reason)'}';
   final body =
       'I want to report this $kind.\n\n'
+      '${reason.isEmpty ? '' : 'Reason: $reason\n'}'
+      'What is wrong:\n${details.trim().isEmpty ? '(please write here)' : details.trim()}\n\n'
+      '---\n'
       'Post id: ${post.id}\n'
       'Posted by: @${post.authorUsername} (${post.authorId})\n'
-      'Link: ${post.isVideo ? post.videoUrl : post.imageUrl}\n\n'
-      'Reason (please write here):\n';
+      'Link: ${post.isVideo ? post.videoUrl : post.imageUrl}\n';
   // encodeComponent writes spaces as %20; Uri(queryParameters:) would write "+", which mail
   // apps show as a plus sign.
   return Uri.parse(
@@ -28,47 +31,133 @@ Uri reportUri(Post post) {
   );
 }
 
-/// The "..." menu of a clip: report it (opens an email to the team).
+const List<String> kReportReasons = [
+  'Spam',
+  'Nudity or sexual content',
+  'Hate or harassment',
+  'Violence',
+  'Copyright',
+  'Something else',
+];
+
+/// Report a clip: pick a reason, write what is wrong, then the email to the team opens with
+/// the text already in it.
 Future<void> showReportSheet(BuildContext context, Post post) async {
-  final report = await showModalBottomSheet<bool>(
+  final result = await showModalBottomSheet<({String reason, String text})>(
     context: context,
+    isScrollControlled: true,
     showDragHandle: true,
-    builder: (ctx) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            key: const ValueKey('reportClip'),
-            leading: const Icon(Icons.flag_outlined, color: AppTheme.coral),
-            title: const Text(
-              'Report',
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                color: AppTheme.coral,
-              ),
-            ),
-            subtitle: Text('Sends an email to $kReportEmail'),
-            onTap: () => Navigator.pop(ctx, true),
-          ),
-          ListTile(
-            leading: const Icon(Icons.close_rounded),
-            title: const Text('Cancel'),
-            onTap: () => Navigator.pop(ctx, false),
-          ),
-          const SizedBox(height: 8),
-        ],
-      ),
-    ),
+    builder: (ctx) => _ReportForm(ctx: ctx),
   );
-  if (report != true || !context.mounted) return;
+  if (result == null || !context.mounted) return;
   var opened = false;
   try {
-    opened = await launchUrl(reportUri(post));
+    opened = await launchUrl(
+      reportUri(post, reason: result.reason, details: result.text),
+    );
   } catch (_) {
     opened = false;
   }
-  if (!opened && context.mounted) {
-    showToast(context, 'No email app found. Write to $kReportEmail');
+  if (!context.mounted) return;
+  showToast(
+    context,
+    opened
+        ? 'Press send in your email app to report it.'
+        : 'No email app found. Write to $kReportEmail',
+  );
+}
+
+class _ReportForm extends StatefulWidget {
+  const _ReportForm({required this.ctx});
+  final BuildContext ctx;
+
+  @override
+  State<_ReportForm> createState() => _ReportFormState();
+}
+
+class _ReportFormState extends State<_ReportForm> {
+  final _text = TextEditingController();
+  String _reason = kReportReasons.last;
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ok = _text.text.trim().length >= 5;
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              context.tr('Report'),
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Tell us what is wrong. It goes to $kReportEmail.',
+              style: TextStyle(color: context.muted),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                for (final r in kReportReasons)
+                  ChoiceChip(
+                    label: Text(r),
+                    selected: _reason == r,
+                    showCheckmark: false,
+                    selectedColor: AppTheme.coral.withValues(alpha: 0.9),
+                    labelStyle: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: _reason == r ? Colors.white : null,
+                    ),
+                    onSelected: (_) => setState(() => _reason = r),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const ValueKey('reportText'),
+              controller: _text,
+              maxLines: 4,
+              minLines: 3,
+              maxLength: 500,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                hintText: 'Write your problem here...',
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                key: const ValueKey('reportSend'),
+                onPressed: ok
+                    ? () => Navigator.pop(widget.ctx, (
+                        reason: _reason,
+                        text: _text.text.trim(),
+                      ))
+                    : null,
+                child: Text(context.tr('Send')),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

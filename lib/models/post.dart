@@ -62,6 +62,34 @@ const int kPhotoClipSeconds = 5;
 /// Most photos and videos one post can hold.
 const int kMaxPostItems = 10;
 
+/// Who may see a post, and which numbers are shown to others.
+class PostOptions {
+  const PostOptions({
+    this.audience = kAudienceEveryone,
+    this.hideLikes = false,
+    this.hideComments = false,
+    this.hideShares = false,
+  });
+
+  /// [kAudienceEveryone], [kAudienceFollowers] or [kAudienceMe].
+  final String audience;
+  final bool hideLikes;
+  final bool hideComments;
+  final bool hideShares;
+
+  Map<String, Object> toMap() => {
+    'audience': audience,
+    'hideLikes': hideLikes,
+    'hideComments': hideComments,
+    'hideShares': hideShares,
+    'shareCount': 0,
+  };
+}
+
+const String kAudienceEveryone = 'everyone';
+const String kAudienceFollowers = 'followers';
+const String kAudienceMe = 'me';
+
 class Post {
   const Post({
     required this.id,
@@ -86,6 +114,12 @@ class Post {
     this.musicVolume = 0.8,
     this.keepSound = true,
     this.media = const [],
+    this.shareCount = 0,
+    this.audience = kAudienceEveryone,
+    this.hideLikes = false,
+    this.hideComments = false,
+    this.hideShares = false,
+    this.authorPrivate = false,
   });
 
   final String id;
@@ -122,6 +156,20 @@ class Post {
   final String musicId;
   final double musicVolume;
   final bool keepSound;
+
+  /// Times it was shared (link or sent to people).
+  final int shareCount;
+
+  /// [kAudienceEveryone], [kAudienceFollowers] or [kAudienceMe].
+  final String audience;
+
+  /// The author chose to hide these numbers from other people (the author still sees them).
+  final bool hideLikes;
+  final bool hideComments;
+  final bool hideShares;
+
+  /// The author's account was private when this was posted.
+  final bool authorPrivate;
 
   /// The photos and videos of a carousel (empty for a normal one-photo or one-video post).
   final List<PostItem> media;
@@ -211,6 +259,14 @@ class Post {
           ? (m['musicVolume'] as num).toDouble().clamp(0.0, 1.0)
           : 0.8,
       keepSound: m['keepSound'] is bool ? m['keepSound'] as bool : true,
+      shareCount: _int(m['shareCount']),
+      audience: _str(m['audience']).isEmpty
+          ? kAudienceEveryone
+          : _str(m['audience']),
+      hideLikes: m['hideLikes'] == true,
+      hideComments: m['hideComments'] == true,
+      hideShares: m['hideShares'] == true,
+      authorPrivate: m['authorPrivate'] == true,
       media: m['media'] is List
           ? [for (final e in m['media'] as List) ?PostItem.fromMap(e)]
           : const [],

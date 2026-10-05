@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/post.dart';
+import 'safety_service.dart';
 
 /// Cursor-based pagination (keeps Firestore reads low on the free tier).
 class PostPager extends ChangeNotifier {
@@ -62,7 +63,12 @@ class PostPager extends ChangeNotifier {
       posts.addAll(
         snap.docs
             .map(Post.fromDoc)
-            .where((p) => !p.isLegacyLink && p.id != first?.id),
+            .where(
+              (p) =>
+                  !p.isLegacyLink &&
+                  p.id != first?.id &&
+                  SafetyService.instance.canSee(p),
+            ),
       );
       if (snap.docs.isNotEmpty) _cursor = snap.docs.last;
       hasMore = snap.docs.length >= pageSize;

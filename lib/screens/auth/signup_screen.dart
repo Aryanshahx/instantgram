@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/errors.dart';
+import '../../core/l10n.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../services/auth_service.dart';
@@ -22,6 +23,29 @@ class _SignupScreenState extends State<SignupScreen> {
   final _password = TextEditingController();
   bool _loading = false;
   bool _obscure = true;
+  DateTime? _birth;
+  bool _birthError = false;
+
+  static String _fmt(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')} / ${d.month.toString().padLeft(2, '0')} / ${d.year}';
+
+  Future<void> _pickBirth() async {
+    final now = DateTime.now();
+    final d = await showDatePicker(
+      context: context,
+      initialDate: _birth ?? DateTime(now.year - 18, now.month, now.day),
+      firstDate: DateTime(now.year - 110),
+      lastDate: now,
+      initialEntryMode: DatePickerEntryMode.calendarOnly,
+      helpText: context.tr('Choose your date of birth'),
+    );
+    if (d != null && mounted) {
+      setState(() {
+        _birth = d;
+        _birthError = false;
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -33,7 +57,13 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 
   Future<void> _signUp() async {
-    if (!_formKey.currentState!.validate()) return;
+    final formOk = _formKey.currentState!.validate();
+    final b = _birth;
+    if (b == null || !AuthService.isOldEnough(b, DateTime.now())) {
+      setState(() => _birthError = true);
+      return;
+    }
+    if (!formOk) return;
     setState(() => _loading = true);
     try {
       await AuthService.instance.signUp(
@@ -41,6 +71,8 @@ class _SignupScreenState extends State<SignupScreen> {
         password: _password.text,
         username: _username.text,
         fullName: _fullName.text,
+        birthDate: b,
+        language: Language.instance.value,
       );
       if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
     } catch (e) {
@@ -85,11 +117,41 @@ class _SignupScreenState extends State<SignupScreen> {
                         style: TextStyle(color: context.muted, fontSize: 15),
                       ),
                       const SizedBox(height: 24),
+                      Text(
+                        context.tr('Choose your language'),
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 8),
+                      ValueListenableBuilder<String>(
+                        valueListenable: Language.instance,
+                        builder: (context, code, _) => Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final l in kLanguages)
+                              ChoiceChip(
+                                key: ValueKey('lang_${l.code}'),
+                                label: Text(l.name),
+                                selected: code == l.code,
+                                showCheckmark: false,
+                                selectedColor: AppTheme.volt,
+                                labelStyle: TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  color: code == l.code ? AppTheme.ink : null,
+                                ),
+                                onSelected: (_) => Language.instance.choose(
+                                  l.code,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
                       TextFormField(
                         controller: _fullName,
                         textCapitalization: TextCapitalization.words,
-                        decoration: const InputDecoration(
-                          hintText: 'Full name',
+                        decoration: InputDecoration(
+                          hintText: context.tr('Full name'),
                           prefixIcon: Icon(Icons.badge_outlined),
                         ),
                       ),
@@ -97,8 +159,8 @@ class _SignupScreenState extends State<SignupScreen> {
                       TextFormField(
                         controller: _username,
                         autocorrect: false,
-                        decoration: const InputDecoration(
-                          hintText: 'Username',
+                        decoration: InputDecoration(
+                          hintText: context.tr('Username'),
                           helperText: '3-20 chars: a-z, 0-9, dot, underscore',
                           prefixIcon: Icon(Icons.tag_rounded),
                         ),
@@ -113,8 +175,8 @@ class _SignupScreenState extends State<SignupScreen> {
                       TextFormField(
                         controller: _email,
                         keyboardType: TextInputType.emailAddress,
-                        decoration: const InputDecoration(
-                          hintText: 'Email',
+                        decoration: InputDecoration(
+                          hintText: context.tr('Email'),
                           prefixIcon: Icon(Icons.alternate_email_rounded),
                         ),
                         validator: (v) => (v == null || !v.contains('@'))
@@ -126,7 +188,7 @@ class _SignupScreenState extends State<SignupScreen> {
                         controller: _password,
                         obscureText: _obscure,
                         decoration: InputDecoration(
-                          hintText: 'Password',
+                          hintText: context.tr('Password'),
                           prefixIcon: const Icon(Icons.lock_outline_rounded),
                           suffixIcon: IconButton(
                             icon: Icon(
@@ -142,6 +204,32 @@ class _SignupScreenState extends State<SignupScreen> {
                             ? 'At least 6 characters'
                             : null,
                       ),
+                      const SizedBox(height: 12),
+                      InkWell(
+                        key: const ValueKey('birthField'),
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: _pickBirth,
+                        child: InputDecorator(
+                          decoration: InputDecoration(
+                            prefixIcon: const Icon(Icons.cake_outlined),
+                            errorText: _birthError
+                                ? (_birth == null
+                                      ? context.tr('Choose your date of birth')
+                                      : context.tr(
+                                          'You must be at least 13 years old.',
+                                        ))
+                                : null,
+                          ),
+                          child: Text(
+                            _birth == null
+                                ? context.tr('Date of birth')
+                                : _fmt(_birth!),
+                            style: TextStyle(
+                              color: _birth == null ? context.muted : null,
+                            ),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 22),
                       FilledButton(
                         onPressed: _loading ? null : _signUp,
@@ -154,7 +242,7 @@ class _SignupScreenState extends State<SignupScreen> {
                                   color: AppTheme.ink,
                                 ),
                               )
-                            : const Text('Create account'),
+                            : Text(context.tr('Create account')),
                       ),
                     ],
                   ),

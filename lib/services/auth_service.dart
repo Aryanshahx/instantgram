@@ -14,6 +14,19 @@ class AuthService {
   User? get currentUser => _auth.currentUser;
   String get uid => _auth.currentUser!.uid;
 
+  /// The youngest age that may make an account.
+  static const int minAge = 13;
+
+  /// True when someone born on [birth] is at least [minAge] on [today].
+  static bool isOldEnough(DateTime birth, DateTime today) {
+    var age = today.year - birth.year;
+    if (today.month < birth.month ||
+        (today.month == birth.month && today.day < birth.day)) {
+      age--;
+    }
+    return age >= minAge;
+  }
+
   static final RegExp usernameRegex = RegExp(r'^[a-z0-9._]{3,20}$');
 
   Future<bool> isUsernameAvailable(String username) async {
@@ -82,7 +95,12 @@ class AuthService {
     required String password,
     required String username,
     String fullName = '',
+    required DateTime birthDate,
+    String language = 'en',
   }) async {
+    if (!isOldEnough(birthDate, DateTime.now())) {
+      throw const AgeException();
+    }
     final uname = username.trim().toLowerCase();
 
     if (!await isUsernameAvailable(uname)) {
@@ -112,6 +130,11 @@ class AuthService {
           'followersCount': 0,
           'followingCount': 0,
           'postsCount': 0,
+          'birthDate': Timestamp.fromDate(
+            DateTime.utc(birthDate.year, birthDate.month, birthDate.day),
+          ),
+          'language': language,
+          'isPrivate': false,
           'createdAt': FieldValue.serverTimestamp(),
         });
       });

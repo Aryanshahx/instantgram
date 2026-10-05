@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../core/media_url.dart';
 import '../core/theme.dart';
+import '../services/story_ring.dart';
 
 /// Round profile picture with an optional lime "moment" ring.
 /// Without a photo it shows a default silhouette picture.
@@ -14,6 +15,7 @@ class UserAvatar extends StatelessWidget {
     this.radius = 20,
     this.ring = false,
     this.seen = false,
+    this.uid,
   });
 
   final String url;
@@ -22,8 +24,22 @@ class UserAvatar extends StatelessWidget {
   final bool ring;
   final bool seen;
 
+  /// When given, the glowing moment ring shows by itself if this person has a moment.
+  final String? uid;
+
   @override
   Widget build(BuildContext context) {
+    final who = uid;
+    if (!ring && who != null && who.isNotEmpty) {
+      return ValueListenableBuilder<Set<String>>(
+        valueListenable: StoryRing.instance.active,
+        builder: (context, set, _) => _avatar(context, set.contains(who)),
+      );
+    }
+    return _avatar(context, ring);
+  }
+
+  Widget _avatar(BuildContext context, bool ring) {
     final size = radius * 2;
 
     // The default picture: a soft person silhouette (never a letter).

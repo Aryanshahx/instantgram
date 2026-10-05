@@ -193,6 +193,7 @@ class _InboxScreenState extends State<InboxScreen> {
                   final unread = t.isUnread(me);
                   final mine = t.lastSender == me;
                   return _Row(
+                    uid: otherUid,
                     avatarUrl: u?.photoUrl ?? '',
                     name: u?.username ?? '...',
                     subtitle: '${mine ? 'You: ' : ''}${t.lastText}',
@@ -218,6 +219,7 @@ class _InboxScreenState extends State<InboxScreen> {
 class _Row extends StatelessWidget {
   const _Row({
     required this.avatarUrl,
+    this.uid,
     required this.name,
     required this.subtitle,
     required this.onTap,
@@ -226,6 +228,7 @@ class _Row extends StatelessWidget {
   });
 
   final String avatarUrl;
+  final String? uid;
   final String name;
   final String subtitle;
   final String time;
@@ -244,7 +247,12 @@ class _Row extends StatelessWidget {
       child: ListTile(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         contentPadding: const EdgeInsets.fromLTRB(10, 6, 14, 6),
-        leading: UserAvatar(url: avatarUrl, name: name, radius: 25),
+        leading: UserAvatar(
+          url: avatarUrl,
+          name: name,
+          radius: 25,
+          uid: uid,
+        ),
         title: Text(
           name,
           maxLines: 1,

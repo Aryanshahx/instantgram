@@ -1,28 +1,30 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../chat/chat_screen.dart';
 import '../story/story_composer.dart';
 import '../../core/app_events.dart';
+import '../../core/l10n.dart';
 import '../../core/media_url.dart';
 import '../../core/theme.dart';
 import '../../core/responsive.dart';
 import '../../core/ui.dart';
 import '../../models/app_user.dart';
 import '../../models/post.dart';
-import '../../services/auth_service.dart';
+import '../../services/safety_service.dart';
 import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/follow_button.dart';
 import '../../widgets/glass.dart';
-import '../../widgets/pill_tabs.dart';
 import '../../widgets/post_grid.dart';
 import '../../widgets/state_views.dart';
 import 'edit_profile_screen.dart';
-import 'saved_posts_screen.dart';
+import '../settings/account_screens.dart' show toggleBlock;
+import '../settings/settings_screen.dart';
 import 'follow_list_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -78,14 +80,54 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (done && mounted) AppEvents.refreshFeed();
   }
 
-  Future<void> _logout() async {
-    final ok = await confirm(
-      context,
-      title: 'Log out?',
-      confirmLabel: 'Log out',
-      destructive: true,
+  void _openSettings(AppUser me) => openScreen(context, SettingsScreen(me: me));
+
+  /// There are no web pages for profiles, so the share is a short invitation text.
+  Future<void> _shareProfile(AppUser user) async {
+    final photo = user.photoUrl.isEmpty ? '' : '\n${resolveMediaUrl(user.photoUrl)}';
+    // ignore: deprecated_member_use
+    await Share.share('Follow @${user.username} on InstantGram$photo');
+  }
+
+  Future<void> _moreMenu(AppUser user) async {
+    final blocked = SafetyService.instance.isBlocked(user.uid);
+    final pick = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.ios_share_rounded),
+              title: Text(ctx.tr('Share profile')),
+              onTap: () => Navigator.pop(ctx, 'share'),
+            ),
+            ListTile(
+              key: const ValueKey('blockMenu'),
+              leading: Icon(
+                blocked ? Icons.lock_open_rounded : Icons.block_rounded,
+                color: blocked ? null : AppTheme.coral,
+              ),
+              title: Text(
+                blocked ? ctx.tr('Unblock') : ctx.tr('Block'),
+                style: TextStyle(color: blocked ? null : AppTheme.coral),
+              ),
+              onTap: () => Navigator.pop(ctx, 'block'),
+            ),
+          ],
+        ),
+      ),
     );
-    if (ok) await AuthService.instance.signOut();
+    if (!mounted) return;
+    if (pick == 'share') {
+      await _shareProfile(user);
+      return;
+    }
+    if (pick == 'block') {
+      await toggleBlock(context, user);
+      if (mounted) setState(() {});
+    }
   }
 
   @override
@@ -119,6 +161,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// Someone else's profile whose posts I may not see (private and not followed, or blocked).
+  bool _locked(AppUser user) =>
+      !_isMe &&
+      (SafetyService.instance.isBlocked(user.uid) ||
+          (user.isPrivate &&
+              !SafetyService.instance.following.contains(user.uid)));
+
   Widget _body(BuildContext context, AppUser user) {
     return ListenableBuilder(
       listenable: _pager,
@@ -128,7 +177,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             if (p.isClip == (_tab == 1)) p,
         ];
         // a tab with few items on the first pages: keep loading until it has some
-        if (shown.length < 9 &&
+        if (!_locked(user) &&
+            shown.length < 9 &&
             _pager.hasMore &&
             !_pager.loading &&
             _pager.error == null &&
@@ -144,13 +194,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               SliverToBoxAdapter(child: _header(context, user)),
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 22, 20, 12),
-                  child: PillTabs(
-                    labels: const ['Posts', 'Clips'],
-                    icons: const [
-                      Icons.grid_view_rounded,
-                      Icons.smart_display_rounded,
-                    ],
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+                  child: _ProfileTabs(
                     index: _tab,
                     onChanged: (i) => setState(() => _tab = i),
                   ),
@@ -168,6 +213,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: ErrorState(
                     error: _pager.error!,
                     onRetry: _pager.retry,
+                  ),
+                )
+              else if (_locked(user))
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: EmptyState(
+                      key: const ValueKey('lockedProfile'),
+                      icon: SafetyService.instance.isBlocked(user.uid)
+                          ? Icons.block_rounded
+                          : Icons.lock_outline_rounded,
+                      title: SafetyService.instance.isBlocked(user.uid)
+                          ? 'You blocked this account'
+                          : 'This account is private',
+                      subtitle: SafetyService.instance.isBlocked(user.uid)
+                          ? 'Unblock it from the three dots to see its posts.'
+                          : 'Request to follow to see their posts and clips.',
+                    ),
                   ),
                 )
               else if (shown.isEmpty && _pager.hasMore)
@@ -222,7 +285,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       children: [
         // ---- banner with aurora colours + floating avatar
         SizedBox(
-          height: 150 + top + 44,
+          height: 120 + top + 44,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -231,7 +294,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 right: 0,
                 top: 0,
                 child: Container(
-                  height: 150 + top,
+                  height: 120 + top,
                   margin: const EdgeInsets.fromLTRB(12, 0, 12, 0),
                   decoration: BoxDecoration(
                     borderRadius: const BorderRadius.vertical(
@@ -273,9 +336,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     if (widget.isTab)
                       GlassIconButton(
-                        icon: Icons.logout_rounded,
-                        tooltip: 'Log out',
-                        onTap: _logout,
+                        key: const ValueKey('settingsButton'),
+                        icon: Icons.settings_rounded,
+                        tooltip: context.tr('Settings'),
+                        onTap: () => _openSettings(user),
+                      )
+                    else if (!_isMe)
+                      GlassIconButton(
+                        key: const ValueKey('profileMore'),
+                        icon: Icons.more_horiz_rounded,
+                        onTap: () => _moreMenu(user),
                       ),
                   ],
                 ),
@@ -293,6 +363,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     url: user.photoUrl,
                     name: user.username,
                     radius: 42,
+                    uid: user.uid,
                   ),
                 ),
               ),
@@ -361,22 +432,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                 ),
               ],
-              const SizedBox(height: 18),
+              const SizedBox(height: 14),
               Row(
                 children: [
-                  _Stat(label: 'Posts', value: user.postsCount),
-                  const SizedBox(width: 10),
+                  _Stat(label: context.tr('Posts'), value: user.postsCount),
                   _Stat(
-                    label: 'Followers',
+                    label: context.tr('Followers'),
                     value: user.followersCount,
                     onTap: () => openScreen(
                       context,
                       FollowListScreen(uid: user.uid, followers: true),
                     ),
                   ),
-                  const SizedBox(width: 10),
                   _Stat(
-                    label: 'Following',
+                    label: context.tr('Following'),
                     value: user.followingCount,
                     onTap: () => openScreen(
                       context,
@@ -385,29 +454,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               if (_isMe)
                 Row(
                   children: [
                     Expanded(
-                      child: FilledButton.icon(
+                      child: FilledButton(
+                        key: const ValueKey('editProfileButton'),
+                        style: _smallButton,
                         onPressed: () =>
                             openScreen(context, EditProfileScreen(user: user)),
-                        icon: const Icon(Icons.edit_rounded, size: 18),
-                        label: const Text('Edit profile'),
+                        child: Text(context.tr('Edit profile')),
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    SizedBox(
-                      width: 56,
+                    const SizedBox(width: 8),
+                    Expanded(
                       child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          padding: EdgeInsets.zero,
-                          minimumSize: const Size(56, 56),
-                        ),
-                        onPressed: () =>
-                            openScreen(context, const SavedPostsScreen()),
-                        child: const Icon(Icons.bookmark_rounded),
+                        key: const ValueKey('shareProfileButton'),
+                        style: _smallButton,
+                        onPressed: () => _shareProfile(user),
+                        child: Text(context.tr('Share profile')),
                       ),
                     ),
                   ],
@@ -415,14 +481,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
               else
                 Row(
                   children: [
-                    Expanded(child: FollowButton(uid: user.uid)),
+                    Expanded(
+                      child: FollowButton(
+                        uid: user.uid,
+                        isPrivate: user.isPrivate,
+                        compact: true,
+                      ),
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: OutlinedButton.icon(
                         key: const ValueKey('messageButton'),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(0, 40),
-                        ),
+                        style: _smallButton,
                         onPressed: () => openScreen(
                           context,
                           ChatScreen(otherUid: user.uid, user: user),
@@ -444,6 +514,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 }
 
+/// Compact buttons of the profile (the theme's buttons are tall).
+final ButtonStyle _smallButton = ButtonStyle(
+  minimumSize: const WidgetStatePropertyAll(Size(0, 38)),
+  padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 12)),
+  textStyle: const WidgetStatePropertyAll(
+    TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+  ),
+  shape: WidgetStatePropertyAll(
+    RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+  ),
+);
+
+/// Number over a label, no box around it.
 class _Stat extends StatelessWidget {
   const _Stat({required this.label, required this.value, this.onTap});
   final String label;
@@ -454,25 +537,21 @@ class _Stat extends StatelessWidget {
   Widget build(BuildContext context) {
     return Expanded(
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          decoration: BoxDecoration(
-            color: context.card,
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: context.hairline.withValues(alpha: 0.7)),
-          ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 '$value',
                 style: const TextStyle(
-                  fontSize: 22,
+                  fontSize: 19,
                   fontWeight: FontWeight.w900,
-                  letterSpacing: -0.5,
+                  letterSpacing: -0.4,
                 ),
               ),
-              const SizedBox(height: 2),
               Text(
                 label,
                 style: TextStyle(color: context.muted, fontSize: 12.5),
@@ -481,6 +560,64 @@ class _Stat extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Posts | Clips as two icons with an underline (small, like the rest of the profile).
+class _ProfileTabs extends StatelessWidget {
+  const _ProfileTabs({required this.index, required this.onChanged});
+  final int index;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget tab(int i, IconData icon, String label) {
+      final on = index == i;
+      return Expanded(
+        child: GestureDetector(
+          key: ValueKey('profileTab$i'),
+          behavior: HitTestBehavior.opaque,
+          onTap: () => onChanged(i),
+          child: Container(
+            height: 42,
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: on ? context.accentInk : context.hairline,
+                  width: on ? 2.5 : 1,
+                ),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: 20,
+                  color: on ? context.accentInk : context.muted,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13.5,
+                    color: on ? null : context.muted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        tab(0, Icons.grid_view_rounded, context.tr('Posts')),
+        tab(1, Icons.smart_display_rounded, context.tr('Clips')),
+      ],
     );
   }
 }

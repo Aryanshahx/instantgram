@@ -16,6 +16,9 @@ class AppUser {
     this.followersCount = 0,
     this.followingCount = 0,
     this.postsCount = 0,
+    this.isPrivate = false,
+    this.language = '',
+    this.birthDate,
   });
 
   final String uid;
@@ -42,6 +45,13 @@ class AppUser {
   final int followingCount;
   final int postsCount;
 
+  /// Only followers see the posts; following needs the person's approval.
+  final bool isPrivate;
+
+  /// Language code chosen when the account was made ('' = not set).
+  final String language;
+  final DateTime? birthDate;
+
   factory AppUser.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? const <String, dynamic>{};
     return AppUser(
@@ -66,6 +76,11 @@ class AppUser {
       followersCount: _int(m['followersCount']),
       followingCount: _int(m['followingCount']),
       postsCount: _int(m['postsCount']),
+      isPrivate: m['isPrivate'] == true,
+      language: _str(m['language']),
+      birthDate: m['birthDate'] is Timestamp
+          ? (m['birthDate'] as Timestamp).toDate()
+          : null,
     );
   }
 }

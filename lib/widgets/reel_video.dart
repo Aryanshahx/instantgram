@@ -294,15 +294,14 @@ class _ReelVideoState extends State<ReelVideo> {
           if (!_ready && thumb.isNotEmpty)
             CachedNetworkImage(
               imageUrl: thumb,
-              fit: BoxFit.cover,
+              fit: BoxFit.contain,
               errorWidget: (_, _, _) => const SizedBox.shrink(),
             ),
           if (_ready && c != null)
             ClipRect(
               child: FittedBox(
-                fit:
-                    widget.fit ??
-                    (c.value.aspectRatio < 0.9 ? BoxFit.cover : BoxFit.contain),
+                // the whole clip is always visible: nothing is cut off at the edges
+                fit: widget.fit ?? BoxFit.contain,
                 child: SizedBox(
                   width: c.value.size.width,
                   height: c.value.size.height,

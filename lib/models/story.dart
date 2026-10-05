@@ -104,6 +104,7 @@ class Story {
     this.musicId = '',
     this.musicVolume = 0.8,
     this.keepSound = true,
+    this.shared = false,
   });
 
   final String id;
@@ -122,6 +123,9 @@ class Story {
   final String musicId;
   final double musicVolume;
   final bool keepSound;
+
+  /// Made from a post: the files belong to the post, so deleting the moment keeps them.
+  final bool shared;
 
   bool get isVideo => videoRef.isNotEmpty;
   String get imageUrl => resolveMediaUrl(imageRef);
@@ -160,6 +164,7 @@ class Story {
           ? (m['musicVolume'] as num).toDouble().clamp(0.0, 1.0)
           : 0.8,
       keepSound: m['keepSound'] != false,
+      shared: m['sharedFromPost'] == true,
     );
   }
 }

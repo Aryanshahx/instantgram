@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/l10n.dart';
+
 import '../core/theme.dart';
 import 'glass.dart';
 
@@ -173,7 +175,7 @@ class NavItem extends StatelessWidget {
                   ? Padding(
                       padding: const EdgeInsets.only(left: 6),
                       child: Text(
-                        label,
+                        context.tr(label),
                         style: const TextStyle(
                           color: AppTheme.ink,
                           fontWeight: FontWeight.w800,

@@ -24,6 +24,7 @@ Future<void> showShareSheet(BuildContext context, Post post) async {
     onShareLink: () async {
       try {
         await sharePost(post);
+        PostService.instance.registerShare(post.id);
       } catch (_) {
         if (context.mounted) {
           showToast(context, 'Could not open the share menu.');
@@ -44,6 +45,7 @@ Future<void> showShareSheet(BuildContext context, Post post) async {
         note: pick.note,
       );
     }
+    PostService.instance.registerShare(post.id);
     if (context.mounted) {
       showToast(
         context,

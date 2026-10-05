@@ -222,6 +222,39 @@ void main() {
       expect(t.takeException(), isNull);
     });
 
+    testWidgets('Details: big cover, options, Share button always visible', (
+      t,
+    ) async {
+      await open(t);
+      await t.tap(find.byKey(const ValueKey('nextButton')));
+      await t.pump(const Duration(milliseconds: 400));
+      final cover = t.getSize(find.byKey(const ValueKey('detailsThumb')));
+      expect(cover.height, greaterThanOrEqualTo(2000 / 2.5 / 2 - 1));
+      expect(find.byKey(const ValueKey('audienceRow')), findsOneWidget);
+      expect(find.byKey(const ValueKey('storyRow')), findsOneWidget);
+      expect(find.byKey(const ValueKey('shareButton')), findsOneWidget);
+      // the three count switches are inside Advanced settings
+      await t.scrollUntilVisible(
+        find.byKey(const ValueKey('advancedRow')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await t.tap(find.byKey(const ValueKey('advancedRow')));
+      await t.pump(const Duration(milliseconds: 400));
+      expect(find.byKey(const ValueKey('hideLikesRow')), findsOneWidget);
+      await t.scrollUntilVisible(
+        find.byKey(const ValueKey('audienceRow')),
+        -200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await t.tap(find.byKey(const ValueKey('audienceRow')));
+      await t.pump(const Duration(milliseconds: 400));
+      await t.tap(find.byKey(const ValueKey('audience_followers')));
+      await t.pump(const Duration(milliseconds: 400));
+      expect(find.text('Followers'), findsOneWidget);
+      expect(t.takeException(), isNull);
+    });
+
     testWidgets('carousel: several photos, counter, remove one', (t) async {
       t.view.physicalSize = const Size(1080, 2000);
       t.view.devicePixelRatio = 2.5;

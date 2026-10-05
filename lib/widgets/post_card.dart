@@ -12,6 +12,7 @@ import '../screens/post/comments_screen.dart';
 import '../screens/profile/profile_screen.dart';
 import '../screens/reels/reels_screen.dart';
 import '../services/post_service.dart';
+import '../services/safety_service.dart';
 import '../services/user_service.dart';
 import 'avatar.dart';
 import 'like_button.dart';
@@ -206,6 +207,7 @@ class _PostCardState extends State<PostCard> {
                     url: post.authorPhotoUrl,
                     name: post.authorUsername,
                     radius: 17,
+                    uid: post.authorId,
                   ),
                   const SizedBox(width: 10),
                   Flexible(
@@ -255,6 +257,7 @@ class _PostCardState extends State<PostCard> {
         children: [
           HeartButton(
             controller: _like,
+            showCount: SafetyService.instance.showsNumber(post, post.hideLikes),
             onError: (e) {
               if (mounted) showToast(context, friendlyError(e));
             },
@@ -268,14 +271,19 @@ class _PostCardState extends State<PostCard> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.chat_bubble_outline_rounded, size: 26),
-                  const SizedBox(width: 6),
-                  Text(
-                    '$_comments',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14.5,
+                  if (SafetyService.instance.showsNumber(
+                    post,
+                    post.hideComments,
+                  )) ...[
+                    const SizedBox(width: 6),
+                    Text(
+                      '$_comments',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14.5,
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),

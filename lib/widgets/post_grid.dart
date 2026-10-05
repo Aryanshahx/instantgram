@@ -6,6 +6,7 @@ import '../core/ui.dart';
 import '../models/post.dart';
 import '../screens/post/post_detail_screen.dart';
 import '../screens/reels/reels_screen.dart';
+import '../services/safety_service.dart';
 import 'post_details_sheet.dart' show compactCount;
 import 'post_media.dart';
 import 'reel_actions.dart';
@@ -98,7 +99,12 @@ class _Tile extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    compactCount(showViews ? post.viewCount : post.likeCount),
+                    !showViews &&
+                            !SafetyService.instance.showsNumber(post, post.hideLikes)
+                        ? '-'
+                        : compactCount(
+                            showViews ? post.viewCount : post.likeCount,
+                          ),
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 12,

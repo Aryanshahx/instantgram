@@ -8,6 +8,7 @@ import '../models/comment.dart';
 import '../models/post.dart';
 import 'post_search.dart';
 import 'media_server.dart';
+import 'safety_service.dart';
 import 'user_service.dart';
 
 typedef PostQuery = Query<Map<String, dynamic>>;
@@ -63,13 +64,13 @@ class PostService {
           .toList();
       _poolAt = DateTime.now();
     }
-    return filterPosts(_pool, query);
+    return SafetyService.instance.visible(filterPosts(_pool, query));
   }
 
   /// Popular hashtags among the newest posts.
   Future<List<String>> trending() async {
     await searchPosts(' '); // loads the pool
-    return trendingTags(_pool);
+    return trendingTags(SafetyService.instance.visible(_pool));
   }
 
   // ------------------------------------------------------------------ create
@@ -80,7 +81,8 @@ class PostService {
     return me;
   }
 
-  Future<void> createImagePost({
+  /// Returns the stored reference of the photo.
+  Future<String> createImagePost({
     required File image,
     required String caption,
     void Function(double progress)? onProgress,
@@ -92,6 +94,7 @@ class PostService {
     double musicVolume = 0.8,
     bool clip = false,
     int clipSeconds = kPhotoClipSeconds,
+    PostOptions options = const PostOptions(),
   }) async {
     // Look up the profile while the photo is uploading (saves a round trip).
     final meFuture = _me();
@@ -121,12 +124,15 @@ class PostService {
       if (width > 0 && height > 0) 'imageHeight': height,
       'likeCount': 0,
       'commentCount': 0,
+      ...options.toMap(),
+      'authorPrivate': me.isPrivate,
       'createdAt': FieldValue.serverTimestamp(),
     });
     batch.update(_db.collection('users').doc(me.uid), {
       'postsCount': FieldValue.increment(1),
     });
     await batch.commit();
+    return uploaded.ref;
   }
 
   /// A post with several photos and videos (at least one photo), swiped sideways. [items]
@@ -140,6 +146,7 @@ class PostService {
     String? musicArtist,
     double musicVolume = 0.8,
     bool keepSound = true,
+    PostOptions options = const PostOptions(),
   }) async {
     final photos = items.where((i) => !i.video).toList();
     if (items.length < 2 || items.length > kMaxPostItems || photos.isEmpty) {
@@ -168,6 +175,8 @@ class PostService {
       if (musicId != null) 'keepSound': keepSound,
       'likeCount': 0,
       'commentCount': 0,
+      ...options.toMap(),
+      'authorPrivate': me.isPrivate,
       'createdAt': FieldValue.serverTimestamp(),
     });
     batch.update(_db.collection('users').doc(me.uid), {
@@ -188,6 +197,7 @@ class PostService {
     String? musicArtist,
     double musicVolume = 0.8,
     bool keepSound = true,
+    PostOptions options = const PostOptions(),
   }) async {
     final me = await _me();
     final ref = _posts.doc();
@@ -210,6 +220,8 @@ class PostService {
       if (musicId != null) 'keepSound': keepSound,
       'likeCount': 0,
       'commentCount': 0,
+      ...options.toMap(),
+      'authorPrivate': me.isPrivate,
       'createdAt': FieldValue.serverTimestamp(),
     });
     batch.update(_db.collection('users').doc(me.uid), {
@@ -228,6 +240,13 @@ class PostService {
       tx.set(seen, {'at': FieldValue.serverTimestamp()});
       tx.update(post, {'viewCount': FieldValue.increment(1)});
     });
+  }
+
+  /// Counts one share (best effort: a failed count never blocks sharing).
+  Future<void> registerShare(String postId) async {
+    try {
+      await _posts.doc(postId).update({'shareCount': FieldValue.increment(1)});
+    } catch (_) {}
   }
 
   Future<void> deletePost(Post p) async {
@@ -279,6 +298,23 @@ class PostService {
     return [
       for (final id in ids)
         if (byId[id] != null) byId[id]!,
+    ];
+  }
+
+  /// The posts with these ids, in the same order (missing and hidden ones are left out).
+  Future<List<Post>> postsByIds(List<String> ids) async {
+    final byId = <String, Post>{};
+    for (var i = 0; i < ids.length; i += 10) {
+      final chunk = ids.sublist(i, i + 10 > ids.length ? ids.length : i + 10);
+      final q = await _posts.where(FieldPath.documentId, whereIn: chunk).get();
+      for (final d in q.docs) {
+        byId[d.id] = Post.fromDoc(d);
+      }
+    }
+    return [
+      for (final id in ids)
+        if (byId[id] != null && SafetyService.instance.canSee(byId[id]!))
+          byId[id]!,
     ];
   }
 
