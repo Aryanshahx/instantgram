@@ -52,16 +52,19 @@ class EpidemicService {
           ? data['detail'] as String
           : null;
       throw MediaException(
-        detail ?? 'Could not reach the music service. Check your connection.',
+        detail ?? 'Could not reach the audio service. Check your connection.',
       );
     }
   }
 
-  /// [term] empty = the catalogue's default list.
+  /// Epidemic Sound answers 400 to a search without a word, so the first list (nothing typed
+  /// yet) is the catalogue's best match for this word.
+  static const String defaultTerm = 'popular';
+
   Future<MusicPage> search(String term, {int offset = 0}) async {
     final r = await _call({
       'op': 'search',
-      'term': term.trim(),
+      'term': term.trim().isEmpty ? defaultTerm : term.trim(),
       'offset': offset,
       'limit': 30,
     });
@@ -97,7 +100,7 @@ class EpidemicService {
     final r = await _call({'op': 'url', 'id': t.remoteId});
     final url = r['url'];
     if (url is! String || url.isEmpty) {
-      throw const MediaException('The music service sent no audio link.');
+      throw const MediaException('The audio service sent no audio link.');
     }
     _urls[t.id] = (url: url, at: DateTime.now());
     return url;

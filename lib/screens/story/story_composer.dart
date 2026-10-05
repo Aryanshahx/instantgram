@@ -16,6 +16,7 @@ import '../../services/music_player.dart';
 import '../../services/story_service.dart';
 import '../post/video_editor_screen.dart';
 import '../../widgets/music_widgets.dart';
+import '../../widgets/overlay_tools.dart';
 import '../../widgets/story_overlays.dart';
 
 /// Saves the kept part of [source] as a new video (a moment can only be so long).
@@ -220,58 +221,6 @@ class StoryComposerScreen extends StatefulWidget {
   State<StoryComposerScreen> createState() => _StoryComposerScreenState();
 }
 
-const _colors = <int>[
-  0xFFFFFFFF,
-  0xFF0B0D12,
-  0xFFD2FF3F,
-  0xFF4DF0B4,
-  0xFFFF5C6C,
-  0xFF7B6CFF,
-  0xFFFFD43B,
-];
-
-const _emojis = [
-  '😀',
-  '😂',
-  '😍',
-  '🥰',
-  '😎',
-  '🤩',
-  '😭',
-  '😡',
-  '🔥',
-  '💯',
-  '❤️',
-  '💜',
-  '💚',
-  '✨',
-  '🎉',
-  '🥳',
-  '👍',
-  '👏',
-  '🙌',
-  '🙏',
-  '💪',
-  '👀',
-  '🎶',
-  '🎧',
-  '🌈',
-  '☀️',
-  '🌙',
-  '⭐',
-  '🌸',
-  '🍕',
-  '🍔',
-  '☕',
-  '📍',
-  '✈️',
-  '🏖️',
-  '⚽',
-  '🎮',
-  '📸',
-  '💥',
-  '🚀',
-];
 
 class _StoryComposerScreenState extends State<StoryComposerScreen> {
   final List<StoryOverlay> _overlays = [];
@@ -333,39 +282,11 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
     StoryOverlay start, {
     bool canDelete = false,
   }) {
-    return showModalBottomSheet<StoryOverlay>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => _TextSheet(start: start, canDelete: canDelete),
-    );
+    return showOverlayTextSheet(context, start, canDelete: canDelete);
   }
 
   Future<void> _addEmoji() async {
-    final e = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          child: GridView.count(
-            shrinkWrap: true,
-            crossAxisCount: 8,
-            children: [
-              for (final e in _emojis)
-                InkWell(
-                  key: ValueKey('emoji_$e'),
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => Navigator.pop(ctx, e),
-                  child: Center(
-                    child: Text(e, style: const TextStyle(fontSize: 28)),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
+    final e = await showEmojiSheet(context);
     if (e == null) return;
     setState(() => _overlays.add(StoryOverlay(text: e, dy: 0.45, emoji: true)));
   }
@@ -565,7 +486,7 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
                       ),
                       _tool(
                         Icons.music_note_rounded,
-                        'Music',
+                        'Audio',
                         _music,
                         key: const ValueKey('storyMusic'),
                       ),
@@ -661,110 +582,6 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TextSheet extends StatefulWidget {
-  const _TextSheet({required this.start, required this.canDelete});
-  final StoryOverlay start;
-  final bool canDelete;
-
-  @override
-  State<_TextSheet> createState() => _TextSheetState();
-}
-
-class _TextSheetState extends State<_TextSheet> {
-  late final TextEditingController _c = TextEditingController(
-    text: widget.start.text,
-  );
-  late int _color = widget.start.color;
-  late bool _pill = widget.start.pill;
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  StoryOverlay get _result =>
-      widget.start.copyWith(text: _c.text.trim(), color: _color, pill: _pill);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.viewInsetsOf(context).bottom,
-        left: 20,
-        right: 20,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            key: const ValueKey('storyTextInput'),
-            controller: _c,
-            autofocus: true,
-            maxLength: 120,
-            maxLines: 3,
-            minLines: 1,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(hintText: 'Type something...'),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              for (final c in _colors)
-                GestureDetector(
-                  onTap: () => setState(() => _color = c),
-                  child: Container(
-                    width: 32,
-                    height: 32,
-                    margin: const EdgeInsets.only(right: 8),
-                    decoration: BoxDecoration(
-                      color: Color(c),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: c == _color ? AppTheme.violet : Colors.grey,
-                        width: c == _color ? 3 : 1,
-                      ),
-                    ),
-                  ),
-                ),
-              const Spacer(),
-              FilterChip(
-                key: const ValueKey('storyPill'),
-                label: const Text('Box'),
-                selected: _pill,
-                onSelected: (v) => setState(() => _pill = v),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              if (widget.canDelete)
-                TextButton(
-                  key: const ValueKey('storyTextDelete'),
-                  onPressed: () =>
-                      Navigator.pop(context, widget.start.copyWith(text: '')),
-                  child: const Text(
-                    'Remove',
-                    style: TextStyle(color: AppTheme.coral),
-                  ),
-                ),
-              const Spacer(),
-              FilledButton(
-                key: const ValueKey('storyTextDone'),
-                style: FilledButton.styleFrom(minimumSize: const Size(110, 46)),
-                onPressed: () => Navigator.pop(context, _result),
-                child: const Text('Done'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
         ],
       ),
     );

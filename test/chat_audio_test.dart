@@ -176,7 +176,7 @@ void main() {
         await open(t);
         expect(find.byKey(const ValueKey('audioBar')), findsOneWidget);
         expect(find.byKey(const ValueKey('editButton')), findsOneWidget);
-        expect(find.text('Music'), findsOneWidget);
+        expect(find.text('Audio'), findsOneWidget);
         await t.tap(find.byKey(const ValueKey('audioBar')));
         await t.pump(const Duration(milliseconds: 500));
         expect(find.byType(Slider), findsNothing); // no custom volume range
@@ -191,13 +191,13 @@ void main() {
       await open(t);
       await t.tap(find.byKey(const ValueKey('mode1')));
       await t.pump(const Duration(milliseconds: 300));
-      expect(find.text('Add music (needed)'), findsOneWidget);
+      expect(find.text('Add audio (needed)'), findsOneWidget);
       expect(find.byType(Slider), findsNothing);
       await t.tap(find.byKey(const ValueKey('nextButton')));
       await t.pump(const Duration(milliseconds: 600));
       // the toast tells why, and the music picker opens instead of the details
       expect(
-        find.text('Add music to make a clip from a photo.'),
+        find.text('Add audio to make a clip from a photo.'),
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('captionField')), findsNothing);

@@ -310,14 +310,15 @@ export function slimTrack(t) {
 }
 
 async function handleMusic(request, env, uid) {
-  if (!env.EPIDEMIC_API_KEY) return fail(503, "Music search is not set up yet (EPIDEMIC_API_KEY is missing).");
+  if (!env.EPIDEMIC_API_KEY) return fail(503, "Audio search is not set up yet (EPIDEMIC_API_KEY is missing).");
   const body = await readJson(request);
   if (body.op === "search") {
     const term = String(body.term || "").slice(0, 80);
     const limit = Math.min(Math.max(parseInt(body.limit, 10) || 30, 1), 60);
     const offset = Math.max(parseInt(body.offset, 10) || 0, 0);
     const q = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-    if (term.trim()) q.set("term", term.trim());
+    // Epidemic Sound answers 400 to a search without a term: use a default one
+    q.set("term", term.trim() || "popular");
     const res = await epidemic(env, uid, `/v0/tracks/search?${q}`);
     if (res.status === 401 || res.status === 403) return fail(502, "Epidemic Sound refused the key. Check EPIDEMIC_API_KEY and your partner access.");
     if (!res.ok) return fail(502, `Epidemic Sound answered ${res.status}.`);

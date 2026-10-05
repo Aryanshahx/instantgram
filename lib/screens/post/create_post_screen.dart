@@ -9,30 +9,34 @@ import 'package:video_player/video_player.dart';
 
 import '../../core/config.dart';
 import '../../core/errors.dart';
+import '../../core/l10n.dart';
 import '../../core/media_url.dart';
 import '../../core/responsive.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import '../../models/finish.dart';
 import '../../models/music.dart';
 import '../../models/post.dart';
-import '../../models/story.dart' show kMaxStorySeconds;
+import '../../models/story.dart' show StoryOverlay, kMaxStorySeconds;
 import '../../services/media_server.dart';
 import '../../services/media_service.dart';
 import '../../services/mp4_faststart.dart';
 import '../../services/music_player.dart';
+import '../../services/overlay_painter.dart';
 import '../../services/photo_edit.dart';
 import '../../services/post_service.dart';
 import '../../services/story_service.dart';
 import '../../widgets/music_widgets.dart';
+import '../../widgets/overlay_tools.dart';
 import '../../widgets/post_media.dart';
-import 'photo_editor_screen.dart';
-import 'video_editor_screen.dart';
-
-/// Clips above this bitrate are saved as a lighter copy by default.
-const double kSmoothMbps = 8;
+import 'editor_screen.dart';
+import 'video_editor_screen.dart' show VideoEdits;
 
 /// How loud the chosen music is (it is not a user setting any more).
 const double kMusicVolume = 0.8;
+
+/// The video's own sound is never mixed away by the audio: use Mute in the editor for that.
+const bool _keepSound = true;
 
 /// One photo or video that is going into the post.
 class _Item {
@@ -65,6 +69,17 @@ class _Item {
   int seconds = 0; // length that will be published (after trimming)
   int secondsFull = 0;
   VideoEdits? videoEdits;
+  VideoLook? look;
+
+  /// Texts and stickers (photos: burned into [file], kept here to edit them again).
+  List<StoryOverlay> overlays = [];
+
+  /// What viewers see on top of a video.
+  MediaFinish? get finish {
+    if (!video) return null;
+    final f = MediaFinish(overlays: overlays, look: look);
+    return f.isEmpty ? null : f;
+  }
 
   double get aspect => (width > 0 && height > 0) ? width / height : 0;
 }
@@ -110,8 +125,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   int _sel = 0;
 
   MusicTrack? _music;
-  bool _keepSound = true;
-  bool _original = true; // upload videos exactly as recorded
 
   /// Live preview of the selected video (the photo case shows the picture).
   VideoPlayerController? _preview;
@@ -187,7 +200,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   bool get _hasMedia => _items.isNotEmpty;
   bool get _hasPhoto => _chosen.any((i) => !i.video);
-  bool get _hasVideo => _chosen.any((i) => i.video);
   bool get _photoClip => _mode == 1 && _first != null && !_first!.video;
 
   /// Post needs a photo; a photo clip needs music (that is what makes it a clip).
@@ -357,7 +369,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   void _add(List<_Item> picked) {
-    final hadVideo = _items.any((i) => i.video);
     setState(() {
       if (_mode == 1) {
         for (final i in _items) {
@@ -372,14 +383,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         _sel = _items.length - picked.length; // show the first new one
       }
       _previewPaused = false;
-      // Heavy files (high bitrate) buffer for viewers on mobile data, so they are saved as a
-      // lighter 720p copy by default. "Original quality" is one tap away.
-      final v = picked.where((i) => i.video).toList();
-      if (v.isNotEmpty && !hadVideo) {
-        final f = v.first;
-        _original =
-            !(f.seconds > 0 && f.bytes * 8 / f.seconds / 1e6 > kSmoothMbps);
-      }
     });
     unawaited(_ensurePreview());
   }
@@ -475,10 +478,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  /// Sound of the video in the preview: off when it was muted, or when the music you added
-  /// should replace it.
+  /// Sound of the video in the preview: off when it was muted in the editor.
   double _previewVolume(_Item it) =>
-      (it.videoEdits?.mute == true || (_music != null && !_keepSound)) ? 0 : 1;
+      it.videoEdits?.mute == true ? 0 : 1;
 
   void _syncPreview() {
     final showing = _step == 0 && !_busy && !_previewPaused && _hasMedia;
@@ -543,22 +545,37 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   Future<void> _edit() async {
     final it = _active;
     if (it == null || _busy) return;
-    if (!it.video) {
-      final r = await Navigator.of(context).push<PhotoEditResult>(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) =>
-              PhotoEditorScreen(original: it.original, initial: it.edits),
+    _preview?.pause();
+    _previewMusic?.pause();
+    final r = await Navigator.of(context).push<EditorResult>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => EditorScreen(
+          file: it.original,
+          video: it.video,
+          thumb: it.thumb,
+          photoEdits: it.edits,
+          videoEdits: it.videoEdits,
+          look: it.look,
+          overlays: it.overlays,
+          music: _music,
         ),
-      );
-      if (r == null || !mounted) return;
-      final bytes = await r.file.length();
-      _dropEditedCopy(it, except: r.file);
-      final size = await PhotoEditor.probeSize(r.file);
+      ),
+    );
+    if (r == null || !mounted) {
+      _syncPreview();
+      return;
+    }
+    if (!it.video) {
+      final f = r.photoFile ?? it.original;
+      final bytes = await f.length();
+      _dropEditedCopy(it, except: f);
+      final size = await PhotoEditor.probeSize(f);
       if (!mounted) return;
       setState(() {
-        it.file = r.file;
-        it.edits = r.edits.isEmpty ? null : r.edits;
+        it.file = f;
+        it.edits = r.photoEdits;
+        it.overlays = r.overlays;
         it.bytes = bytes;
         if (size != null) {
           it.width = size.width.round();
@@ -566,26 +583,22 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         }
       });
     } else {
-      _preview?.pause();
-      final r = await Navigator.of(context).push<VideoEdits>(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) =>
-              VideoEditorScreen(file: it.file, initial: it.videoEdits),
-        ),
-      );
-      if (!mounted) return;
-      if (r != null) {
-        setState(() {
-          it.videoEdits = r.isEmpty ? null : r;
-          it.seconds = r.isEmpty ? it.secondsFull : r.length;
-        });
-        final c = _preview;
-        if (c != null) {
-          await c.setVolume(_previewVolume(it));
-          await c.seekTo(Duration(seconds: r.trimmed ? r.start : 0));
-        }
+      final ve = r.videoEdits;
+      setState(() {
+        it.videoEdits = ve;
+        it.seconds = ve == null ? it.secondsFull : ve.length;
+        it.look = r.look;
+        it.overlays = r.overlays;
+      });
+      final c = _preview;
+      if (c != null) {
+        await c.setVolume(_previewVolume(it));
+        await c.seekTo(Duration(seconds: ve != null && ve.trimmed ? ve.start : 0));
       }
+    }
+    if (r.music?.id != _music?.id) {
+      await _setMusic(r.music);
+    } else {
       _syncPreview();
     }
   }
@@ -594,7 +607,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   void _next() {
     if (_mode == 1 && _first != null && !_first!.video && _music == null) {
-      showToast(context, 'Add music to make a clip from a photo.');
+      showToast(context, 'Add audio to make a clip from a photo.');
       unawaited(_chooseMusic());
       return;
     }
@@ -639,10 +652,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     });
   }
 
+  /// Videos go up exactly as recorded; only an edited (trimmed or muted) video, or one bigger
+  /// than the service accepts, is saved again.
   bool _willShrink(_Item it) =>
-      !_original ||
-      it.bytes > kMaxVideoMb * 1024 * 1024 ||
-      it.videoEdits != null;
+      it.bytes > kMaxVideoMb * 1024 * 1024 || it.videoEdits != null;
 
   Future<void> _share() async {
     FocusScope.of(context).unfocus();
@@ -712,6 +725,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             musicArtist: artist,
             musicVolume: kMusicVolume,
             keepSound: _keepSound,
+            finish: chosen.first.finish,
             options: _options,
           );
           storyVideo = r.ref;
@@ -852,11 +866,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           final it = items[i];
           if (it.video) {
             final r = ready[i]!;
+            final cover = await _coverFor(it);
             final media = await MediaServer.instance.uploadVideo(
               file: r.file,
-              thumb: it.thumb,
+              thumb: cover,
               onProgress: (p) => report(i, p),
             );
+            if (cover != null && cover.path != it.thumb?.path) {
+              cover.delete().ignore();
+            }
             out[i] = PostItem(
               video: true,
               ref: media.ref,
@@ -864,6 +882,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               width: r.width,
               height: r.height,
               seconds: it.seconds,
+              finish: it.finish,
             );
           } else {
             final media = await MediaServer.instance.uploadImage(
@@ -893,6 +912,28 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
+  /// The cover of a video with its colour look and texts burned in, so grids and previews
+  /// match what plays (the video file itself is not touched).
+  Future<File?> _coverFor(_Item it) async {
+    final t = it.thumb;
+    final f = it.finish;
+    if (t == null || f == null) return t;
+    try {
+      final l = f.look;
+      final edits = l == null
+          ? null
+          : PhotoEdits(
+              filter: l.filter,
+              brightness: l.brightness,
+              contrast: l.contrast,
+              saturation: l.saturation,
+            );
+      return await finishPhoto(t, edits, f.overlays);
+    } catch (_) {
+      return t;
+    }
+  }
+
   Future<_Ready> _prepareVideo(_Item it, String tag) async {
     var file = it.file;
     MediaInfo? info;
@@ -911,9 +952,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       try {
         info = await VideoCompress.compressVideo(
           it.file.path,
-          quality: _original
-              ? VideoQuality.Res1920x1080Quality
-              : VideoQuality.Res1280x720Quality,
+          quality: VideoQuality.Res1920x1080Quality,
           deleteOrigin: false,
           startTime: cut ? ve.start : null,
           duration: cut ? ve.length : null,
@@ -994,9 +1033,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 child: TextButton(
                   key: const ValueKey('nextButton'),
                   onPressed: _hasMedia ? _next : null,
-                  child: const Text(
-                    'Next',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+                  child: Text(
+                    context.tr('Next'),
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ),
               ),
@@ -1176,7 +1218,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           child: SizedBox(
             width: c.value.size.width,
             height: c.value.size.height,
-            child: VideoPlayer(c),
+            child: FinishedMedia(finish: it.finish, child: VideoPlayer(c)),
           ),
         ),
       );
@@ -1289,6 +1331,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   /// Edit, Music and (in Clips) Change.
   Widget _toolbar(BuildContext context) {
+    final m = _music;
     Widget tool(Key key, IconData icon, String label, VoidCallback? onTap) =>
         Expanded(
           child: InkWell(
@@ -1303,7 +1346,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   Icon(icon, size: 24),
                   const SizedBox(height: 4),
                   Text(
-                    label,
+                    context.tr(label),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -1316,7 +1359,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             ),
           ),
         );
-    final m = _music;
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
       child: Row(
@@ -1325,7 +1367,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           tool(
             const ValueKey('audioBar'),
             Icons.music_note_rounded,
-            m == null ? (_photoClip ? 'Add music (needed)' : 'Music') : m.title,
+            m == null ? (_photoClip ? 'Add audio (needed)' : 'Audio') : m.title,
             _chooseMusic,
           ),
           if (_mode == 1)
@@ -1397,7 +1439,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         ? null
         : (first.video ? first.thumb : first.file);
     final needsPhoto = _mode == 0 && !_hasPhoto;
-    final m = _music;
     final screen = MediaQuery.sizeOf(context);
     // the cover takes at least half of the screen
     final coverHeight = math.max(300.0, screen.height * 0.5);
@@ -1474,55 +1515,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               ),
               Divider(height: 1, color: context.hairline),
               ListTile(
-                key: const ValueKey('musicRow'),
-                leading: const Icon(Icons.music_note_rounded),
-                title: Text(
-                  m == null ? 'Add music' : m.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                subtitle: Text(
-                  m == null
-                      ? (_photoClip
-                            ? 'A photo clip needs music'
-                            : 'InstantGram and Epidemic Sound')
-                      : (m.artist.isEmpty ? m.mood : m.artist),
-                ),
-                trailing: m == null
-                    ? const Icon(Icons.chevron_right_rounded)
-                    : IconButton(
-                        key: const ValueKey('removeMusic'),
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: _busy ? null : () => _setMusic(null),
-                      ),
-                onTap: _busy ? null : _chooseMusic,
-              ),
-              if (m != null && _hasVideo)
-                SwitchListTile(
-                  key: const ValueKey('keepSoundRow'),
-                  value: _keepSound,
-                  onChanged: _busy
-                      ? null
-                      : (v) => setState(() {
-                          _keepSound = v;
-                          _syncPreview();
-                        }),
-                  activeTrackColor: AppTheme.volt,
-                  secondary: const Icon(Icons.volume_up_rounded),
-                  title: const Text(
-                    "Keep the video's own sound",
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ListTile(
                 key: const ValueKey('audienceRow'),
                 leading: Icon(_audienceIcon(_audience)),
-                title: const Text(
-                  'Audience',
-                  style: TextStyle(fontWeight: FontWeight.w800),
+                title: Text(
+                  context.tr('Audience'),
+                  style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
-                subtitle: Text(_audienceName(_audience)),
+                subtitle: Text(context.tr(_audienceName(_audience))),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: _busy ? null : _chooseAudience,
               ),
@@ -1532,9 +1531,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 onChanged: _busy ? null : (v) => setState(() => _alsoStory = v),
                 activeTrackColor: AppTheme.volt,
                 secondary: const Icon(Icons.auto_awesome_rounded),
-                title: const Text(
-                  'Also share to your moments',
-                  style: TextStyle(fontWeight: FontWeight.w800),
+                title: Text(
+                  context.tr('Also share to your moments'),
+                  style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 subtitle: const Text('It stays there for 24 hours.'),
               ),
@@ -1547,13 +1546,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     style: TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
-              if (_hasVideo) _qualityTile(context),
               ExpansionTile(
                 key: const ValueKey('advancedRow'),
                 leading: const Icon(Icons.tune_rounded),
-                title: const Text(
-                  'Advanced settings',
-                  style: TextStyle(fontWeight: FontWeight.w800),
+                title: Text(
+                  context.tr('Advanced settings'),
+                  style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 shape: const Border(),
                 collapsedShape: const Border(),
@@ -1565,7 +1563,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         ? null
                         : (v) => setState(() => _hideLikes = v),
                     activeTrackColor: AppTheme.volt,
-                    title: const Text('Hide like count'),
+                    title: Text(context.tr('Hide like count')),
                     subtitle: const Text('Only you see the number.'),
                   ),
                   SwitchListTile(
@@ -1575,7 +1573,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         ? null
                         : (v) => setState(() => _hideComments = v),
                     activeTrackColor: AppTheme.volt,
-                    title: const Text('Hide comment count'),
+                    title: Text(context.tr('Hide comment count')),
                   ),
                   SwitchListTile(
                     key: const ValueKey('hideSharesRow'),
@@ -1584,12 +1582,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         ? null
                         : (v) => setState(() => _hideShares = v),
                     activeTrackColor: AppTheme.volt,
-                    title: const Text('Hide share count'),
+                    title: Text(context.tr('Hide share count')),
                   ),
                 ],
               ),
               ListTile(
-                leading: const Icon(Icons.high_quality_rounded),
+                leading: const Icon(Icons.info_outline_rounded),
                 title: Text(
                   _summary(),
                   style: TextStyle(
@@ -1664,7 +1662,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                               ),
                             ],
                           )
-                        : const Text('Share'),
+                        : Text(context.tr('Share')),
                   ),
                 ),
               ],
@@ -1687,7 +1685,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         Icon(icon, size: 16, color: Colors.white),
         const SizedBox(width: 6),
         Text(
-          text,
+          context.tr(text),
           style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w800,
@@ -1761,7 +1759,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       builder: (_) => _CoverSheet(path: it.original.path, seconds: total),
     );
     if (f == null || !mounted) return;
-    await FileImage(f).evict();
     setState(() {
       it.thumb = f;
       _coverVer++;
@@ -1789,57 +1786,27 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           if (e != null && e.mute) 'No sound',
         ].join('  \u00b7  ');
       }
-      return '${it.edits != null ? 'Edited' : 'Original'}  \u00b7  ${_mb(it.bytes)}';
+      return '${it.edits != null || it.overlays.isNotEmpty ? 'Edited photo' : 'Photo'}  \u00b7  ${_mb(it.bytes)}';
     }
     return parts.join('  \u00b7  ');
   }
 
-  String _qualityText(bool big) {
-    final videos = _chosen.where((i) => i.video).toList();
-    final it = videos.first;
-    final secs = it.secondsFull;
-    if (big && _original) {
-      return 'A video is over $kMaxVideoMb MB, so it will be shrunk to fit.';
-    }
-    if (!_original) {
-      final heavy = secs > 0 && it.bytes * 8 / secs / 1e6 > kSmoothMbps;
-      return heavy
-          ? 'This video is very heavy (${(it.bytes * 8 / secs / 1e6).round()} Mbps) and would buffer for viewers, so it is saved as a smooth 720p copy first. Turn on Original quality to upload it as recorded.'
-          : 'Saved at 720p on your phone first. Smaller, so it uploads and plays faster.';
-    }
-    final mbps = secs > 0 ? it.bytes * 8 / secs / 1e6 : 0;
-    final edited = videos.any((v) => v.videoEdits != null)
-        ? ' Edited videos are saved again at up to 1080p.'
-        : '';
-    if (mbps > 15) {
-      return 'Uploaded as recorded (${mbps.round()} Mbps). Heavy videos like this can '
-          'buffer on slow connections: turn this off for smoother playback.$edited';
-    }
-    return 'Uploaded exactly as recorded. Big files take longer to upload and to load for viewers.$edited';
-  }
-
-  Widget _qualityTile(BuildContext context) {
-    final big = _chosen.any(
-      (i) => i.video && i.bytes > kMaxVideoMb * 1024 * 1024,
-    );
-    return SwitchListTile(
-      key: const ValueKey('qualityRow'),
-      value: _original,
-      onChanged: _busy ? null : (v) => setState(() => _original = v),
-      activeTrackColor: AppTheme.volt,
-      secondary: const Icon(Icons.hd_rounded),
-      title: const Text(
-        'Original quality',
-        style: TextStyle(fontWeight: FontWeight.w800),
-      ),
-      subtitle: Text(
-        _qualityText(big),
-        style: TextStyle(color: context.muted, fontSize: 12.5, height: 1.3),
-      ),
-    );
-  }
 }
 
+
+/// A picture of the video at [ms]. Every call writes a new file, so a changed cover is never
+/// shown from the picture cache.
+Future<File> frameAt(String videoPath, int ms) async {
+  final f = await VideoCompress.getFileThumbnail(
+    videoPath,
+    quality: 85,
+    position: ms,
+  );
+  final copy = File(
+    '${Directory.systemTemp.path}/instantgram_cover_${DateTime.now().microsecondsSinceEpoch}.jpg',
+  );
+  return f.copy(copy.path);
+}
 
 /// Slide through the video and use the frame you like as the cover.
 class _CoverSheet extends StatefulWidget {
@@ -1867,18 +1834,29 @@ class _CoverSheetState extends State<_CoverSheet> {
     final gen = ++_gen;
     setState(() => _loading = true);
     try {
-      final f = await VideoCompress.getFileThumbnail(
-        widget.path,
-        quality: 85,
-        position: (_t * 1000).round(),
-      );
+      final f = await frameAt(widget.path, (_t * 1000).round());
       if (!mounted || gen != _gen) return;
-      await FileImage(f).evict();
       setState(() => _frame = f);
     } catch (_) {
       // keep the previous frame
     } finally {
       if (mounted && gen == _gen) setState(() => _loading = false);
+    }
+  }
+
+  /// Any photo from the phone as the cover (saved as a 1280 px JPEG).
+  Future<void> _fromGallery() async {
+    try {
+      final x = await ImagePicker().pickImage(source: ImageSource.gallery);
+      if (x == null || !mounted) return;
+      setState(() => _loading = true);
+      final proxy = await PhotoEditor.makeProxy(File(x.path));
+      if (mounted) Navigator.pop(context, proxy.file);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _loading = false);
+        showToast(context, 'Could not use this photo as a cover.');
+      }
     }
   }
 
@@ -1920,6 +1898,16 @@ class _CoverSheetState extends State<_CoverSheet> {
               onChanged: (v) => setState(() => _t = v),
               onChangeEnd: (_) => _load(),
             ),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: const ValueKey('coverFromGallery'),
+                onPressed: _fromGallery,
+                icon: const Icon(Icons.photo_library_outlined),
+                label: const Text('Choose from gallery'),
+              ),
+            ),
+            const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
               child: FilledButton(

@@ -490,7 +490,7 @@ class _MusicSheetState extends State<_MusicSheet> {
             const Padding(
               padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: Text(
-                'Music',
+                'Audio',
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
               ),
             ),

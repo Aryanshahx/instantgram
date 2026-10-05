@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/app_user.dart';
 import '../models/comment.dart';
+import '../models/finish.dart';
 import '../models/post.dart';
 import 'post_search.dart';
 import 'media_server.dart';
@@ -197,6 +198,7 @@ class PostService {
     String? musicArtist,
     double musicVolume = 0.8,
     bool keepSound = true,
+    MediaFinish? finish,
     PostOptions options = const PostOptions(),
   }) async {
     final me = await _me();
@@ -207,6 +209,7 @@ class PostService {
       'authorUsername': me.username,
       'authorPhotoUrl': me.photoUrl,
       'type': 'video',
+      if (finish != null && !finish.isEmpty) 'finish': finish.toMap(),
       'caption': caption.trim(),
       'videoUrl': media.ref,
       'thumbnailUrl': media.thumbRef,
@@ -262,6 +265,69 @@ class PostService {
         for (final m in p.media) ...[m.ref, m.thumbRef]
       else ...[p.isVideo ? p.videoRef : p.imageRef, p.thumbRef],
     ]);
+  }
+
+  // ----------------------------------------------------------------- reposts
+
+  CollectionReference<Map<String, dynamic>> _repostsOf(String uid) =>
+      _db.collection('users').doc(uid).collection('reposts');
+
+  Future<bool> isReposted(String postId) async =>
+      (await _repostsOf(_uid).doc(postId).get()).exists;
+
+  /// Puts a post on my profile (Reposts tab) or takes it off again.
+  Future<void> setReposted(Post post, bool on) async {
+    final ref = _repostsOf(_uid).doc(post.id);
+    if (on) {
+      await ref.set({
+        'authorId': post.authorId,
+        'repostedAt': FieldValue.serverTimestamp(),
+      });
+    } else {
+      await ref.delete();
+    }
+    try {
+      await _posts.doc(post.id).update({
+        'repostCount': FieldValue.increment(on ? 1 : -1),
+      });
+    } catch (_) {
+      // the counter is only a number; the repost itself is saved
+    }
+  }
+
+  /// Newest-first posts [uid] reposted (max 30).
+  Future<List<Post>> repostedPosts(String uid) async {
+    final snap = await _repostsOf(
+      uid,
+    ).orderBy('repostedAt', descending: true).limit(30).get();
+    return postsByIds([for (final d in snap.docs) d.id]);
+  }
+
+  // -------------------------------------------------------------------- pins
+
+  /// Most posts and clips a person can pin to the top of their profile.
+  static const int maxPins = 3;
+
+  Future<List<Post>> pinnedPosts(String uid) async {
+    final snap = await _posts
+        .where('authorId', isEqualTo: uid)
+        .where('pinned', isEqualTo: true)
+        .limit(maxPins)
+        .get();
+    final list = [for (final d in snap.docs) Post.fromDoc(d)];
+    list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return list;
+  }
+
+  /// Pins or unpins one of my posts. Throws a readable message past [maxPins].
+  Future<void> setPinned(Post post, bool pin) async {
+    if (pin) {
+      final now = await pinnedPosts(_uid);
+      if (now.length >= maxPins && !now.any((p) => p.id == post.id)) {
+        throw PinLimitException('You can pin up to $maxPins posts. Unpin one first.');
+      }
+    }
+    await _posts.doc(post.id).update({'pinned': pin});
   }
 
   // ------------------------------------------------------------------- saved
@@ -371,4 +437,13 @@ class PostService {
     batch.update(postRef, {'commentCount': FieldValue.increment(-1)});
     await batch.commit();
   }
+}
+
+/// Tried to pin more than [PostService.maxPins] posts.
+class PinLimitException implements Exception {
+  const PinLimitException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
 }

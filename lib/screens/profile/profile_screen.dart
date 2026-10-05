@@ -48,7 +48,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
     widget.uid,
   );
   final ScrollController _scroll = ScrollController();
-  int _tab = 0; // 0 = Posts (photos), 1 = Clips (videos)
+  int _tab = 0; // 0 = Posts (photos), 1 = Clips (videos), 2 = Reposts
+
+  List<Post> _pinned = const [];
+  List<Post>? _reposts;
+  bool _repostLoading = false;
+  Object? _repostError;
+
+  Future<void> _loadPinned() async {
+    try {
+      final list = await PostService.instance.pinnedPosts(widget.uid);
+      if (mounted) setState(() => _pinned = list);
+    } catch (_) {
+      // without pins the profile simply shows the newest first
+    }
+  }
+
+  Future<void> _loadReposts() async {
+    setState(() {
+      _repostLoading = true;
+      _repostError = null;
+    });
+    try {
+      final list = await PostService.instance.repostedPosts(widget.uid);
+      if (mounted) setState(() => _reposts = list);
+    } catch (e) {
+      if (mounted) setState(() => _repostError = e);
+    } finally {
+      if (mounted) setState(() => _repostLoading = false);
+    }
+  }
 
   bool get _isMe => widget.uid == UserService.instance.myUid;
 
@@ -56,6 +85,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _pager.loadMore();
+    _loadPinned();
     _scroll.addListener(() {
       if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 500) {
         _pager.loadMore();
@@ -64,7 +94,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     AppEvents.feedRefresh.addListener(_onRefresh);
   }
 
-  void _onRefresh() => _pager.refresh();
+  void _onRefresh() {
+    _pager.refresh();
+    _loadPinned();
+    if (_reposts != null) _loadReposts();
+  }
 
   @override
   void dispose() {
@@ -172,12 +206,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return ListenableBuilder(
       listenable: _pager,
       builder: (context, _) {
+        final pinnedIds = {for (final p in _pinned) p.id};
         final shown = <Post>[
-          for (final p in _pager.posts)
+          for (final p in _pinned)
             if (p.isClip == (_tab == 1)) p,
+          for (final p in _pager.posts)
+            if (p.isClip == (_tab == 1) && !pinnedIds.contains(p.id)) p,
         ];
         // a tab with few items on the first pages: keep loading until it has some
         if (!_locked(user) &&
+            _tab < 2 &&
             shown.length < 9 &&
             _pager.hasMore &&
             !_pager.loading &&
@@ -197,11 +235,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
                   child: _ProfileTabs(
                     index: _tab,
-                    onChanged: (i) => setState(() => _tab = i),
+                    onChanged: (i) {
+                      setState(() => _tab = i);
+                      if (i == 2 && _reposts == null && !_repostLoading) {
+                        _loadReposts();
+                      }
+                    },
                   ),
                 ),
               ),
-              if (_pager.initialLoading)
+              if (_tab == 2 && !_locked(user))
+                ..._repostSlivers()
+              else if (_pager.initialLoading)
                 const SliverToBoxAdapter(
                   child: Padding(
                     padding: EdgeInsets.all(40),
@@ -276,6 +321,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
       },
     );
+  }
+
+  List<Widget> _repostSlivers() {
+    final list = _reposts;
+    if (_repostError != null && list == null) {
+      return [
+        SliverToBoxAdapter(
+          child: ErrorState(error: _repostError!, onRetry: _loadReposts),
+        ),
+      ];
+    }
+    if (list == null || _repostLoading && list.isEmpty) {
+      return const [
+        SliverToBoxAdapter(
+          child: Padding(padding: EdgeInsets.all(40), child: CenteredLoader()),
+        ),
+      ];
+    }
+    if (list.isEmpty) {
+      return [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: EmptyState(
+              key: const ValueKey('noReposts'),
+              icon: Icons.repeat_rounded,
+              title: _isMe ? 'Nothing reposted yet' : 'No reposts yet',
+              subtitle: _isMe
+                  ? 'Tap Repost on a post or clip to keep it here.'
+                  : null,
+            ),
+          ),
+        ),
+      ];
+    }
+    return [PostGridSliver(posts: list, showViews: false)];
   }
 
   Widget _header(BuildContext context, AppUser user) {
@@ -598,12 +679,16 @@ class _ProfileTabs extends StatelessWidget {
                   color: on ? context.accentInk : context.muted,
                 ),
                 const SizedBox(width: 6),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13.5,
-                    color: on ? null : context.muted,
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13.5,
+                      color: on ? null : context.muted,
+                    ),
                   ),
                 ),
               ],
@@ -617,6 +702,7 @@ class _ProfileTabs extends StatelessWidget {
       children: [
         tab(0, Icons.grid_view_rounded, context.tr('Posts')),
         tab(1, Icons.smart_display_rounded, context.tr('Clips')),
+        tab(2, Icons.repeat_rounded, context.tr('Reposts')),
       ],
     );
   }

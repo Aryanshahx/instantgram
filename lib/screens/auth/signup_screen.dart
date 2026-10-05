@@ -128,7 +128,7 @@ class _SignupScreenState extends State<SignupScreen> {
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            for (final l in kLanguages)
+                            for (final l in kLanguages.take(4))
                               ChoiceChip(
                                 key: ValueKey('lang_${l.code}'),
                                 label: Text(l.name),

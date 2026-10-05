@@ -11,12 +11,11 @@ import '../models/post.dart';
 import '../screens/post/comments_screen.dart';
 import '../screens/profile/profile_screen.dart';
 import '../screens/reels/reels_screen.dart';
-import '../services/post_service.dart';
 import '../services/safety_service.dart';
-import '../services/user_service.dart';
 import 'avatar.dart';
 import 'like_button.dart';
 import 'music_widgets.dart';
+import 'post_actions_sheet.dart';
 import 'post_media.dart';
 import 'reel_actions.dart';
 import 'save_controller.dart';
@@ -49,7 +48,6 @@ class _PostCardState extends State<PostCard> {
   bool _expanded = false;
 
   Post get post => widget.post;
-  bool get _mine => post.authorId == UserService.instance.myUid;
 
   @override
   void initState() {
@@ -115,23 +113,6 @@ class _PostCardState extends State<PostCard> {
       await showShareSheet(context, post);
     } catch (_) {
       if (mounted) showToast(context, 'Could not open the share menu.');
-    }
-  }
-
-  Future<void> _delete() async {
-    final ok = await confirm(
-      context,
-      title: 'Delete post?',
-      message: 'This cannot be undone.',
-      confirmLabel: 'Delete',
-      destructive: true,
-    );
-    if (!ok) return;
-    try {
-      await PostService.instance.deletePost(post);
-      widget.onDeleted?.call();
-    } catch (e) {
-      if (mounted) showToast(context, friendlyError(e));
     }
   }
 
@@ -234,16 +215,15 @@ class _PostCardState extends State<PostCard> {
               ),
             ),
           ),
-          if (_mine)
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_horiz_rounded),
-              onSelected: (v) {
-                if (v == 'delete') _delete();
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'delete', child: Text('Delete')),
-              ],
+          IconButton(
+            key: const ValueKey('postMore'),
+            icon: const Icon(Icons.more_horiz_rounded),
+            onPressed: () => showPostActions(
+              context,
+              post,
+              onDeleted: widget.onDeleted,
             ),
+          ),
         ],
       ),
     );

@@ -38,6 +38,11 @@ service cloud.firestore {
       match /saved/{postId} {
         allow read, write: if signedIn() && request.auth.uid == uid;
       }
+      // posts {uid} reposted: anybody signed in can read (they are shown on the profile), only the owner writes
+      match /reposts/{postId} {
+        allow read: if signedIn();
+        allow write: if signedIn() && request.auth.uid == uid;
+      }
       // people I blocked: private to the owner
       match /blocked/{targetId} {
         allow read, write: if signedIn() && request.auth.uid == uid;
@@ -69,7 +74,7 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
       // author edits anything; anyone may change like/comment counters
       allow update: if signedIn() && (resource.data.authorId == request.auth.uid
-                                      || onlyChanges(['likeCount', 'commentCount', 'viewCount', 'shareCount']));
+                                      || onlyChanges(['likeCount', 'commentCount', 'viewCount', 'shareCount', 'repostCount']));
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
 
       match /likes/{uid} {

@@ -6,9 +6,11 @@ import 'package:flutter/scheduler.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/music.dart';
+import '../models/finish.dart';
 import '../models/post.dart';
 import '../services/clip_cache.dart';
 import '../services/music_player.dart';
+import 'overlay_tools.dart';
 
 /// Sound switch for clips that play inside the Discover feed (starts silent, like Instagram).
 class InlineAudio {
@@ -127,9 +129,13 @@ class InlineVideoLayer extends StatefulWidget {
     required this.post,
     this.showSound = true,
     this.videoUrl,
+    this.finish,
   });
   final Post post;
   final bool showSound;
+
+  /// Texts and look of the video shown (null = the post's own).
+  final MediaFinish? finish;
 
   /// null = the post's own video; '' = no video (music only).
   final String? videoUrl;
@@ -380,7 +386,12 @@ class _InlineVideoLayerState extends State<InlineVideoLayer>
                 child: SizedBox(
                   width: c.value.size.width,
                   height: c.value.size.height,
-                  child: VideoPlayer(c),
+                  child: FinishedMedia(
+                    finish: widget.videoUrl == null
+                        ? widget.post.finish
+                        : widget.finish,
+                    child: VideoPlayer(c),
+                  ),
                 ),
               ),
             ),

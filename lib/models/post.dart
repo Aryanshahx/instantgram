@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../core/media_url.dart';
+import 'finish.dart';
 import 'music.dart';
 
 int _int(Object? v) => v is num ? v.toInt() : 0;
@@ -15,6 +16,7 @@ class PostItem {
     this.width = 0,
     this.height = 0,
     this.seconds = 0,
+    this.finish,
   });
 
   final bool video;
@@ -28,6 +30,9 @@ class PostItem {
   final int height;
   final int seconds;
 
+  /// Texts, stickers and colour look shown over a video (null = none).
+  final MediaFinish? finish;
+
   String get url => resolveMediaUrl(ref);
   String get thumbUrl => resolveMediaUrl(video ? thumbRef : ref);
   double get aspect => (width > 0 && height > 0) ? width / height : 0;
@@ -39,6 +44,7 @@ class PostItem {
     if (width > 0 && height > 0) 'w': width,
     if (width > 0 && height > 0) 'h': height,
     if (seconds > 0) 'd': seconds,
+    if (finish != null && !finish!.isEmpty) 'fin': finish!.toMap(),
   };
 
   static PostItem? fromMap(Object? e) {
@@ -52,6 +58,7 @@ class PostItem {
       width: _int(e['w']),
       height: _int(e['h']),
       seconds: _int(e['d']),
+      finish: MediaFinish.fromMap(e['fin']),
     );
   }
 }
@@ -115,6 +122,9 @@ class Post {
     this.keepSound = true,
     this.media = const [],
     this.shareCount = 0,
+    this.repostCount = 0,
+    this.pinned = false,
+    this.finish,
     this.audience = kAudienceEveryone,
     this.hideLikes = false,
     this.hideComments = false,
@@ -160,6 +170,15 @@ class Post {
   /// Times it was shared (link or sent to people).
   final int shareCount;
 
+  /// People who reposted it to their profile.
+  final int repostCount;
+
+  /// The author pinned it to the top of their profile.
+  final bool pinned;
+
+  /// Texts, stickers and colour look shown over a single video post (null = none).
+  final MediaFinish? finish;
+
   /// [kAudienceEveryone], [kAudienceFollowers] or [kAudienceMe].
   final String audience;
 
@@ -186,6 +205,7 @@ class Post {
           width: videoWidth,
           height: videoHeight,
           seconds: videoDuration,
+          finish: finish,
         )
       else
         PostItem(
@@ -260,6 +280,9 @@ class Post {
           : 0.8,
       keepSound: m['keepSound'] is bool ? m['keepSound'] as bool : true,
       shareCount: _int(m['shareCount']),
+      repostCount: _int(m['repostCount']),
+      pinned: m['pinned'] == true,
+      finish: MediaFinish.fromMap(m['finish']),
       audience: _str(m['audience']).isEmpty
           ? kAudienceEveryone
           : _str(m['audience']),

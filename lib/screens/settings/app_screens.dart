@@ -94,17 +94,43 @@ class AccessibilityScreen extends StatelessWidget {
 }
 
 /// Settings > Language.
-class LanguageScreen extends StatelessWidget {
+class LanguageScreen extends StatefulWidget {
   const LanguageScreen({super.key});
 
   @override
+  State<LanguageScreen> createState() => _LanguageScreenState();
+}
+
+class _LanguageScreenState extends State<LanguageScreen> {
+  String _q = '';
+
+  @override
   Widget build(BuildContext context) {
+    final q = _q.trim().toLowerCase();
+    final list = [
+      for (final l in kLanguages)
+        if (q.isEmpty ||
+            l.name.toLowerCase().contains(q) ||
+            l.english.toLowerCase().contains(q))
+          l,
+    ];
     return ValueListenableBuilder<String>(
       valueListenable: Language.instance,
       builder: (context, code, _) => SettingsPage(
         title: context.tr('Language'),
         children: [
-          for (final l in kLanguages)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: TextField(
+              key: const ValueKey('languageSearch'),
+              onChanged: (v) => setState(() => _q = v),
+              decoration: InputDecoration(
+                hintText: context.tr('Search'),
+                prefixIcon: const Icon(Icons.search_rounded),
+              ),
+            ),
+          ),
+          for (final l in list)
             ListTile(
               key: ValueKey('language_${l.code}'),
               contentPadding: const EdgeInsets.symmetric(horizontal: 20),
@@ -228,7 +254,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
       ),
       (
         'Where it is stored',
-        'Account data and messages live in Google Firebase. Photos, clips and voice files live in our own media storage. Music comes from Epidemic Sound.',
+        'Account data and messages live in Google Firebase. Photos, clips and voice files live in our own media storage. Audio comes from Epidemic Sound.',
       ),
       (
         'On your phone',
@@ -267,8 +293,8 @@ class TermsScreen extends StatelessWidget {
         'Hate, harassment, threats, nudity or sexual content involving minors, scams, spam, violence, and content that breaks the law or other people\'s rights.',
       ),
       (
-        'Music',
-        'Music from Epidemic Sound may only be used inside the app as it is offered. Do not copy or resell it.',
+        'Audio',
+        'Audio from Epidemic Sound may only be used inside the app as it is offered. Do not copy or resell it.',
       ),
       (
         'Reports and removal',

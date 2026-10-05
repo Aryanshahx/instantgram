@@ -9,6 +9,7 @@ import '../screens/reels/reels_screen.dart';
 import '../services/safety_service.dart';
 import 'post_details_sheet.dart' show compactCount;
 import 'post_media.dart';
+import 'post_actions_sheet.dart';
 import 'reel_actions.dart';
 
 /// Masonry of posts. Every tile has the real proportions of its photo or clip (square corners).
@@ -58,6 +59,7 @@ class _Tile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
+      onLongPress: () => showPostActions(context, post),
       onTap: () => post.isClip
           ? openClips(context, post)
           : openScreen(context, PostDetailScreen(post: post)),
@@ -69,6 +71,19 @@ class _Tile extends StatelessWidget {
             inline: inline && post.isVideo,
             showSound: false,
           ),
+          if (post.pinned)
+            const Positioned(
+              left: 8,
+              top: 8,
+              child: IgnorePointer(
+                child: Icon(
+                  Icons.push_pin_rounded,
+                  size: 18,
+                  color: Colors.white,
+                  shadows: kReelShadow,
+                ),
+              ),
+            ),
           if (post.isCarousel)
             const Positioned(
               right: 8,

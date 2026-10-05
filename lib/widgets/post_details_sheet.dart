@@ -180,6 +180,24 @@ class _PostDetailsSheetState extends State<PostDetailsSheet> {
                   ),
                 ],
               ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  _Stat(
+                    key: const ValueKey('statShares'),
+                    icon: Icons.ios_share_rounded,
+                    label: 'Shares',
+                    value: p.shareCount,
+                  ),
+                  const SizedBox(width: 10),
+                  _Stat(
+                    key: const ValueKey('statReposts'),
+                    icon: Icons.repeat_rounded,
+                    label: 'Reposts',
+                    value: p.repostCount,
+                  ),
+                ],
+              ),
               const SizedBox(height: 12),
               for (final r in rows)
                 Padding(

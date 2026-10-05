@@ -11,6 +11,7 @@ import '../services/clip_cache.dart';
 import '../services/music_player.dart';
 import 'reel_progress.dart';
 import 'reel_touch.dart';
+import 'overlay_tools.dart';
 
 export 'reel_touch.dart' show ReelAudio;
 
@@ -305,7 +306,10 @@ class _ReelVideoState extends State<ReelVideo> {
                 child: SizedBox(
                   width: c.value.size.width,
                   height: c.value.size.height,
-                  child: VideoPlayer(c),
+                  child: FinishedMedia(
+                    finish: widget.post.finish,
+                    child: VideoPlayer(c),
+                  ),
                 ),
               ),
             ),

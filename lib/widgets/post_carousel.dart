@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
+import '../models/finish.dart';
 import '../models/post.dart';
 import 'inline_video.dart';
 
@@ -86,6 +87,7 @@ class _PostCarouselState extends State<PostCarousel> {
           _Layer(
             post: widget.post,
             url: cur.video ? cur.url : '',
+            finish: cur.finish,
             showSound: widget.showSound,
           ),
         Positioned(
@@ -144,9 +146,11 @@ class _Layer extends StatelessWidget {
     required this.post,
     required this.url,
     required this.showSound,
+    this.finish,
   });
   final Post post;
   final String url;
+  final MediaFinish? finish;
   final bool showSound;
 
   @override
@@ -154,6 +158,7 @@ class _Layer extends StatelessWidget {
     key: ValueKey('layer_${post.id}'),
     post: post,
     videoUrl: url,
+    finish: finish,
     showSound: showSound,
   );
 }

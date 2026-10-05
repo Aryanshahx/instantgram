@@ -260,6 +260,9 @@ test("music: search and download link come from Epidemic Sound, the key never le
     assert.equal(seen[0].auth, "Bearer ES_KEY");
     assert.equal(seen[0].user, "user1abc");
     assert.ok(seen[0].u.includes("term=sunrise"));
+    // nothing typed: Epidemic Sound needs a term (it answers 400 without one)
+    await call("/music", { op: "search", term: "" }, t, env);
+    assert.ok(seen[1].u.includes("term=popular"));
     const link = await (await call("/music", { op: "url", id: "abc123" }, t, env)).json();
     assert.equal(link.url, "https://cdn/abc.mp3");
     // bad id, no login, no key

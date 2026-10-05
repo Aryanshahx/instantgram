@@ -24,6 +24,8 @@ import '../../widgets/music_widgets.dart';
 import '../../widgets/reel_photo.dart';
 import '../../widgets/reel_progress.dart';
 import '../../widgets/reel_video.dart';
+import '../../widgets/post_actions_sheet.dart';
+import '../../widgets/repost_controller.dart';
 import '../../widgets/save_controller.dart';
 import '../../widgets/state_views.dart';
 import '../post/comments_screen.dart';
@@ -262,6 +264,7 @@ class _ReelPageState extends State<_ReelPage> {
     widget.post.likeCount,
   );
   late final SaveController _save = SaveController(widget.post.id);
+  late final RepostController _repost = RepostController(widget.post);
   late int _comments = widget.post.commentCount;
   VoidCallback? _unwatch;
 
@@ -290,6 +293,7 @@ class _ReelPageState extends State<_ReelPage> {
     _progress.dispose();
     _like.dispose();
     _save.dispose();
+    _repost.dispose();
     super.dispose();
   }
 
@@ -307,6 +311,19 @@ class _ReelPageState extends State<_ReelPage> {
       showToast(
         context,
         _save.saved ? 'Saved to your profile' : 'Removed from saved',
+      );
+    }
+  }
+
+  Future<void> _toggleRepost() async {
+    final err = await _repost.toggle();
+    if (!mounted) return;
+    if (err != null) {
+      showToast(context, friendlyError(err));
+    } else {
+      showToast(
+        context,
+        _repost.reposted ? 'Reposted to your profile' : 'Repost removed',
       );
     }
   }
@@ -451,9 +468,11 @@ class _ReelPageState extends State<_ReelPage> {
                     post: post,
                     like: _like,
                     save: _save,
+                    repost: _repost,
                     comments: _comments,
                     onLike: _toggleLike,
                     onSave: _toggleSave,
+                    onRepost: _toggleRepost,
                     onShare: _share,
                     onComments: () => showCommentsSheet(
                       context,
@@ -548,9 +567,11 @@ class _Rail extends StatelessWidget {
     required this.post,
     required this.like,
     required this.save,
+    required this.repost,
     required this.comments,
     required this.onLike,
     required this.onSave,
+    required this.onRepost,
     required this.onShare,
     required this.onComments,
   });
@@ -558,9 +579,11 @@ class _Rail extends StatelessWidget {
   final Post post;
   final LikeController like;
   final SaveController save;
+  final RepostController repost;
   final int comments;
   final VoidCallback onLike;
   final VoidCallback onSave;
+  final VoidCallback onRepost;
   final VoidCallback onShare;
   final VoidCallback onComments;
 
@@ -581,6 +604,15 @@ class _Rail extends StatelessWidget {
             size: 28,
             label: 'Report',
             onTap: () => showReportSheet(context, post),
+          ),
+          const SizedBox(height: 8),
+        ] else ...[
+          ReelIconButton(
+            key: const ValueKey('clipMine'),
+            icon: Icons.more_horiz_rounded,
+            size: 28,
+            label: 'More',
+            onTap: () => showPostActions(context, post),
           ),
           const SizedBox(height: 8),
         ],
@@ -629,6 +661,20 @@ class _Rail extends StatelessWidget {
               : 'Share',
           onTap: onShare,
         ),
+        if (!mine) ...[
+          const SizedBox(height: 8),
+          ListenableBuilder(
+            listenable: repost,
+            builder: (_, _) => ReelIconButton(
+              key: const ValueKey('clipRepost'),
+              icon: Icons.repeat_rounded,
+              color: repost.reposted ? AppTheme.volt : Colors.white,
+              size: 30,
+              label: repost.reposted ? 'Reposted' : 'Repost',
+              onTap: onRepost,
+            ),
+          ),
+        ],
       ],
     );
   }

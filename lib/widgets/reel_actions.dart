@@ -304,7 +304,7 @@ class ReelIconButton extends StatelessWidget {
             ),
             if (label != null)
               Text(
-                label!,
+                context.tr(label!),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 12.5,

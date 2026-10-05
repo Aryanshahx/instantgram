@@ -31,7 +31,16 @@ class InstantgramApp extends StatelessWidget {
                 boldText: mq.boldText || a.boldText,
                 disableAnimations: mq.disableAnimations || a.reduceMotion,
               ),
-              child: child ?? const SizedBox.shrink(),
+              child: ValueListenableBuilder<String>(
+                valueListenable: Language.instance,
+                builder: (context, _, inner) => Directionality(
+                  textDirection: Language.instance.isRtl
+                      ? TextDirection.rtl
+                      : TextDirection.ltr,
+                  child: inner!,
+                ),
+                child: child ?? const SizedBox.shrink(),
+              ),
             );
           },
           home: const AuthGate(),
