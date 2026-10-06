@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Where the Privacy Policy and the Terms of Use pages live. They are the files
-/// `docs/privacy.html` and `docs/terms.html` of the repository, shown by GitHub Pages.
+/// `docs/privacy.md` and `docs/terms.md` of the repository, shown by GitHub Pages.
 /// Change the address here if you host them somewhere else.
 const String kLegalBaseUrl = 'https://aryanshahx.github.io/instantgram';
 const String kPrivacyUrl = '$kLegalBaseUrl/privacy.html';

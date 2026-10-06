@@ -87,9 +87,20 @@ void main() {
       expect(kPrivacyUrl, endsWith('/privacy.html'));
       expect(kTermsUrl, endsWith('/terms.html'));
       expect(kPrivacyUrl.startsWith(kLegalBaseUrl), isTrue);
-      expect(File('docs/privacy.html').existsSync(), isTrue);
-      expect(File('docs/terms.html').existsSync(), isTrue);
+      expect(File('docs/privacy.md').existsSync(), isTrue);
+      expect(File('docs/terms.md').existsSync(), isTrue);
       expect(File('docs/profile.html').existsSync(), isTrue);
+      expect(File('docs/privacy.html').existsSync(), isFalse);
+      expect(File('docs/terms.html').existsSync(), isFalse);
+    });
+
+    test('the markdown pages carry front matter for GitHub Pages', () {
+      for (final f in ['docs/privacy.md', 'docs/terms.md']) {
+        final text = File(f).readAsStringSync();
+        expect(text.startsWith('---\nlayout: default\n'), isTrue, reason: f);
+        expect(text, contains('techlabs.hyper@gmail.com'));
+      }
+      expect(File('docs/_config.yml').readAsStringSync(), contains('theme:'));
     });
 
     test('a profile link carries the username', () {
