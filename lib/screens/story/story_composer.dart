@@ -232,6 +232,7 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
   double _progress = 0;
   Size _canvas = const Size(360, 640);
   double _baseScale = 1;
+  int? _sel; // the selected text or sticker
 
   bool get _isVideo => widget.video != null;
 
@@ -288,30 +289,52 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
   Future<void> _addEmoji() async {
     final o = await showStickerSheet(context);
     if (o == null || !mounted) return;
-    setState(() => _overlays.add(o));
+    setState(() {
+      _overlays.add(o);
+      _sel = _overlays.length - 1;
+    });
   }
 
+  /// First tap selects (frame, corner handle, size bar); a second tap on a selected text edits it.
   Future<void> _tapOverlay(int i) async {
-    final o = _overlays[i];
-    if (o.emoji || o.isImage) {
-      final ok = await confirm(
-        context,
-        title: 'Remove sticker?',
-        confirmLabel: 'Remove',
-        destructive: true,
-      );
-      if (ok && mounted) setState(() => _overlays.removeAt(i));
+    if (_sel != i) {
+      setState(() => _sel = i);
       return;
     }
+    if (!_overlays[i].emoji && !_overlays[i].isImage) await _editSelected();
+  }
+
+  Future<void> _editSelected() async {
+    final i = _sel;
+    if (i == null || i >= _overlays.length) return;
+    final o = _overlays[i];
+    if (o.emoji || o.isImage) return;
     final r = await _editText(o, canDelete: true);
-    if (!mounted) return;
-    if (r == null) return;
+    if (!mounted || r == null) return;
     setState(() {
       if (r.text.isEmpty) {
         _overlays.removeAt(i);
+        _sel = null;
       } else {
         _overlays[i] = r;
       }
+    });
+  }
+
+  void _deleteSelected() {
+    final i = _sel;
+    if (i == null || i >= _overlays.length) return;
+    setState(() {
+      _overlays.removeAt(i);
+      _sel = null;
+    });
+  }
+
+  void _resizeSelected(double scale) {
+    final i = _sel;
+    if (i == null || i >= _overlays.length) return;
+    setState(() {
+      _overlays[i] = _overlays[i].copyWith(scale: scale.clamp(0.4, 4.0));
     });
   }
 
@@ -427,6 +450,16 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
+          // a tap beside the texts and stickers lets go of the selected one
+          Positioned.fill(
+            child: GestureDetector(
+              key: const ValueKey('storyBackground'),
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                if (_sel != null) setState(() => _sel = null);
+              },
+            ),
+          ),
           StoryCanvas(
             media: _media(),
             overlays: _overlays,
@@ -454,9 +487,31 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
                   );
                 });
               },
-              child: chip,
+              child: _sel == i && i < _overlays.length
+                  ? SelectedOverlayChip(
+                      overlay: _overlays[i],
+                      canvasWidth: _canvas.width,
+                      onScale: _resizeSelected,
+                    )
+                  : chip,
             ),
           ),
+          if (_sel != null && _sel! < _overlays.length)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 90,
+              child: OverlaySelectionBar(
+                dark: false,
+                overlay: _overlays[_sel!],
+                onScale: _resizeSelected,
+                onEdit: !_overlays[_sel!].emoji && !_overlays[_sel!].isImage
+                    ? _editSelected
+                    : null,
+                onDelete: _deleteSelected,
+                onDone: () => setState(() => _sel = null),
+              ),
+            ),
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(12),

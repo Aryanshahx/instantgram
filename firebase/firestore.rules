@@ -93,8 +93,11 @@ service cloud.firestore {
         allow read: if signedIn();
         allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
         // the author may edit the words; everybody may change the like counter
+        // the owner of the post may pin or unpin a comment
         allow update: if signedIn() && (
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likeCount']) ||
+          (get(/databases/$(database)/documents/posts/$(postId)).data.authorId == request.auth.uid &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pinned'])) ||
           (resource.data.authorId == request.auth.uid &&
             request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['text', 'edited', 'editedAt']))

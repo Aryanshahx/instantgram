@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:video_compress/video_compress.dart';
 import 'package:video_player/video_player.dart';
 
@@ -14,6 +15,7 @@ import '../../models/story.dart';
 import '../../services/music_player.dart';
 import '../../services/overlay_painter.dart';
 import '../../services/photo_edit.dart';
+import '../../services/playhead.dart';
 import '../../widgets/music_widgets.dart';
 import '../../widgets/overlay_tools.dart';
 import '../../widgets/trim_timeline.dart';
@@ -86,9 +88,10 @@ class EditorScreen extends StatefulWidget {
   State<EditorScreen> createState() => _EditorScreenState();
 }
 
-enum _Tool { filters, adjust, crop, trim }
+enum _Tool { filters, adjust, crop }
 
-class _EditorScreenState extends State<EditorScreen> {
+class _EditorScreenState extends State<EditorScreen>
+    with SingleTickerProviderStateMixin {
   // photo
   PhotoProxy? _proxy;
   // video
@@ -104,12 +107,24 @@ class _EditorScreenState extends State<EditorScreen> {
   final List<StoryOverlay> _overlays = [];
   MusicTrack? _music;
   MusicPlayer? _player;
-  _Tool _tool = _Tool.filters;
+  // photos always have a tool open; videos keep the timeline in view and open a tool on demand
+  _Tool? _tool = _Tool.filters;
   int _preset = 0; // index into _presets (0 = free)
   bool _busy = false;
   int? _sel; // the selected text or sticker
   final ValueNotifier<double> _pos = ValueNotifier(0);
+
+  // the timeline is redrawn through these, not through setState of the whole editor
+  final ValueNotifier<(double, double)> _rangeN = ValueNotifier((0, 1));
+  final ValueNotifier<int> _ovTick = ValueNotifier(0);
+  final PlayheadSmoother _smooth = PlayheadSmoother();
+  final Stopwatch _clock = Stopwatch()..start();
+  Ticker? _ticker; // made when a video is loaded (photos never need it)
+  Ticker get _tk => _ticker ??= createTicker(_onFrame);
+  late final SeekThrottle _seek = SeekThrottle((d) async => _c?.seekTo(d));
+  bool _looping = false;
   final List<Uint8List?> _frames = List<Uint8List?>.filled(10, null);
+  final ValueNotifier<int> _framesTick = ValueNotifier(0);
 
   static const _presets = <(String, double?)>[
     ('Free', null),
@@ -142,7 +157,7 @@ class _EditorScreenState extends State<EditorScreen> {
     _overlays.addAll(widget.overlays);
     _music = widget.music;
     if (_isVideo) {
-      _tool = _Tool.trim;
+      _tool = null;
       _loadVideo();
     } else {
       _loadPhoto();
@@ -191,12 +206,15 @@ class _EditorScreenState extends State<EditorScreen> {
         final cap = widget.maxSeconds;
         if (cap != null && _end - _start > cap) _end = _start + cap;
         _mute = init?.mute ?? false;
+        _rangeN.value = (_start, _end);
       });
       await c.setLooping(false);
       await c.setVolume(_mute ? 0 : 1);
       c.addListener(_tick);
       unawaited(_loadFrames());
       await c.seekTo(Duration(seconds: _start.round()));
+      _smooth.seek(_start, _clock.elapsed);
+      _pos.value = _start;
       await c.play();
     } catch (e) {
       await c.dispose();
@@ -216,32 +234,67 @@ class _EditorScreenState extends State<EditorScreen> {
           position: ((i + 0.5) / n * _total * 1000).round(),
         );
         if (!mounted) return;
-        setState(() => _frames[i] = b);
+        _frames[i] = b;
+        _framesTick.value++;
       } catch (_) {
         // that picture stays dark
       }
     }
   }
 
+  /// The player reported (a few times a second): keep the smooth clock in step and loop.
   void _tick() {
     final c = _c;
     if (c == null) return;
-    _pos.value = c.value.position.inMilliseconds / 1000;
-    if (_paused) return;
     final v = c.value;
+    final now = _clock.elapsed;
+    _smooth.report(v.position.inMilliseconds / 1000, v.isPlaying, now);
+    if (v.isPlaying && !_tk.isActive) {
+      _tk.start();
+    } else if (!v.isPlaying && _tk.isActive) {
+      _tk.stop();
+      _pos.value = _smooth.value(now);
+    }
+    if (_paused) return;
     final end = Duration(milliseconds: (_end * 1000).round());
     if (v.isInitialized &&
         (v.position >= end ||
             (v.position >= v.duration && v.duration > Duration.zero))) {
-      c.seekTo(Duration(seconds: _start.round()));
-      c.play();
+      _loopBack();
     }
+  }
+
+  /// One step per screen frame: the playhead moves smoothly between the player's reports.
+  void _onFrame(Duration _) {
+    final est = _smooth.value(_clock.elapsed);
+    if (est >= _end - 0.02) {
+      _loopBack();
+      return;
+    }
+    _pos.value = est;
+  }
+
+  void _loopBack() {
+    final c = _c;
+    if (c == null || _looping) return;
+    _looping = true;
+    _smooth.seek(_start, _clock.elapsed);
+    _pos.value = _start;
+    c
+        .seekTo(Duration(milliseconds: (_start * 1000).round()))
+        .then((_) => c.play())
+        .whenComplete(() => _looping = false);
   }
 
   @override
   void dispose() {
     _c?.removeListener(_tick);
+    _ticker?.dispose();
+    _seek.dispose();
     _pos.dispose();
+    _rangeN.dispose();
+    _ovTick.dispose();
+    _framesTick.dispose();
     _c?.dispose();
     _player?.dispose();
     _proxy?.file.delete().ignore();
@@ -348,60 +401,12 @@ class _EditorScreenState extends State<EditorScreen> {
     final i = _sel;
     if (i == null || i >= _overlays.length) return const SizedBox.shrink();
     final o = _overlays[i];
-    final canEdit = !o.emoji && !o.isImage;
-    return Container(
-      key: const ValueKey('selectionBar'),
-      height: 52,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Colors.white12)),
-      ),
-      child: Row(
-        children: [
-          IconButton(
-            key: const ValueKey('sizeDown'),
-            tooltip: 'Smaller',
-            icon: const Icon(Icons.remove_circle_outline_rounded),
-            onPressed: () => _resizeSelected(o.scale / 1.15),
-          ),
-          Expanded(
-            child: Slider(
-              key: const ValueKey('sizeSlider'),
-              value: o.scale.clamp(0.4, 4.0).toDouble(),
-              min: 0.4,
-              max: 4,
-              activeColor: AppTheme.volt,
-              onChanged: _resizeSelected,
-            ),
-          ),
-          IconButton(
-            key: const ValueKey('sizeUp'),
-            tooltip: 'Bigger',
-            icon: const Icon(Icons.add_circle_outline_rounded),
-            onPressed: () => _resizeSelected(o.scale * 1.15),
-          ),
-          if (canEdit)
-            IconButton(
-              key: const ValueKey('selEdit'),
-              tooltip: 'Edit',
-              icon: const Icon(Icons.edit_outlined),
-              onPressed: _editSelected,
-            ),
-          IconButton(
-            key: const ValueKey('selDelete'),
-            tooltip: 'Delete',
-            color: AppTheme.coral,
-            icon: const Icon(Icons.delete_outline_rounded),
-            onPressed: _deleteSelected,
-          ),
-          IconButton(
-            key: const ValueKey('selDone'),
-            tooltip: 'Done',
-            icon: const Icon(Icons.check_rounded),
-            onPressed: () => setState(() => _sel = null),
-          ),
-        ],
-      ),
+    return OverlaySelectionBar(
+      overlay: o,
+      onScale: _resizeSelected,
+      onEdit: !o.emoji && !o.isImage ? _editSelected : null,
+      onDelete: _deleteSelected,
+      onDone: () => setState(() => _sel = null),
     );
   }
 
@@ -426,12 +431,18 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   void _applyRange(double s, double e, bool startMoved) {
-    setState(() {
-      _start = s.clamp(0, _total - 1).toDouble();
-      _end = e.clamp(_start + 1, _total.toDouble()).toDouble();
-    });
+    _start = s.clamp(0, _total - 1).toDouble();
+    _end = e.clamp(_start + 1, _total.toDouble()).toDouble();
+    _rangeN.value = (_start, _end);
     // the picture follows the handle that is being moved
-    _c?.seekTo(Duration(seconds: (startMoved ? _start : _end - 1).round()));
+    _scrubTo(startMoved ? _start : _end - 1);
+  }
+
+  /// Moves the picture (and the playhead) to [sec] without flooding the player with seeks.
+  void _scrubTo(double sec) {
+    _smooth.seek(sec, _clock.elapsed);
+    _pos.value = sec;
+    _seek.request(Duration(milliseconds: (sec * 1000).round()));
   }
 
   void _rotate(int dir) {
@@ -473,11 +484,10 @@ class _EditorScreenState extends State<EditorScreen> {
             : _total.clamp(1, widget.maxSeconds!).toDouble();
         _mute = false;
         _c?.setVolume(1);
+        _rangeN.value = (_start, _end);
       }
     });
   }
-
-
 
   // ------------------------------------------------------------------- done
 
@@ -608,6 +618,7 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
         ),
         _selectionBar(),
+        if (_isVideo) _timeline(),
         _panel(context),
       ],
     );
@@ -646,16 +657,20 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
-  Widget _overlayLayer() => OverlayEditLayer(
-    overlays: _overlays,
-    onChanged: (l) => setState(() {
-      _overlays
-        ..clear()
-        ..addAll(l);
-    }),
-    onTap: _tapOverlay,
-    selected: _sel,
-    onBackgroundTap: () => setState(() => _sel = null),
+  Widget _overlayLayer() => ValueListenableBuilder<int>(
+    valueListenable: _ovTick,
+    builder: (_, _, _) => OverlayEditLayer(
+      overlays: _overlays,
+      onChanged: (l) => setState(() {
+        _overlays
+          ..clear()
+          ..addAll(l);
+      }),
+      onTap: _tapOverlay,
+      selected: _sel,
+      onBackgroundTap: () => setState(() => _sel = null),
+      position: _isVideo ? _pos : null,
+    ),
   );
 
   Widget _preview(BuildContext context, BoxConstraints c) {
@@ -687,8 +702,12 @@ class _EditorScreenState extends State<EditorScreen> {
     } else {
       final fullW = w / crop.width;
       final fullH = h / crop.height;
-      final ax = crop.width >= 0.999 ? 0.0 : 2 * crop.left / (1 - crop.width) - 1;
-      final ay = crop.height >= 0.999 ? 0.0 : 2 * crop.top / (1 - crop.height) - 1;
+      final ax = crop.width >= 0.999
+          ? 0.0
+          : 2 * crop.left / (1 - crop.width) - 1;
+      final ay = crop.height >= 0.999
+          ? 0.0
+          : 2 * crop.top / (1 - crop.height) - 1;
       content = Stack(
         fit: StackFit.expand,
         children: [
@@ -697,7 +716,11 @@ class _EditorScreenState extends State<EditorScreen> {
               alignment: Alignment(ax, ay),
               widthFactor: crop.width,
               heightFactor: crop.height,
-              child: SizedBox(width: fullW, height: fullH, child: _imageWidget()),
+              child: SizedBox(
+                width: fullW,
+                height: fullH,
+                child: _imageWidget(),
+              ),
             ),
           ),
           _overlayLayer(),
@@ -770,15 +793,15 @@ class _EditorScreenState extends State<EditorScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
-            height: 150,
-            child: switch (_tool) {
-              _Tool.crop => _cropTools(),
-              _Tool.filters => _filterTools(),
-              _Tool.adjust => _adjustTools(),
-              _Tool.trim => _trimTools(),
-            },
-          ),
+          if (_tool != null)
+            SizedBox(
+              height: _isVideo ? 130 : 150,
+              child: switch (_tool!) {
+                _Tool.crop => _cropTools(),
+                _Tool.filters => _filterTools(),
+                _Tool.adjust => _adjustTools(),
+              },
+            ),
           Container(
             decoration: const BoxDecoration(
               border: Border(top: BorderSide(color: Colors.white12)),
@@ -834,12 +857,6 @@ class _EditorScreenState extends State<EditorScreen> {
                     _Tool.crop,
                   ),
                 if (_isVideo) ...[
-                  _toolButton(
-                    const ValueKey('tool_trim'),
-                    Icons.content_cut_rounded,
-                    'Trim',
-                    _Tool.trim,
-                  ),
                   _actionButton(
                     const ValueKey('tool_mute'),
                     _mute ? Icons.volume_off_rounded : Icons.volume_up_rounded,
@@ -857,14 +874,19 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
-  Widget _toolButton(Key key, IconData icon, String label, _Tool t) =>
-      _actionButton(
-        key,
-        icon,
-        label,
-        () => setState(() => _tool = t),
-        on: _tool == t,
-      );
+  Widget _toolButton(
+    Key key,
+    IconData icon,
+    String label,
+    _Tool t,
+  ) => _actionButton(
+    key,
+    icon,
+    label,
+    // on a video a second tap closes the tool again, so the timeline keeps its room
+    () => setState(() => _tool = (_isVideo && _tool == t) ? null : t),
+    on: _tool == t,
+  );
 
   Widget _actionButton(
     Key key,
@@ -900,19 +922,55 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
-  Widget _trimTools() {
+  String _laneLabel(StoryOverlay o) {
+    if (o.isImage) return 'GIF';
+    final t = o.text.trim();
+    return t.isEmpty ? (o.emoji ? 'Sticker' : 'Text') : t;
+  }
+
+  /// Always in view for a video: the frames, the kept part, and one lane each for the audio,
+  /// every text and every sticker.
+  Widget _timeline() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-      child: TrimTimeline(
-        total: _total,
-        start: _start,
-        end: _end,
-        position: _pos,
-        frames: _frames,
-        maxSeconds: widget.maxSeconds,
-        audioLabel: _music?.title,
-        onRange: (s, e, startMoved) => _applyRange(s, e, startMoved),
-        onSeek: (sec) => _c?.seekTo(Duration(milliseconds: (sec * 1000).round())),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+      child: RepaintBoundary(
+        child: ListenableBuilder(
+          listenable: Listenable.merge([_rangeN, _ovTick, _framesTick]),
+          builder: (context, _) {
+            final r = _rangeN.value;
+            return TrimTimeline(
+              total: _total,
+              start: r.$1,
+              end: r.$2,
+              position: _pos,
+              frames: _frames,
+              maxSeconds: widget.maxSeconds,
+              audioLabel: _music?.title,
+              lanes: [
+                for (var i = 0; i < _overlays.length; i++)
+                  TimelineLane(
+                    kind: _overlays[i].emoji || _overlays[i].isImage
+                        ? LaneKind.sticker
+                        : LaneKind.text,
+                    label: _laneLabel(_overlays[i]),
+                    from: _overlays[i].from,
+                    to: _overlays[i].to,
+                    selected: _sel == i,
+                  ),
+              ],
+              onLaneTap: (i) {
+                if (_sel != i) setState(() => _sel = i);
+              },
+              onLaneRange: (i, from, to) {
+                if (i >= _overlays.length) return;
+                _overlays[i] = _overlays[i].copyWith(from: from, to: to);
+                _ovTick.value++;
+              },
+              onRange: (s, e, startMoved) => _applyRange(s, e, startMoved),
+              onSeek: _scrubTo,
+            );
+          },
+        ),
       ),
     );
   }
@@ -992,8 +1050,8 @@ class _EditorScreenState extends State<EditorScreen> {
                 child: ColorFiltered(
                   colorFilter: ColorFilter.matrix(kPhotoFilters[i].matrix),
                   child: thumb == null
-                    ? const ColoredBox(color: Colors.white24)
-                    : Image.file(thumb, fit: BoxFit.cover, cacheWidth: 160),
+                      ? const ColoredBox(color: Colors.white24)
+                      : Image.file(thumb, fit: BoxFit.cover, cacheWidth: 160),
                 ),
               ),
               const SizedBox(height: 4),

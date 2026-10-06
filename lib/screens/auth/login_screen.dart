@@ -7,7 +7,7 @@ import '../../core/ui.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/aurora_background.dart';
 import '../../widgets/brand_logo.dart';
-import 'signup_screen.dart';
+import 'language_step_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   /// Filled in by "Switch account": the username to log in with.
@@ -30,6 +30,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _email.text = LoginScreen.prefill;
     LoginScreen.prefill = '';
   }
+
   bool _loading = false;
   bool _obscure = true;
 
@@ -153,7 +154,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 14),
                       OutlinedButton(
                         onPressed: () =>
-                            openScreen(context, const SignupScreen()),
+                            openScreen(context, const LanguageStepScreen()),
                         child: const Text('Create an account'),
                       ),
                     ],

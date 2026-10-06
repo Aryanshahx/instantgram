@@ -97,6 +97,7 @@ class AuthService {
     String fullName = '',
     required DateTime birthDate,
     String language = 'en',
+    String country = '',
   }) async {
     if (!isOldEnough(birthDate, DateTime.now())) {
       throw const AgeException();
@@ -134,6 +135,7 @@ class AuthService {
             DateTime.utc(birthDate.year, birthDate.month, birthDate.day),
           ),
           'language': language,
+          if (country.isNotEmpty) 'country': country,
           'isPrivate': false,
           'createdAt': FieldValue.serverTimestamp(),
         });

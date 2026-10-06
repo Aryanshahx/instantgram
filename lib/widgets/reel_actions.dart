@@ -250,16 +250,17 @@ class _ReelFollowPillState extends State<ReelFollowPill> {
         height: 28,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: following ? Colors.black38 : AppTheme.volt,
+          color: Colors.transparent,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: following ? Colors.white70 : AppTheme.volt),
+          border: Border.all(color: following ? Colors.white54 : Colors.white),
         ),
         child: Text(
           context.tr(following ? 'Following' : 'Follow'),
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w800,
-            color: following ? Colors.white : AppTheme.ink,
+            color: following ? Colors.white70 : Colors.white,
+            shadows: kReelShadow,
           ),
         ),
       ),

@@ -802,9 +802,10 @@ void main() {
       await tester.pump();
       final after = tester.getCenter(find.text('Good morning'));
       expect(after.dy, greaterThan(before.dy + 60));
+      // the first tap selects it (size bar), Delete takes it away
       await tester.tap(find.text('Good morning'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('storyTextDelete')));
+      await tester.tap(find.byKey(const ValueKey('selDelete')));
       await tester.pumpAndSettle();
       expect(find.text('Good morning'), findsNothing);
       expect(tester.takeException(), isNull);

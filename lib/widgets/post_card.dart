@@ -17,6 +17,7 @@ import 'avatar.dart';
 import 'like_button.dart';
 import 'music_widgets.dart';
 import 'post_actions_sheet.dart';
+import 'post_details_sheet.dart' show compactCount;
 import 'post_media.dart';
 import 'reel_actions.dart';
 import 'repost_controller.dart';
@@ -114,6 +115,10 @@ class _PostCardState extends State<PostCard> {
   }
 
   Future<void> _toggleRepost() async {
+    if (post.authorId == UserService.instance.myUid) {
+      showToast(context, 'You cannot repost your own post.');
+      return;
+    }
     final err = await _repost.toggle();
     if (!mounted) return;
     showToast(
@@ -295,14 +300,36 @@ class _PostCardState extends State<PostCard> {
               ),
             ),
           ),
-          if (!mine)
+          if (!mine || _repost.count > 0)
             ListenableBuilder(
               listenable: _repost,
-              builder: (context, _) => icon(
-                const ValueKey('cardRepost'),
-                Icons.repeat_rounded,
-                _toggleRepost,
-                color: _repost.reposted ? context.accentInk : null,
+              builder: (context, _) => GestureDetector(
+                key: const ValueKey('cardRepost'),
+                behavior: HitTestBehavior.opaque,
+                onTap: _toggleRepost,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.repeat_rounded,
+                        size: 23,
+                        color: _repost.reposted ? context.accentInk : null,
+                      ),
+                      if (_repost.count > 0) ...[
+                        const SizedBox(width: 5),
+                        Text(
+                          compactCount(_repost.count),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ),
             ),
           const Spacer(),

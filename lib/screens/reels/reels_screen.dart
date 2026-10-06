@@ -324,6 +324,10 @@ class _ReelPageState extends State<_ReelPage> {
   }
 
   Future<void> _toggleRepost() async {
+    if (widget.post.authorId == UserService.instance.myUid) {
+      showToast(context, 'You cannot repost your own clip.');
+      return;
+    }
     final err = await _repost.toggle();
     if (!mounted) return;
     if (err != null) {
@@ -465,16 +469,6 @@ class _ReelPageState extends State<_ReelPage> {
                     ),
                   ),
                   const Spacer(),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: ReelAudio.muted,
-                    builder: (_, muted, _) => ReelIconButton(
-                      icon: muted
-                          ? Icons.volume_off_rounded
-                          : Icons.volume_up_rounded,
-                      size: 26,
-                      onTap: () => ReelAudio.muted.value = !muted,
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -659,7 +653,7 @@ class _Rail extends StatelessWidget {
               : 'Comment',
           onTap: onComments,
         ),
-        if (!mine) ...[
+        if (!mine || repost.count > 0) ...[
           const SizedBox(height: _gap),
           ListenableBuilder(
             listenable: repost,
@@ -667,7 +661,9 @@ class _Rail extends StatelessWidget {
               key: const ValueKey('clipRepost'),
               icon: Icons.repeat_rounded,
               color: repost.reposted ? AppTheme.volt : Colors.white,
-              label: repost.reposted ? 'Reposted' : 'Repost',
+              label: repost.count > 0
+                  ? compactCount(repost.count)
+                  : (repost.reposted ? 'Reposted' : 'Repost'),
               onTap: onRepost,
             ),
           ),
@@ -704,6 +700,17 @@ class _Rail extends StatelessWidget {
             onTap: () => showReportSheet(context, post),
           ),
         ],
+        // sound on / off lives with the other buttons
+        const SizedBox(height: _gap),
+        ValueListenableBuilder<bool>(
+          valueListenable: ReelAudio.muted,
+          builder: (_, muted, _) => ReelIconButton(
+            key: const ValueKey('clipMute'),
+            icon: muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+            label: muted ? 'Unmute' : 'Mute',
+            onTap: () => ReelAudio.muted.value = !muted,
+          ),
+        ),
       ],
     );
   }

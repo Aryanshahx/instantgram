@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>InstantGram profile</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#14161a;--mut:#5d6470;--acc:#c6f432;--line:#e4e7ec}
+@media(prefers-color-scheme:dark){:root{--bg:#0e0f12;--fg:#f2f3f5;--mut:#a0a6b0;--line:#25282e}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:grid;place-items:center;min-height:100vh}
+main{max-width:420px;padding:32px 24px;text-align:center}
+.card{border:1px solid var(--line);border-radius:28px;padding:32px 24px}
+h1{font-size:28px;letter-spacing:-.8px;margin:0 0 6px;word-break:break-all}
+p{color:var(--mut);margin:6px 0}
+.btn{display:inline-block;margin-top:18px;background:var(--acc);color:#111;font-weight:800;border-radius:999px;padding:12px 26px;text-decoration:none}
+.small{font-size:13px;margin-top:22px}
+a.l{color:inherit}
+</style></head><body><main><div class="card">
+<p>Follow on InstantGram</p>
+<h1 id="n">@…</h1>
+<p>Open InstantGram, tap Discover, then search for this username to find the profile.</p>
+<a class="btn" href="https://github.com/Aryanshahx/instantgram/releases/latest">Get the app</a>
+<p class="small"><a class="l" href="privacy.html">Privacy Policy</a> · <a class="l" href="terms.html">Terms of Use</a></p>
+</div></main>
+<script>
+var u=(new URLSearchParams(location.search).get('u')||'').replace(/[^a-zA-Z0-9._]/g,'').slice(0,30);
+document.getElementById('n').textContent=u?'@'+u:'InstantGram';
+if(u)document.title='@'+u+' on InstantGram';
+</script></body></html>

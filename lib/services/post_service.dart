@@ -459,6 +459,13 @@ class PostService {
     });
   }
 
+  /// The owner of the post pins or unpins a comment (rules: only `pinned` may change).
+  Future<void> setCommentPinned(String postId, String commentId, bool pinned) {
+    return _posts.doc(postId).collection('comments').doc(commentId).update({
+      'pinned': pinned,
+    });
+  }
+
   Future<void> deleteComment(String postId, String commentId) async {
     final postRef = _posts.doc(postId);
     final batch = _db.batch();

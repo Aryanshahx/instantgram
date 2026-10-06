@@ -18,6 +18,7 @@ class AppUser {
     this.postsCount = 0,
     this.isPrivate = false,
     this.language = '',
+    this.country = '',
     this.birthDate,
   });
 
@@ -50,6 +51,9 @@ class AppUser {
 
   /// Language code chosen when the account was made ('' = not set).
   final String language;
+
+  /// ISO code chosen at sign-up ('' for older accounts).
+  final String country;
   final DateTime? birthDate;
 
   factory AppUser.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
@@ -78,6 +82,7 @@ class AppUser {
       postsCount: _int(m['postsCount']),
       isPrivate: m['isPrivate'] == true,
       language: _str(m['language']),
+      country: _str(m['country']),
       birthDate: m['birthDate'] is Timestamp
           ? (m['birthDate'] as Timestamp).toDate()
           : null,

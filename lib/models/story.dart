@@ -24,6 +24,8 @@ class StoryOverlay {
     this.image = '',
     this.still = '',
     this.aspect = 1,
+    this.from = 0,
+    this.to = -1,
   });
 
   final String text;
@@ -48,7 +50,17 @@ class StoryOverlay {
   final String still;
   final double aspect;
 
+  /// Videos: the seconds (in the video) in which it is shown. [to] below 0 = until the end.
+  final double from;
+  final double to;
+
   bool get isImage => image.isNotEmpty;
+
+  /// Shown during the whole video.
+  bool get isAlways => from <= 0 && to < 0;
+
+  /// Is it on screen at [sec]?
+  bool visibleAt(double sec) => sec >= from - 0.001 && (to < 0 || sec <= to);
 
   StoryOverlay copyWith({
     String? text,
@@ -57,6 +69,8 @@ class StoryOverlay {
     double? scale,
     int? color,
     bool? pill,
+    double? from,
+    double? to,
   }) => StoryOverlay(
     text: text ?? this.text,
     dx: dx ?? this.dx,
@@ -68,6 +82,8 @@ class StoryOverlay {
     image: image,
     still: still,
     aspect: aspect,
+    from: from ?? this.from,
+    to: to ?? this.to,
   );
 
   /// Font size for a picture that is [canvasWidth] wide.
@@ -87,6 +103,8 @@ class StoryOverlay {
     if (isImage) 'i': image,
     if (isImage && still.isNotEmpty) 'g': still,
     if (isImage) 'a': double.parse(aspect.toStringAsFixed(3)),
+    if (from > 0) 'ts': double.parse(from.toStringAsFixed(2)),
+    if (to >= 0) 'te': double.parse(to.toStringAsFixed(2)),
   };
 
   static StoryOverlay? fromMap(Object? v) {
@@ -107,6 +125,8 @@ class StoryOverlay {
       image: ok ? img : '',
       still: ok && v['g'] is String ? v['g'] as String : '',
       aspect: d(v['a'], 1).clamp(0.2, 5.0),
+      from: d(v['ts'], 0).clamp(0.0, 36000.0),
+      to: v['te'] is num ? (v['te'] as num).toDouble().clamp(0.0, 36000.0) : -1,
     );
   }
 }

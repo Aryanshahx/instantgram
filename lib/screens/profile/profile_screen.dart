@@ -1,6 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../chat/chat_screen.dart';
@@ -26,6 +25,7 @@ import 'edit_profile_screen.dart';
 import '../settings/account_screens.dart' show toggleBlock;
 import '../settings/settings_screen.dart';
 import 'follow_list_screen.dart';
+import 'share_profile_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key, required this.uid, this.isTab = false});
@@ -116,11 +116,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _openSettings(AppUser me) => openScreen(context, SettingsScreen(me: me));
 
-  /// There are no web pages for profiles, so the share is a short invitation text.
+  /// Opens the share screen: QR code, link, username and a Share button.
   Future<void> _shareProfile(AppUser user) async {
-    final photo = user.photoUrl.isEmpty ? '' : '\n${resolveMediaUrl(user.photoUrl)}';
-    // ignore: deprecated_member_use
-    await Share.share('Follow @${user.username} on InstantGram$photo');
+    openScreen(context, ShareProfileScreen(user: user));
   }
 
   Future<void> _moreMenu(AppUser user) async {

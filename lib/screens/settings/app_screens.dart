@@ -6,6 +6,7 @@ import '../../core/a11y.dart';
 import '../../core/app_info.dart';
 import '../../core/l10n.dart';
 import '../../core/theme.dart';
+import '../../core/legal.dart';
 import '../../core/ui.dart';
 import '../../services/user_service.dart';
 import 'settings_widgets.dart';
@@ -221,12 +222,20 @@ class AboutScreen extends StatelessWidget {
         SettingsTile(
           icon: Icons.privacy_tip_outlined,
           title: context.tr('Privacy policy'),
-          onTap: () => openScreen(context, const PrivacyPolicyScreen()),
+          onTap: () => openLegal(
+            context,
+            kPrivacyUrl,
+            () => openScreen(context, const PrivacyPolicyScreen()),
+          ),
         ),
         SettingsTile(
           icon: Icons.gavel_rounded,
           title: context.tr('Terms of use'),
-          onTap: () => openScreen(context, const TermsScreen()),
+          onTap: () => openLegal(
+            context,
+            kTermsUrl,
+            () => openScreen(context, const TermsScreen()),
+          ),
         ),
       ],
     );
@@ -242,7 +251,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
     sections: const [
       (
         'What we keep',
-        'Your account details (name, username, email, date of birth, language), the photos, clips, moments, comments and messages you post, and simple counts such as likes and views.',
+        'Your account details (name, username, email, date of birth, country, language), the photos, clips, moments, comments and messages you post, and simple counts such as likes and views.',
       ),
       (
         'Why we keep it',

@@ -11,6 +11,9 @@ class RepostController extends ChangeNotifier {
 
   final Post post;
   bool reposted = false;
+
+  /// How many people reposted it (changes at once when you repost).
+  late int count = post.repostCount;
   bool _busy = false;
   bool _disposed = false;
 
@@ -29,12 +32,14 @@ class RepostController extends ChangeNotifier {
     _busy = true;
     final target = !reposted;
     reposted = target;
+    count = (count + (target ? 1 : -1)).clamp(0, 1 << 30);
     notifyListeners();
     try {
       await PostService.instance.setReposted(post, target);
       return null;
     } catch (e) {
       reposted = !target;
+      count = (count + (target ? -1 : 1)).clamp(0, 1 << 30);
       if (!_disposed) notifyListeners();
       return e;
     } finally {

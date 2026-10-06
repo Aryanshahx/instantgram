@@ -154,6 +154,8 @@ class _CommentsPanelState extends State<CommentsPanel> {
   final Set<String> _open = {};
 
   String get _myUid => UserService.instance.myUid;
+  int _pinnedNow = 0;
+
   bool get _iOwnPost => widget.post.authorId == _myUid;
 
   @override
@@ -317,6 +319,8 @@ class _CommentsPanelState extends State<CommentsPanel> {
       canEdit: mine,
       canDelete: mine || _iOwnPost,
       canReport: !mine,
+      canPin: _iOwnPost && !c.isReply,
+      pinned: c.pinned,
     );
     if (action == null || !mounted) return;
     switch (action) {
@@ -344,8 +348,28 @@ class _CommentsPanelState extends State<CommentsPanel> {
           _text.selection = TextSelection.collapsed(offset: c.text.length);
         });
         _focus.requestFocus();
+      case CommentAction.pin:
+        await _pin(c, true);
+      case CommentAction.unpin:
+        await _pin(c, false);
       case CommentAction.delete:
         await _delete(c);
+    }
+  }
+
+  Future<void> _pin(Comment c, bool pinned) async {
+    if (pinned && _pinnedNow >= kMaxPinnedComments) {
+      showToast(
+        context,
+        'You can pin up to $kMaxPinnedComments comments. Unpin one first.',
+      );
+      return;
+    }
+    try {
+      await PostService.instance.setCommentPinned(widget.post.id, c.id, pinned);
+      if (mounted) showToast(context, pinned ? 'Comment pinned.' : 'Comment unpinned.');
+    } catch (e) {
+      if (mounted) showToast(context, friendlyError(e));
     }
   }
 
@@ -398,6 +422,7 @@ class _CommentsPanelState extends State<CommentsPanel> {
                 );
               }
               if (!snap.hasData) return const CenteredLoader();
+              _pinnedNow = snap.data!.where((x) => x.pinned).length;
               final threads = buildThreads(snap.data!);
               if (threads.isEmpty) {
                 return const EmptyState(

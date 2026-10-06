@@ -1,12 +1,17 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/countries.dart';
 import '../../core/errors.dart';
+import '../../core/legal.dart';
 import '../../core/l10n.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/aurora_background.dart';
 import '../../widgets/brand_logo.dart';
+import '../settings/app_screens.dart';
+import 'country_picker.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -25,6 +30,10 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _obscure = true;
   DateTime? _birth;
   bool _birthError = false;
+  Country? _country;
+  bool _countryError = false;
+  bool _agree = false;
+  bool _agreeError = false;
 
   static String _fmt(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')} / ${d.month.toString().padLeft(2, '0')} / ${d.year}';
@@ -48,7 +57,103 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    // start with the country of the phone's region, the person can change it
+    _country = countryForCode(
+      WidgetsBinding.instance.platformDispatcher.locale.countryCode,
+    );
+  }
+
+  Future<void> _pickCountry() async {
+    final c = await showCountryPicker(context, selected: _country?.code);
+    if (c != null && mounted) {
+      setState(() {
+        _country = c;
+        _countryError = false;
+      });
+    }
+  }
+
+  Widget _agreeRow(BuildContext context) {
+    final link = TextStyle(
+      color: context.accentInk,
+      fontWeight: FontWeight.w800,
+      decoration: TextDecoration.underline,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Checkbox(
+              key: const ValueKey('agreeBox'),
+              value: _agree,
+              visualDensity: VisualDensity.compact,
+              onChanged: (v) => setState(() {
+                _agree = v ?? false;
+                if (_agree) _agreeError = false;
+              }),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text.rich(
+                  TextSpan(
+                    style: const TextStyle(fontSize: 13.5, height: 1.4),
+                    children: [
+                      TextSpan(text: '${context.tr('I accept the')} '),
+                      TextSpan(
+                        text: context.tr('Privacy policy'),
+                        style: link,
+                        recognizer: _privacyTap,
+                      ),
+                      TextSpan(text: ' ${context.tr('and')} '),
+                      TextSpan(
+                        text: context.tr('Terms of use'),
+                        style: link,
+                        recognizer: _termsTap,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (_agreeError)
+          Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Text(
+              context.tr(
+                'Please accept the Privacy policy and Terms of use to continue.',
+              ),
+              key: const ValueKey('agreeError'),
+              style: const TextStyle(color: AppTheme.coral, fontSize: 12.5),
+            ),
+          ),
+      ],
+    );
+  }
+
+  late final TapGestureRecognizer _privacyTap = TapGestureRecognizer()
+    ..onTap = () => openLegal(
+      context,
+      kPrivacyUrl,
+      () => openScreen(context, const PrivacyPolicyScreen()),
+    );
+  late final TapGestureRecognizer _termsTap = TapGestureRecognizer()
+    ..onTap = () => openLegal(
+      context,
+      kTermsUrl,
+      () => openScreen(context, const TermsScreen()),
+    );
+
+  @override
   void dispose() {
+    _privacyTap.dispose();
+    _termsTap.dispose();
     _email.dispose();
     _fullName.dispose();
     _username.dispose();
@@ -59,11 +164,13 @@ class _SignupScreenState extends State<SignupScreen> {
   Future<void> _signUp() async {
     final formOk = _formKey.currentState!.validate();
     final b = _birth;
-    if (b == null || !AuthService.isOldEnough(b, DateTime.now())) {
-      setState(() => _birthError = true);
-      return;
-    }
-    if (!formOk) return;
+    final birthBad = b == null || !AuthService.isOldEnough(b, DateTime.now());
+    setState(() {
+      _birthError = birthBad;
+      _countryError = _country == null;
+      _agreeError = !_agree;
+    });
+    if (birthBad || _country == null || !_agree || !formOk) return;
     setState(() => _loading = true);
     try {
       await AuthService.instance.signUp(
@@ -72,6 +179,7 @@ class _SignupScreenState extends State<SignupScreen> {
         username: _username.text,
         fullName: _fullName.text,
         birthDate: b,
+        country: _country!.code,
         language: Language.instance.value,
       );
       if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
@@ -117,35 +225,6 @@ class _SignupScreenState extends State<SignupScreen> {
                         style: TextStyle(color: context.muted, fontSize: 15),
                       ),
                       const SizedBox(height: 24),
-                      Text(
-                        context.tr('Choose your language'),
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      const SizedBox(height: 8),
-                      ValueListenableBuilder<String>(
-                        valueListenable: Language.instance,
-                        builder: (context, code, _) => Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final l in kLanguages.take(4))
-                              ChoiceChip(
-                                key: ValueKey('lang_${l.code}'),
-                                label: Text(l.name),
-                                selected: code == l.code,
-                                showCheckmark: false,
-                                selectedColor: AppTheme.volt,
-                                labelStyle: TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  color: code == l.code ? AppTheme.ink : null,
-                                ),
-                                onSelected: (_) => Language.instance.choose(
-                                  l.code,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
                       const SizedBox(height: 16),
                       TextFormField(
                         controller: _fullName,
@@ -230,7 +309,34 @@ class _SignupScreenState extends State<SignupScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 22),
+                      const SizedBox(height: 12),
+                      InkWell(
+                        key: const ValueKey('countryField'),
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: _pickCountry,
+                        child: InputDecorator(
+                          decoration: InputDecoration(
+                            prefixIcon: const Icon(Icons.public_rounded),
+                            suffixIcon: const Icon(
+                              Icons.arrow_drop_down_rounded,
+                            ),
+                            errorText: _countryError
+                                ? context.tr('Choose your country')
+                                : null,
+                          ),
+                          child: Text(
+                            _country == null
+                                ? context.tr('Country')
+                                : '${_country!.flag}  ${_country!.name}',
+                            style: TextStyle(
+                              color: _country == null ? context.muted : null,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      _agreeRow(context),
+                      const SizedBox(height: 14),
                       FilledButton(
                         onPressed: _loading ? null : _signUp,
                         child: _loading

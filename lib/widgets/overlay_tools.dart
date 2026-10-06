@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 
 import '../core/errors.dart';
 import '../core/l10n.dart';
@@ -219,10 +221,7 @@ class _StickerSheetState extends State<StickerSheet>
         Expanded(
           child: TabBarView(
             controller: _tabs,
-            children: [
-              if (withGiphy) _stickers(context),
-              _emoji(context),
-            ],
+            children: [if (withGiphy) _stickers(context), _emoji(context)],
           ),
         ),
       ],
@@ -334,7 +333,11 @@ class OverlayEditLayer extends StatefulWidget {
     required this.onTap,
     this.selected,
     this.onBackgroundTap,
+    this.position,
   });
+
+  /// Where a video is playing (seconds). Items that are not shown at that moment look faint.
+  final ValueListenable<double>? position;
 
   /// The item that is selected (frame and corner handle), if any.
   final int? selected;
@@ -353,58 +356,14 @@ class OverlayEditLayer extends StatefulWidget {
 class _OverlayEditLayerState extends State<OverlayEditLayer> {
   double _baseScale = 1;
 
-  /// The selected item: a frame around it and a round handle in the corner. Dragging the
-  /// handle makes it bigger or smaller.
-  Widget _selectedChip(List<StoryOverlay> list, int i, double w, double h) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(14),
-          child: DecoratedBox(
-            key: const ValueKey('selectedFrame'),
-            position: DecorationPosition.foreground,
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.white, width: 1.5),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(3),
-              child: StoryOverlayChip(overlay: list[i], canvasWidth: w),
-            ),
-          ),
-        ),
-        Positioned(
-          right: 0,
-          bottom: 0,
-          child: GestureDetector(
-            key: const ValueKey('resizeHandle'),
-            behavior: HitTestBehavior.opaque,
-            onScaleUpdate: (d) {
-              final o = widget.overlays[i];
-              final next = [...widget.overlays];
-              final factor =
-                  1 + (d.focalPointDelta.dx + d.focalPointDelta.dy) / (w * 0.45);
-              next[i] = o.copyWith(scale: (o.scale * factor).clamp(0.4, 4.0));
-              widget.onChanged(next);
-            },
-            child: Container(
-              width: 28,
-              height: 28,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-                boxShadow: [BoxShadow(blurRadius: 6, color: Colors.black38)],
-              ),
-              child: const Icon(
-                Icons.open_in_full_rounded,
-                size: 15,
-                color: Colors.black87,
-              ),
-            ),
-          ),
-        ),
-      ],
+  Widget _dim(Widget chip, StoryOverlay o) {
+    final pos = widget.position;
+    if (pos == null || o.isAlways) return chip;
+    return ValueListenableBuilder<double>(
+      valueListenable: pos,
+      builder: (_, p, child) =>
+          Opacity(opacity: o.visibleAt(p) ? 1 : 0.35, child: child),
+      child: chip,
     );
   }
 
@@ -444,8 +403,14 @@ class _OverlayEditLayerState extends State<OverlayEditLayer> {
                         final o = list[i];
                         final next = [...list];
                         next[i] = o.copyWith(
-                          dx: (o.dx + d.focalPointDelta.dx / w).clamp(0.02, 0.98),
-                          dy: (o.dy + d.focalPointDelta.dy / h).clamp(0.02, 0.98),
+                          dx: (o.dx + d.focalPointDelta.dx / w).clamp(
+                            0.02,
+                            0.98,
+                          ),
+                          dy: (o.dy + d.focalPointDelta.dy / h).clamp(
+                            0.02,
+                            0.98,
+                          ),
                           scale: d.pointerCount > 1
                               ? (_baseScale * d.scale).clamp(0.4, 4.0)
                               : o.scale,
@@ -453,8 +418,22 @@ class _OverlayEditLayerState extends State<OverlayEditLayer> {
                         widget.onChanged(next);
                       },
                       child: widget.selected == i
-                          ? _selectedChip(list, i, w, h)
-                          : StoryOverlayChip(overlay: list[i], canvasWidth: w),
+                          ? SelectedOverlayChip(
+                              overlay: list[i],
+                              canvasWidth: w,
+                              onScale: (v) {
+                                final next = [...widget.overlays];
+                                next[i] = widget.overlays[i].copyWith(scale: v);
+                                widget.onChanged(next);
+                              },
+                            )
+                          : _dim(
+                              StoryOverlayChip(
+                                overlay: list[i],
+                                canvasWidth: w,
+                              ),
+                              list[i],
+                            ),
                     ),
                   ),
                 ),
@@ -466,11 +445,177 @@ class _OverlayEditLayerState extends State<OverlayEditLayer> {
   }
 }
 
+/// The selected text or sticker: a frame around it and a round handle in the corner.
+/// Dragging the handle makes it bigger or smaller ([onScale] gets the new size factor).
+class SelectedOverlayChip extends StatelessWidget {
+  const SelectedOverlayChip({
+    super.key,
+    required this.overlay,
+    required this.canvasWidth,
+    required this.onScale,
+  });
+
+  final StoryOverlay overlay;
+  final double canvasWidth;
+  final ValueChanged<double> onScale;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child: DecoratedBox(
+            key: const ValueKey('selectedFrame'),
+            position: DecorationPosition.foreground,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.white, width: 1.5),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(3),
+              child: StoryOverlayChip(
+                overlay: overlay,
+                canvasWidth: canvasWidth,
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          right: 0,
+          bottom: 0,
+          child: GestureDetector(
+            key: const ValueKey('resizeHandle'),
+            behavior: HitTestBehavior.opaque,
+            onScaleUpdate: (d) {
+              final factor =
+                  1 +
+                  (d.focalPointDelta.dx + d.focalPointDelta.dy) /
+                      (canvasWidth * 0.45);
+              onScale((overlay.scale * factor).clamp(0.4, 4.0));
+            },
+            child: Container(
+              width: 28,
+              height: 28,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+                boxShadow: [BoxShadow(blurRadius: 6, color: Colors.black38)],
+              ),
+              child: const Icon(
+                Icons.open_in_full_rounded,
+                size: 15,
+                color: Colors.black87,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The bar under a picture while a text or sticker is selected: smaller / size slider /
+/// bigger, Edit (texts), Delete and Done.
+class OverlaySelectionBar extends StatelessWidget {
+  const OverlaySelectionBar({
+    super.key,
+    required this.overlay,
+    required this.onScale,
+    required this.onDelete,
+    required this.onDone,
+    this.onEdit,
+    this.dark = true,
+  });
+
+  final StoryOverlay overlay;
+  final ValueChanged<double> onScale;
+  final VoidCallback onDelete;
+  final VoidCallback onDone;
+
+  /// Null for stickers (they have no words to edit).
+  final VoidCallback? onEdit;
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    final o = overlay;
+    return Container(
+      key: const ValueKey('selectionBar'),
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: dark ? null : Colors.black54,
+        border: const Border(top: BorderSide(color: Colors.white12)),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            key: const ValueKey('sizeDown'),
+            tooltip: 'Smaller',
+            color: Colors.white,
+            icon: const Icon(Icons.remove_circle_outline_rounded),
+            onPressed: () => onScale((o.scale / 1.15).clamp(0.4, 4.0)),
+          ),
+          Expanded(
+            child: Slider(
+              key: const ValueKey('sizeSlider'),
+              value: o.scale.clamp(0.4, 4.0).toDouble(),
+              min: 0.4,
+              max: 4,
+              activeColor: AppTheme.volt,
+              onChanged: onScale,
+            ),
+          ),
+          IconButton(
+            key: const ValueKey('sizeUp'),
+            tooltip: 'Bigger',
+            color: Colors.white,
+            icon: const Icon(Icons.add_circle_outline_rounded),
+            onPressed: () => onScale((o.scale * 1.15).clamp(0.4, 4.0)),
+          ),
+          if (onEdit != null)
+            IconButton(
+              key: const ValueKey('selEdit'),
+              tooltip: 'Edit',
+              color: Colors.white,
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: onEdit,
+            ),
+          IconButton(
+            key: const ValueKey('selDelete'),
+            tooltip: 'Delete',
+            color: AppTheme.coral,
+            icon: const Icon(Icons.delete_outline_rounded),
+            onPressed: onDelete,
+          ),
+          IconButton(
+            key: const ValueKey('selDone'),
+            tooltip: 'Done',
+            color: Colors.white,
+            icon: const Icon(Icons.check_rounded),
+            onPressed: onDone,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// A video (or any picture) with its colour look and its texts and stickers on top.
+/// Pass the video's [player] so that texts and stickers that only belong to a part of the
+/// clip appear and disappear with it.
 class FinishedMedia extends StatelessWidget {
-  const FinishedMedia({super.key, required this.finish, required this.child});
+  const FinishedMedia({
+    super.key,
+    required this.finish,
+    required this.child,
+    this.player,
+  });
   final MediaFinish? finish;
   final Widget child;
+  final ValueListenable<VideoPlayerValue>? player;
 
   @override
   Widget build(BuildContext context) {
@@ -480,48 +625,112 @@ class FinishedMedia extends StatelessWidget {
     final colored = look == null || look.isEmpty
         ? child
         : ColorFiltered(colorFilter: lookFilter(look), child: child);
-    return OverlayShow(overlays: f.overlays, child: colored);
+    return OverlayShow(overlays: f.overlays, player: player, child: colored);
   }
 }
 
+/// Which of [overlays] are on screen at [sec].
+List<bool> overlayMask(List<StoryOverlay> overlays, double sec) => [
+  for (final o in overlays) o.visibleAt(sec),
+];
+
 /// Texts and stickers drawn over a photo or clip when people look at it (no touch handling).
-class OverlayShow extends StatelessWidget {
-  const OverlayShow({super.key, required this.overlays, required this.child});
+/// With a [player], items with a start and end time follow the video's position.
+class OverlayShow extends StatefulWidget {
+  const OverlayShow({
+    super.key,
+    required this.overlays,
+    required this.child,
+    this.player,
+  });
   final List<StoryOverlay> overlays;
   final Widget child;
+  final ValueListenable<VideoPlayerValue>? player;
+
+  @override
+  State<OverlayShow> createState() => _OverlayShowState();
+}
+
+class _OverlayShowState extends State<OverlayShow> {
+  late List<bool> _mask = _compute();
+
+  bool get _timed => widget.overlays.any((o) => !o.isAlways);
+
+  List<bool> _compute() {
+    final v = widget.player?.value;
+    final sec = v == null ? 0.0 : v.position.inMilliseconds / 1000;
+    return overlayMask(widget.overlays, sec);
+  }
+
+  void _onPlayer() {
+    final next = _compute();
+    if (!listEquals(next, _mask)) setState(() => _mask = next);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (_timed) widget.player?.addListener(_onPlayer);
+  }
+
+  @override
+  void didUpdateWidget(OverlayShow old) {
+    super.didUpdateWidget(old);
+    if (old.player != widget.player || old.overlays != widget.overlays) {
+      old.player?.removeListener(_onPlayer);
+      if (_timed) widget.player?.addListener(_onPlayer);
+      _mask = _compute();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.player?.removeListener(_onPlayer);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (overlays.isEmpty) return child;
+    final overlays = widget.overlays;
+    if (overlays.isEmpty) return widget.child;
     return Stack(
       fit: StackFit.passthrough,
       children: [
-        child,
+        widget.child,
         Positioned.fill(
           child: IgnorePointer(
-            child: LayoutBuilder(
-              builder: (context, box) {
-                final w = box.maxWidth;
-                final h = box.maxHeight;
-                return ClipRect(
-                  child: Stack(
-                    children: [
-                      for (final o in overlays)
-                        Positioned(
-                          left: o.dx * w,
-                          top: o.dy * h,
-                          child: FractionalTranslation(
-                            translation: const Offset(-0.5, -0.5),
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(maxWidth: w * 0.92),
-                              child: StoryOverlayChip(overlay: o, canvasWidth: w),
+            child: RepaintBoundary(
+              child: LayoutBuilder(
+                builder: (context, box) {
+                  final w = box.maxWidth;
+                  final h = box.maxHeight;
+                  return ClipRect(
+                    child: Stack(
+                      children: [
+                        for (var i = 0; i < overlays.length; i++)
+                          if (i < _mask.length && _mask[i])
+                            Positioned(
+                              key: ValueKey('shown$i'),
+                              left: overlays[i].dx * w,
+                              top: overlays[i].dy * h,
+                              child: FractionalTranslation(
+                                translation: const Offset(-0.5, -0.5),
+                                child: ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    maxWidth: w * 0.92,
+                                  ),
+                                  child: StoryOverlayChip(
+                                    overlay: overlays[i],
+                                    canvasWidth: w,
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                    ],
-                  ),
-                );
-              },
+                      ],
+                    ),
+                  );
+                },
+              ),
             ),
           ),
         ),

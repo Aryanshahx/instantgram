@@ -308,6 +308,7 @@ class _ReelVideoState extends State<ReelVideo> {
                   height: c.value.size.height,
                   child: FinishedMedia(
                     finish: widget.post.finish,
+                    player: c,
                     child: VideoPlayer(c),
                   ),
                 ),

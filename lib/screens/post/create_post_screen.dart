@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:video_compress/video_compress.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../core/limits.dart';
 import '../../core/config.dart';
 import '../../core/errors.dart';
 import '../../core/l10n.dart';
@@ -333,14 +334,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     try {
       final bytes = await File(path).length();
       final info = await VideoCompress.getMediaInfo(path);
-      final seconds = ((info.duration ?? 0) / 1000).ceil();
-      if (seconds > kMaxVideoSeconds + 1) {
-        if (mounted) {
-          showToast(
-            context,
-            'Videos can be up to $kMaxVideoSeconds seconds. This one is $seconds s.',
-          );
-        }
+      final ms = (info.duration ?? 0).round();
+      final seconds = (ms / 1000).ceil();
+      if (isVideoTooLong(ms)) {
+        if (mounted) showToast(context, videoTooLongMessage(ms));
         return null;
       }
       var w = info.width ?? 0;
@@ -928,7 +925,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               contrast: l.contrast,
               saturation: l.saturation,
             );
-      return await finishPhoto(t, edits, f.overlays);
+      // the cover is the first picture: only what is on screen then is burned in
+      return await finishPhoto(
+        t,
+        edits,
+        [for (final o in f.overlays) if (o.visibleAt(0)) o],
+      );
     } catch (_) {
       return t;
     }
@@ -1218,7 +1220,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           child: SizedBox(
             width: c.value.size.width,
             height: c.value.size.height,
-            child: FinishedMedia(finish: it.finish, child: VideoPlayer(c)),
+            child: FinishedMedia(
+              finish: it.finish,
+              player: c,
+              child: VideoPlayer(c),
+            ),
           ),
         ),
       );

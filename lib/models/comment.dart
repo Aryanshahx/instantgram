@@ -2,6 +2,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../core/media_url.dart';
 
+/// How many comments the owner of a post can pin.
+const int kMaxPinnedComments = 3;
+
 class Comment {
   const Comment({
     required this.id,
@@ -19,6 +22,7 @@ class Comment {
     this.clipThumbRef = '',
     this.likeCount = 0,
     this.edited = false,
+    this.pinned = false,
   });
 
   final String id;
@@ -47,6 +51,9 @@ class Comment {
   final int likeCount;
   final bool edited;
 
+  /// Pinned by the owner of the post: shown first (at most [kMaxPinnedComments] per post).
+  final bool pinned;
+
   bool get isReply => parentId.isNotEmpty;
   bool get hasGif => gifUrl.isNotEmpty;
   bool get hasImage => imageRef.isNotEmpty;
@@ -63,7 +70,12 @@ class Comment {
     return '';
   }
 
-  Comment copyWith({int? likeCount, String? text, bool? edited}) => Comment(
+  Comment copyWith({
+    int? likeCount,
+    String? text,
+    bool? edited,
+    bool? pinned,
+  }) => Comment(
     id: id,
     authorId: authorId,
     authorUsername: authorUsername,
@@ -79,6 +91,7 @@ class Comment {
     clipThumbRef: clipThumbRef,
     likeCount: likeCount ?? this.likeCount,
     edited: edited ?? this.edited,
+    pinned: pinned ?? this.pinned,
   );
 
   factory Comment.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
@@ -103,6 +116,7 @@ class Comment {
       clipThumbRef: s(m['clipThumb']),
       likeCount: n is num ? n.toInt().clamp(0, 1 << 30) : 0,
       edited: m['edited'] == true,
+      pinned: m['pinned'] == true,
     );
   }
 }
@@ -126,7 +140,10 @@ List<CommentThread> buildThreads(List<Comment> all) {
       (byParent[c.parentId] ??= []).add(c);
     }
   }
-  roots.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  roots.sort((a, b) {
+    if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+    return b.createdAt.compareTo(a.createdAt);
+  });
   return [
     for (final r in roots)
       CommentThread(

@@ -10,7 +10,16 @@ import 'avatar.dart';
 import 'like_button.dart';
 
 /// What the long-press menu of a comment can do.
-enum CommentAction { reply, replyWithClip, share, report, edit, delete }
+enum CommentAction {
+  reply,
+  replyWithClip,
+  share,
+  report,
+  edit,
+  pin,
+  unpin,
+  delete,
+}
 
 /// The long-press menu: Reply, Reply with a clip, Share and Report for everybody; Edit for
 /// the author; Delete for the author and for the owner of the post.
@@ -19,12 +28,19 @@ Future<CommentAction?> showCommentMenu(
   required bool canEdit,
   required bool canDelete,
   required bool canReport,
+  bool canPin = false,
+  bool pinned = false,
 }) {
   return showModalBottomSheet<CommentAction>(
     context: context,
     showDragHandle: true,
     builder: (ctx) {
-      Widget item(CommentAction a, IconData icon, String label, {bool red = false}) {
+      Widget item(
+        CommentAction a,
+        IconData icon,
+        String label, {
+        bool red = false,
+      }) {
         return ListTile(
           key: ValueKey('commentMenu_${a.name}'),
           leading: Icon(icon, color: red ? AppTheme.coral : null),
@@ -39,28 +55,38 @@ Future<CommentAction?> showCommentMenu(
         );
       }
 
+      // scrolls on a short screen (there can be seven rows now)
       return SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            item(CommentAction.reply, Icons.reply_rounded, 'Reply'),
-            item(
-              CommentAction.replyWithClip,
-              Icons.smart_display_outlined,
-              'Reply with a clip',
-            ),
-            item(CommentAction.share, Icons.ios_share_rounded, 'Share'),
-            if (canEdit) item(CommentAction.edit, Icons.edit_outlined, 'Edit'),
-            if (canReport)
-              item(CommentAction.report, Icons.flag_outlined, 'Report'),
-            if (canDelete)
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              item(CommentAction.reply, Icons.reply_rounded, 'Reply'),
               item(
-                CommentAction.delete,
-                Icons.delete_outline_rounded,
-                'Delete',
-                red: true,
+                CommentAction.replyWithClip,
+                Icons.smart_display_outlined,
+                'Reply with a clip',
               ),
-          ],
+              item(CommentAction.share, Icons.ios_share_rounded, 'Share'),
+              if (canPin)
+                item(
+                  pinned ? CommentAction.unpin : CommentAction.pin,
+                  pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                  pinned ? 'Unpin' : 'Pin',
+                ),
+              if (canEdit)
+                item(CommentAction.edit, Icons.edit_outlined, 'Edit'),
+              if (canReport)
+                item(CommentAction.report, Icons.flag_outlined, 'Report'),
+              if (canDelete)
+                item(
+                  CommentAction.delete,
+                  Icons.delete_outline_rounded,
+                  'Delete',
+                  red: true,
+                ),
+            ],
+          ),
         ),
       );
     },
@@ -118,6 +144,26 @@ class CommentTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (c.pinned)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 3),
+                      child: Row(
+                        key: const ValueKey('pinnedMark'),
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.push_pin, size: 12, color: context.muted),
+                          const SizedBox(width: 4),
+                          Text(
+                            context.tr('Pinned'),
+                            style: TextStyle(
+                              color: context.muted,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   Wrap(
                     crossAxisAlignment: WrapCrossAlignment.center,
                     spacing: 8,
@@ -145,7 +191,8 @@ class CommentTile extends StatelessWidget {
                         ),
                     ],
                   ),
-                  if (c.text.isNotEmpty || (c.isReply && c.replyToUsername.isNotEmpty))
+                  if (c.text.isNotEmpty ||
+                      (c.isReply && c.replyToUsername.isNotEmpty))
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text.rich(
@@ -303,11 +350,12 @@ class _CommentLikeState extends State<CommentLike> {
 
   Future<void> _load() async {
     try {
-      final v = await (widget.loadLiked ??
-          () => PostService.instance.isCommentLiked(
-            widget.postId,
-            widget.comment.id,
-          ))();
+      final v =
+          await (widget.loadLiked ??
+              () => PostService.instance.isCommentLiked(
+                widget.postId,
+                widget.comment.id,
+              ))();
       if (mounted) setState(() => _liked = v);
     } catch (_) {}
   }

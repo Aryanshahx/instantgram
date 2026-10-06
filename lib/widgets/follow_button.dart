@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/errors.dart';
+import '../core/l10n.dart';
 import '../core/ui.dart';
 import '../services/safety_service.dart';
 import '../services/user_service.dart';
@@ -109,28 +110,47 @@ class _FollowButtonState extends State<FollowButton> {
     }
     final following = _following ?? false;
     final size = widget.compact
-        ? const Size(96, 34)
+        ? const Size(88, 30)
         : const Size.fromHeight(40);
+    // in the follower / following lists the words are a little smaller
+    final small = widget.compact
+        ? const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)
+        : null;
+    final pad = widget.compact
+        ? const EdgeInsets.symmetric(horizontal: 10)
+        : null;
 
     if (following) {
       return OutlinedButton(
-        style: OutlinedButton.styleFrom(minimumSize: size),
+        style: OutlinedButton.styleFrom(
+          minimumSize: size,
+          textStyle: small,
+          padding: pad,
+        ),
         onPressed: _toggle,
-        child: const Text('Following'),
+        child: Text(context.tr('Following')),
       );
     }
     if (_private && _requested) {
       return OutlinedButton(
         key: const ValueKey('requestedButton'),
-        style: OutlinedButton.styleFrom(minimumSize: size),
+        style: OutlinedButton.styleFrom(
+          minimumSize: size,
+          textStyle: small,
+          padding: pad,
+        ),
         onPressed: _busy ? null : _toggle,
         child: const Text('Requested'),
       );
     }
     return FilledButton(
-      style: FilledButton.styleFrom(minimumSize: size),
+      style: FilledButton.styleFrom(
+        minimumSize: size,
+        textStyle: small,
+        padding: pad,
+      ),
       onPressed: _following == null ? null : _toggle,
-      child: Text(_private ? 'Request' : 'Follow'),
+      child: Text(context.tr(_private ? 'Request' : 'Follow')),
     );
   }
 }

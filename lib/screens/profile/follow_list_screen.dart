@@ -93,7 +93,7 @@ class _FollowListScreenState extends State<FollowListScreen> {
                     ),
                     subtitle: u.fullName.isEmpty ? null : Text(u.fullName),
                     trailing: SizedBox(
-                      width: 104,
+                      width: 92,
                       child: FollowButton(uid: u.uid, compact: true),
                     ),
                     onTap: () => openScreen(context, ProfileScreen(uid: u.uid)),

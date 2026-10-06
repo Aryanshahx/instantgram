@@ -390,6 +390,7 @@ class _InlineVideoLayerState extends State<InlineVideoLayer>
                     finish: widget.videoUrl == null
                         ? widget.post.finish
                         : widget.finish,
+                    player: c,
                     child: VideoPlayer(c),
                   ),
                 ),

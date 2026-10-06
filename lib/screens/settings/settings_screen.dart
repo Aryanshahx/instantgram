@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/l10n.dart';
 import '../../core/theme.dart';
+import '../../core/legal.dart';
 import '../../core/ui.dart';
 import '../../models/app_user.dart';
 import '../../services/app_prefs.dart';
@@ -144,14 +145,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Icons.privacy_tip_outlined,
           'Privacy policy',
           'data privacy',
-          (c, _) => openScreen(c, const PrivacyPolicyScreen()),
+          (c, _) => openLegal(
+            c,
+            kPrivacyUrl,
+            () => openScreen(c, const PrivacyPolicyScreen()),
+          ),
         ),
         _Item(
           'terms',
           Icons.gavel_rounded,
           'Terms of use',
           'rules terms conditions',
-          (c, _) => openScreen(c, const TermsScreen()),
+          (c, _) => openLegal(
+            c,
+            kTermsUrl,
+            () => openScreen(c, const TermsScreen()),
+          ),
         ),
       ],
     ),
