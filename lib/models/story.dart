@@ -21,6 +21,9 @@ class StoryOverlay {
     this.color = 0xFFFFFFFF,
     this.pill = false,
     this.emoji = false,
+    this.image = '',
+    this.still = '',
+    this.aspect = 1,
   });
 
   final String text;
@@ -39,6 +42,14 @@ class StoryOverlay {
   /// A sticker (large emoji) rather than text.
   final bool emoji;
 
+  /// A picture sticker (Giphy): the animated link, a still frame for photos that are baked,
+  /// and width / height.
+  final String image;
+  final String still;
+  final double aspect;
+
+  bool get isImage => image.isNotEmpty;
+
   StoryOverlay copyWith({
     String? text,
     double? dx,
@@ -54,11 +65,14 @@ class StoryOverlay {
     color: color ?? this.color,
     pill: pill ?? this.pill,
     emoji: emoji,
+    image: image,
+    still: still,
+    aspect: aspect,
   );
 
   /// Font size for a picture that is [canvasWidth] wide.
   double fontSize(double canvasWidth) =>
-      canvasWidth * (emoji ? 0.2 : 0.075) * scale;
+      canvasWidth * (isImage ? 0.36 : (emoji ? 0.2 : 0.075)) * scale;
 
   Color get textColor => Color(color);
 
@@ -70,12 +84,17 @@ class StoryOverlay {
     'c': color,
     'p': pill,
     'e': emoji,
+    if (isImage) 'i': image,
+    if (isImage && still.isNotEmpty) 'g': still,
+    if (isImage) 'a': double.parse(aspect.toStringAsFixed(3)),
   };
 
   static StoryOverlay? fromMap(Object? v) {
     if (v is! Map) return null;
     final t = v['t'];
     if (t is! String || t.isEmpty) return null;
+    final img = v['i'] is String ? v['i'] as String : '';
+    final ok = img.startsWith('https://');
     double d(Object? x, double fallback) => x is num ? x.toDouble() : fallback;
     return StoryOverlay(
       text: t,
@@ -85,6 +104,9 @@ class StoryOverlay {
       color: v['c'] is num ? (v['c'] as num).toInt() : 0xFFFFFFFF,
       pill: v['p'] == true,
       emoji: v['e'] == true,
+      image: ok ? img : '',
+      still: ok && v['g'] is String ? v['g'] as String : '',
+      aspect: d(v['a'], 1).clamp(0.2, 5.0),
     );
   }
 }

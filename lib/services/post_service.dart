@@ -411,11 +411,23 @@ class PostService {
       .doc(postId)
       .collection('comments')
       .orderBy('createdAt', descending: true)
-      .limit(100)
+      .limit(200)
       .snapshots()
       .map((s) => s.docs.map(Comment.fromDoc).toList());
 
-  Future<void> addComment(String postId, String text) async {
+  /// A comment, a reply ([parentId] is the top-level comment), or one with a GIF, a photo
+  /// (`m:` reference) or one of the author's own clips.
+  Future<void> addComment(
+    String postId,
+    String text, {
+    String parentId = '',
+    String replyToUsername = '',
+    String gifUrl = '',
+    double gifAspect = 1,
+    String imageRef = '',
+    String clipId = '',
+    String clipThumbRef = '',
+  }) async {
     final me = await _me();
     final postRef = _posts.doc(postId);
     final batch = _db.batch();
@@ -425,9 +437,26 @@ class PostService {
       'authorPhotoUrl': me.photoUrl,
       'text': text.trim(),
       'createdAt': FieldValue.serverTimestamp(),
+      'likeCount': 0,
+      if (parentId.isNotEmpty) 'parentId': parentId,
+      if (parentId.isNotEmpty && replyToUsername.isNotEmpty)
+        'replyToUsername': replyToUsername,
+      if (gifUrl.isNotEmpty) 'gifUrl': gifUrl,
+      if (gifUrl.isNotEmpty) 'gifAspect': gifAspect,
+      if (imageRef.isNotEmpty) 'imageUrl': imageRef,
+      if (clipId.isNotEmpty) 'clipId': clipId,
+      if (clipThumbRef.isNotEmpty) 'clipThumb': clipThumbRef,
     });
     batch.update(postRef, {'commentCount': FieldValue.increment(1)});
     await batch.commit();
+  }
+
+  Future<void> editComment(String postId, String commentId, String text) {
+    return _posts.doc(postId).collection('comments').doc(commentId).update({
+      'text': text.trim(),
+      'edited': true,
+      'editedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   Future<void> deleteComment(String postId, String commentId) async {
@@ -436,6 +465,34 @@ class PostService {
     batch.delete(postRef.collection('comments').doc(commentId));
     batch.update(postRef, {'commentCount': FieldValue.increment(-1)});
     await batch.commit();
+  }
+
+  CollectionReference<Map<String, dynamic>> _commentLikes(
+    String postId,
+    String commentId,
+  ) => _posts.doc(postId).collection('comments').doc(commentId).collection('likes');
+
+  Future<bool> isCommentLiked(String postId, String commentId) async =>
+      (await _commentLikes(postId, commentId).doc(_uid).get()).exists;
+
+  Future<void> setCommentLike(String postId, String commentId, bool like) async {
+    final ref = _posts.doc(postId).collection('comments').doc(commentId);
+    final likeRef = ref.collection('likes').doc(_uid);
+    final batch = _db.batch();
+    if (like) {
+      batch.set(likeRef, {'createdAt': FieldValue.serverTimestamp()});
+      batch.update(ref, {'likeCount': FieldValue.increment(1)});
+    } else {
+      batch.delete(likeRef);
+      batch.update(ref, {'likeCount': FieldValue.increment(-1)});
+    }
+    await batch.commit();
+  }
+
+  /// The signed-in user's own clips, newest first (for "Reply with a clip").
+  Future<List<Post>> myClips({int limit = 40}) async {
+    final snap = await userPostsQuery(_uid).limit(limit).get();
+    return snap.docs.map(Post.fromDoc).where((p) => p.isClip).toList();
   }
 }
 

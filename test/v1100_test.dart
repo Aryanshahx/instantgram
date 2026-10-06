@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:instantgram/widgets/overlay_tools.dart' show debugStickerClient;
 import 'package:instantgram/core/app_events.dart';
 import 'package:instantgram/core/errors.dart';
 import 'package:instantgram/core/hashtags.dart';
@@ -125,6 +126,7 @@ ChatMessage _msg(
 );
 
 void main() {
+  setUp(() => debugStickerClient = GiphyClient(key: ''));
   group('hashtags and search', () {
     test('hashtags are found once, lowercase', () {
       expect(extractHashtags('Hi #Flutter #dart_2 #flutter and #'), [

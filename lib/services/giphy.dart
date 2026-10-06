@@ -11,6 +11,7 @@ class GifItem {
     required this.previewUrl,
     required this.width,
     required this.height,
+    this.stillUrl = '',
   });
 
   final String id;
@@ -22,6 +23,9 @@ class GifItem {
   final String previewUrl;
   final int width;
   final int height;
+
+  /// One frame (used when a sticker is baked into a photo).
+  final String stillUrl;
 
   double get aspect => (width > 0 && height > 0) ? width / height : 1;
 
@@ -41,6 +45,7 @@ class GifItem {
     }
 
     final main = pick(['fixed_width', 'downsized', 'original']);
+    final still = pick(['fixed_width_still', 'downsized_still']);
     if (main == null) return null;
     final small = pick(['fixed_width_small', 'fixed_width']) ?? main;
     int n(Object? v) => int.tryParse('${v ?? ''}') ?? 0;
@@ -50,13 +55,14 @@ class GifItem {
       previewUrl: small['url'] as String,
       width: n(main['width']),
       height: n(main['height']),
+      stillUrl: still == null ? '' : still['url'] as String,
     );
   }
 }
 
 /// Giphy search (https://developers.giphy.com/docs/api/endpoint).
 class GiphyClient {
-  GiphyClient({Dio? dio, String? key})
+  GiphyClient({Dio? dio, String? key, this.stickers = false})
     : _dio =
           dio ?? Dio(BaseOptions(connectTimeout: const Duration(seconds: 12))),
       _key = key ?? kGiphyKey;
@@ -64,7 +70,11 @@ class GiphyClient {
   final Dio _dio;
   final String _key;
 
-  static const _base = 'https://api.giphy.com/v1/gifs';
+  /// Transparent stickers instead of GIFs.
+  final bool stickers;
+
+  String get _base =>
+      'https://api.giphy.com/v1/${stickers ? 'stickers' : 'gifs'}';
 
   bool get configured => _key.trim().isNotEmpty;
 
@@ -88,7 +98,7 @@ class GiphyClient {
           ...params,
           'api_key': _key.trim(),
           'rating': 'g',
-          'bundle': 'messaging_non_clips',
+          if (!stickers) 'bundle': 'messaging_non_clips',
         },
       );
       final data = r.data;

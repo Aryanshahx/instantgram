@@ -92,11 +92,24 @@ service cloud.firestore {
       match /comments/{commentId} {
         allow read: if signedIn();
         allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
+        // the author may edit the words; everybody may change the like counter
+        allow update: if signedIn() && (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likeCount']) ||
+          (resource.data.authorId == request.auth.uid &&
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['text', 'edited', 'editedAt']))
+        );
         // comment author OR the post author can delete
         allow delete: if signedIn() && (
           resource.data.authorId == request.auth.uid ||
           get(/databases/$(database)/documents/posts/$(postId)).data.authorId == request.auth.uid
         );
+
+        // who liked the comment
+        match /likes/{likerId} {
+          allow read: if signedIn();
+          allow create, delete: if signedIn() && likerId == request.auth.uid;
+        }
       }
     }
 

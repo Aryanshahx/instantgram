@@ -61,7 +61,7 @@ class HeartButton extends StatelessWidget {
   const HeartButton({
     super.key,
     required this.controller,
-    this.size = 28,
+    this.size = 24,
     this.onError,
     this.showCount = true,
   });
@@ -86,12 +86,12 @@ class HeartButton extends StatelessWidget {
             if (err != null) onError?.call(err);
           },
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 AnimatedScale(
-                  scale: liked ? 1.18 : 1,
+                  scale: liked ? 1.14 : 1,
                   duration: const Duration(milliseconds: 220),
                   curve: Curves.easeOutBack,
                   child: Icon(
@@ -103,12 +103,12 @@ class HeartButton extends StatelessWidget {
                   ),
                 ),
                 if (showCount) ...[
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 5),
                   Text(
                     '${controller.count}',
                     style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
                     ),
                   ),
                 ],

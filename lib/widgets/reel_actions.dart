@@ -12,14 +12,22 @@ import '../services/user_service.dart';
 const String kReportEmail = 'techlabs.hyper@gmail.com';
 
 /// The email that opens when someone reports a clip.
-Uri reportUri(Post post, {String reason = '', String details = ''}) {
-  final kind = post.isClip ? 'clip' : 'post';
+Uri reportUri(
+  Post post, {
+  String reason = '',
+  String details = '',
+  String about = '',
+}) {
+  final kind = about.isNotEmpty
+      ? 'comment'
+      : (post.isClip ? 'clip' : 'post');
   final subject = 'Report: $kind ${post.id}${reason.isEmpty ? '' : ' ($reason)'}';
   final body =
       'I want to report this $kind.\n\n'
       '${reason.isEmpty ? '' : 'Reason: $reason\n'}'
       'What is wrong:\n${details.trim().isEmpty ? '(please write here)' : details.trim()}\n\n'
       '---\n'
+      '${about.isEmpty ? '' : 'Comment: $about\n'}'
       'Post id: ${post.id}\n'
       'Posted by: @${post.authorUsername} (${post.authorId})\n'
       'Link: ${post.isVideo ? post.videoUrl : post.imageUrl}\n';
@@ -42,7 +50,11 @@ const List<String> kReportReasons = [
 
 /// Report a clip: pick a reason, write what is wrong, then the email to the team opens with
 /// the text already in it.
-Future<void> showReportSheet(BuildContext context, Post post) async {
+Future<void> showReportSheet(
+  BuildContext context,
+  Post post, {
+  String about = '',
+}) async {
   final result = await showModalBottomSheet<({String reason, String text})>(
     context: context,
     isScrollControlled: true,
@@ -53,7 +65,12 @@ Future<void> showReportSheet(BuildContext context, Post post) async {
   var opened = false;
   try {
     opened = await launchUrl(
-      reportUri(post, reason: result.reason, details: result.text),
+      reportUri(
+        post,
+        reason: result.reason,
+        details: result.text,
+        about: about,
+      ),
     );
   } catch (_) {
     opened = false;
@@ -229,18 +246,18 @@ class _ReelFollowPillState extends State<ReelFollowPill> {
       behavior: HitTestBehavior.opaque,
       onTap: _toggle,
       child: Container(
-        width: 78,
-        height: 30,
+        width: 76,
+        height: 28,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: following ? Colors.black38 : AppTheme.volt,
-          borderRadius: BorderRadius.circular(15),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(color: following ? Colors.white70 : AppTheme.volt),
         ),
         child: Text(
-          following ? 'Following' : 'Follow',
+          context.tr(following ? 'Following' : 'Follow'),
           style: TextStyle(
-            fontSize: 12.5,
+            fontSize: 12,
             fontWeight: FontWeight.w800,
             color: following ? Colors.white : AppTheme.ink,
           ),
@@ -261,7 +278,7 @@ class ReelIconButton extends StatelessWidget {
     required this.onTap,
     this.label,
     this.color = Colors.white,
-    this.size = 32,
+    this.size = 25,
     this.pop = false,
   });
 
@@ -282,15 +299,15 @@ class ReelIconButton extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: SizedBox(
-        width: 60,
+        width: 54,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             SizedBox(
-              height: 46,
+              height: 36,
               child: Center(
                 child: AnimatedScale(
-                  scale: pop ? 1.2 : 1,
+                  scale: pop ? 1.14 : 1,
                   duration: const Duration(milliseconds: 200),
                   curve: Curves.easeOutBack,
                   child: Icon(
@@ -307,8 +324,8 @@ class ReelIconButton extends StatelessWidget {
                 context.tr(label!),
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
                   shadows: kReelShadow,
                 ),
               ),

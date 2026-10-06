@@ -284,14 +284,55 @@ async function handleDelete(request, env, uid, store) {
 // ------------------------------------------------------- Epidemic Sound (music)
 const EPIDEMIC_BASE = "https://partner-content-api.epidemicsound.com";
 
-async function epidemic(env, uid, path) {
-  return fetch(EPIDEMIC_BASE + path, {
-    headers: {
-      authorization: `Bearer ${env.EPIDEMIC_API_KEY}`,
-      "x-partner-user-id": uid,
-      accept: "application/json",
-    },
-  });
+async function epidemic(env, uid, path, withUser = true) {
+  const headers = {
+    authorization: `Bearer ${env.EPIDEMIC_API_KEY}`,
+    accept: "application/json",
+  };
+  if (withUser && uid) headers["x-partner-user-id"] = uid;
+  return fetch(EPIDEMIC_BASE + path, { headers });
+}
+
+/**
+ * Asks Epidemic Sound. A 400 means "something in the request is not accepted", so the
+ * request is tried again in plainer forms (fewer parameters, then without the end-user header)
+ * before giving up. Returns the first answer that is not a 400, or the last 400.
+ */
+export async function epidemicTry(env, uid, paths) {
+  let last = null;
+  for (const path of paths) {
+    for (const withUser of [true, false]) {
+      const res = await epidemic(env, uid, path, withUser);
+      if (res.status !== 400) return res;
+      last = res;
+      console.error(`epidemic 400 for ${path} (user header ${withUser}): ${await reason(res)}`);
+    }
+  }
+  return last;
+}
+
+/** What Epidemic Sound wrote in its error answer (a short text), or "". */
+export async function reason(res) {
+  try {
+    const text = (await res.clone().text()).trim();
+    if (!text) return "";
+    try {
+      const j = JSON.parse(text);
+      const extra = Array.isArray(j.errors)
+        ? j.errors.map((e) => `${e.key}: ${(e.messages || []).join(" ")}`).join("; ")
+        : "";
+      return [j.message, extra].filter(Boolean).join(" - ").slice(0, 200);
+    } catch {
+      return text.slice(0, 200);
+    }
+  } catch {
+    return "";
+  }
+}
+
+async function epidemicFail(res) {
+  const why = await reason(res);
+  return fail(502, `Epidemic Sound answered ${res.status}${why ? `: ${why}` : "."}`);
 }
 
 /** Keeps only what the app shows. */
@@ -316,12 +357,13 @@ async function handleMusic(request, env, uid) {
     const term = String(body.term || "").slice(0, 80);
     const limit = Math.min(Math.max(parseInt(body.limit, 10) || 30, 1), 60);
     const offset = Math.max(parseInt(body.offset, 10) || 0, 0);
-    const q = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     // Epidemic Sound answers 400 to a search without a term: use a default one
-    q.set("term", term.trim() || "popular");
-    const res = await epidemic(env, uid, `/v0/tracks/search?${q}`);
+    const word = term.trim() || "popular";
+    const full = new URLSearchParams({ term: word, limit: String(limit), offset: String(offset) });
+    const plain = new URLSearchParams({ term: word });
+    const res = await epidemicTry(env, uid, [`/v0/tracks/search?${full}`, `/v0/tracks/search?${plain}`]);
     if (res.status === 401 || res.status === 403) return fail(502, "Epidemic Sound refused the key. Check EPIDEMIC_API_KEY and your partner access.");
-    if (!res.ok) return fail(502, `Epidemic Sound answered ${res.status}.`);
+    if (!res.ok) return epidemicFail(res);
     const data = await res.json();
     const tracks = (data.tracks || []).map(slimTrack);
     return json({ tracks, hasMore: Boolean(data.links && data.links.next) });
@@ -329,9 +371,10 @@ async function handleMusic(request, env, uid) {
   if (body.op === "url") {
     const id = String(body.id || "");
     if (!/^[A-Za-z0-9_-]{4,64}$/.test(id)) return fail(400, "Bad track id.");
-    const res = await epidemic(env, uid, `/v0/tracks/${encodeURIComponent(id)}/download?format=mp3&quality=normal`);
+    const base = `/v0/tracks/${encodeURIComponent(id)}/download`;
+    const res = await epidemicTry(env, uid, [`${base}?format=mp3&quality=normal`, `${base}?format=mp3`, base]);
     if (res.status === 401 || res.status === 403) return fail(502, "Epidemic Sound refused this download (check your partner access).");
-    if (!res.ok) return fail(502, `Epidemic Sound answered ${res.status}.`);
+    if (!res.ok) return epidemicFail(res);
     const data = await res.json();
     if (!data.url) return fail(502, "Epidemic Sound sent no link.");
     return json({ url: data.url, expires: data.expires || null });

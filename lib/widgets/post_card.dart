@@ -8,6 +8,7 @@ import '../core/theme.dart';
 import 'share_sheet.dart';
 import '../core/ui.dart';
 import '../models/post.dart';
+import '../services/user_service.dart';
 import '../screens/post/comments_screen.dart';
 import '../screens/profile/profile_screen.dart';
 import '../screens/reels/reels_screen.dart';
@@ -18,6 +19,7 @@ import 'music_widgets.dart';
 import 'post_actions_sheet.dart';
 import 'post_media.dart';
 import 'reel_actions.dart';
+import 'repost_controller.dart';
 import 'save_controller.dart';
 
 /// A post in Discover: author on top, the photo or clip in its real proportions (square
@@ -43,6 +45,7 @@ class PostCard extends StatefulWidget {
 class _PostCardState extends State<PostCard> {
   late final LikeController _like;
   late final SaveController _save;
+  late final RepostController _repost;
   late int _comments;
   bool _heart = false;
   bool _expanded = false;
@@ -54,6 +57,7 @@ class _PostCardState extends State<PostCard> {
     super.initState();
     _like = LikeController(post.id, post.likeCount);
     _save = SaveController(post.id);
+    _repost = RepostController(post);
     _comments = post.commentCount;
     _unwatch = ViewTracker.instance.watch(post);
   }
@@ -65,6 +69,7 @@ class _PostCardState extends State<PostCard> {
     _unwatch?.call();
     _like.dispose();
     _save.dispose();
+    _repost.dispose();
     super.dispose();
   }
 
@@ -106,6 +111,17 @@ class _PostCardState extends State<PostCard> {
         _save.saved ? 'Saved to your profile' : 'Removed from saved',
       );
     }
+  }
+
+  Future<void> _toggleRepost() async {
+    final err = await _repost.toggle();
+    if (!mounted) return;
+    showToast(
+      context,
+      err != null
+          ? friendlyError(err)
+          : (_repost.reposted ? 'Reposted to your profile' : 'Repost removed'),
+    );
   }
 
   Future<void> _share() async {
@@ -229,10 +245,21 @@ class _PostCardState extends State<PostCard> {
     );
   }
 
-  /// Heart and comment, directly under the media.
+  /// Heart, comment and repost on the left; share and save on the right.
   Widget _actions(BuildContext context) {
+    final mine = post.authorId == UserService.instance.myUid;
+    Widget icon(Key? key, IconData data, VoidCallback onTap, {Color? color}) =>
+        GestureDetector(
+          key: key,
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
+            child: Icon(data, size: 23, color: color),
+          ),
+        );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(6, 2, 6, 0),
+      padding: const EdgeInsets.fromLTRB(6, 0, 6, 0),
       child: Row(
         children: [
           HeartButton(
@@ -246,21 +273,21 @@ class _PostCardState extends State<PostCard> {
             behavior: HitTestBehavior.opaque,
             onTap: _openComments,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.chat_bubble_outline_rounded, size: 26),
+                  const Icon(Icons.mode_comment_outlined, size: 22),
                   if (SafetyService.instance.showsNumber(
                     post,
                     post.hideComments,
                   )) ...[
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 5),
                     Text(
                       '$_comments',
                       style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
                       ),
                     ),
                   ],
@@ -268,30 +295,27 @@ class _PostCardState extends State<PostCard> {
               ),
             ),
           ),
-          const Spacer(),
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _share,
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              child: Icon(Icons.ios_share_rounded, size: 25),
+          if (!mine)
+            ListenableBuilder(
+              listenable: _repost,
+              builder: (context, _) => icon(
+                const ValueKey('cardRepost'),
+                Icons.repeat_rounded,
+                _toggleRepost,
+                color: _repost.reposted ? context.accentInk : null,
+              ),
             ),
-          ),
+          const Spacer(),
+          icon(null, Icons.ios_share_rounded, _share),
           ListenableBuilder(
             listenable: _save,
-            builder: (context, _) => GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _toggleSave,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                child: Icon(
-                  _save.saved
-                      ? Icons.bookmark_rounded
-                      : Icons.bookmark_border_rounded,
-                  size: 27,
-                  color: _save.saved ? context.accentInk : null,
-                ),
-              ),
+            builder: (context, _) => icon(
+              null,
+              _save.saved
+                  ? Icons.bookmark_rounded
+                  : Icons.bookmark_border_rounded,
+              _toggleSave,
+              color: _save.saved ? context.accentInk : null,
             ),
           ),
         ],

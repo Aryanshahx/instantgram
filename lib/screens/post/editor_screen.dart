@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:video_compress/video_compress.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../core/theme.dart';
@@ -14,6 +16,7 @@ import '../../services/overlay_painter.dart';
 import '../../services/photo_edit.dart';
 import '../../widgets/music_widgets.dart';
 import '../../widgets/overlay_tools.dart';
+import '../../widgets/trim_timeline.dart';
 import 'photo_editor_screen.dart' show CropOverlay;
 import 'video_editor_screen.dart' show VideoEdits;
 
@@ -104,6 +107,9 @@ class _EditorScreenState extends State<EditorScreen> {
   _Tool _tool = _Tool.filters;
   int _preset = 0; // index into _presets (0 = free)
   bool _busy = false;
+  int? _sel; // the selected text or sticker
+  final ValueNotifier<double> _pos = ValueNotifier(0);
+  final List<Uint8List?> _frames = List<Uint8List?>.filled(10, null);
 
   static const _presets = <(String, double?)>[
     ('Free', null),
@@ -136,7 +142,7 @@ class _EditorScreenState extends State<EditorScreen> {
     _overlays.addAll(widget.overlays);
     _music = widget.music;
     if (_isVideo) {
-      _tool = _Tool.filters;
+      _tool = _Tool.trim;
       _loadVideo();
     } else {
       _loadPhoto();
@@ -189,6 +195,7 @@ class _EditorScreenState extends State<EditorScreen> {
       await c.setLooping(false);
       await c.setVolume(_mute ? 0 : 1);
       c.addListener(_tick);
+      unawaited(_loadFrames());
       await c.seekTo(Duration(seconds: _start.round()));
       await c.play();
     } catch (e) {
@@ -197,9 +204,30 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
+  /// The pictures of the timeline, one after the other.
+  Future<void> _loadFrames() async {
+    final n = _frames.length;
+    for (var i = 0; i < n; i++) {
+      if (!mounted) return;
+      try {
+        final b = await VideoCompress.getByteThumbnail(
+          widget.file.path,
+          quality: 40,
+          position: ((i + 0.5) / n * _total * 1000).round(),
+        );
+        if (!mounted) return;
+        setState(() => _frames[i] = b);
+      } catch (_) {
+        // that picture stays dark
+      }
+    }
+  }
+
   void _tick() {
     final c = _c;
-    if (c == null || _paused) return;
+    if (c == null) return;
+    _pos.value = c.value.position.inMilliseconds / 1000;
+    if (_paused) return;
     final v = c.value;
     final end = Duration(milliseconds: (_end * 1000).round());
     if (v.isInitialized &&
@@ -213,6 +241,7 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void dispose() {
     _c?.removeListener(_tick);
+    _pos.dispose();
     _c?.dispose();
     _player?.dispose();
     _proxy?.file.delete().ignore();
@@ -263,32 +292,117 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Future<void> _addSticker() async {
-    final e = await showEmojiSheet(context);
-    if (e == null || !mounted) return;
-    setState(() => _overlays.add(StoryOverlay(text: e, dy: 0.45, emoji: true)));
+    final o = await showStickerSheet(context);
+    if (o == null || !mounted) return;
+    setState(() {
+      _overlays.add(o);
+      _sel = _overlays.length - 1;
+    });
   }
 
+  /// First tap selects (frame, handle, size bar); a second tap on a selected text edits it.
   Future<void> _tapOverlay(int i) async {
-    final o = _overlays[i];
-    if (o.emoji) {
-      final ok = await confirm(
-        context,
-        title: 'Remove sticker?',
-        confirmLabel: 'Remove',
-        destructive: true,
-      );
-      if (ok && mounted) setState(() => _overlays.removeAt(i));
+    if (_sel != i) {
+      setState(() => _sel = i);
       return;
     }
+    if (!_overlays[i].emoji && !_overlays[i].isImage) await _editSelected();
+  }
+
+  Future<void> _editSelected() async {
+    final i = _sel;
+    if (i == null || i >= _overlays.length) return;
+    final o = _overlays[i];
+    if (o.emoji || o.isImage) return;
     final r = await showOverlayTextSheet(context, o, canDelete: true);
     if (r == null || !mounted) return;
     setState(() {
       if (r.text.isEmpty) {
         _overlays.removeAt(i);
+        _sel = null;
       } else {
         _overlays[i] = r;
       }
     });
+  }
+
+  void _deleteSelected() {
+    final i = _sel;
+    if (i == null || i >= _overlays.length) return;
+    setState(() {
+      _overlays.removeAt(i);
+      _sel = null;
+    });
+  }
+
+  void _resizeSelected(double scale) {
+    final i = _sel;
+    if (i == null || i >= _overlays.length) return;
+    setState(() {
+      _overlays[i] = _overlays[i].copyWith(scale: scale.clamp(0.4, 4.0));
+    });
+  }
+
+  /// Size slider, smaller / bigger, edit and delete for the selected text or sticker.
+  Widget _selectionBar() {
+    final i = _sel;
+    if (i == null || i >= _overlays.length) return const SizedBox.shrink();
+    final o = _overlays[i];
+    final canEdit = !o.emoji && !o.isImage;
+    return Container(
+      key: const ValueKey('selectionBar'),
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: Colors.white12)),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            key: const ValueKey('sizeDown'),
+            tooltip: 'Smaller',
+            icon: const Icon(Icons.remove_circle_outline_rounded),
+            onPressed: () => _resizeSelected(o.scale / 1.15),
+          ),
+          Expanded(
+            child: Slider(
+              key: const ValueKey('sizeSlider'),
+              value: o.scale.clamp(0.4, 4.0).toDouble(),
+              min: 0.4,
+              max: 4,
+              activeColor: AppTheme.volt,
+              onChanged: _resizeSelected,
+            ),
+          ),
+          IconButton(
+            key: const ValueKey('sizeUp'),
+            tooltip: 'Bigger',
+            icon: const Icon(Icons.add_circle_outline_rounded),
+            onPressed: () => _resizeSelected(o.scale * 1.15),
+          ),
+          if (canEdit)
+            IconButton(
+              key: const ValueKey('selEdit'),
+              tooltip: 'Edit',
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: _editSelected,
+            ),
+          IconButton(
+            key: const ValueKey('selDelete'),
+            tooltip: 'Delete',
+            color: AppTheme.coral,
+            icon: const Icon(Icons.delete_outline_rounded),
+            onPressed: _deleteSelected,
+          ),
+          IconButton(
+            key: const ValueKey('selDone'),
+            tooltip: 'Done',
+            icon: const Icon(Icons.check_rounded),
+            onPressed: () => setState(() => _sel = null),
+          ),
+        ],
+      ),
+    );
   }
 
   // ------------------------------------------------------------------ video
@@ -311,35 +425,13 @@ class _EditorScreenState extends State<EditorScreen> {
     await _c?.setVolume(_mute ? 0 : 1);
   }
 
-  void _setRange(RangeValues v) {
-    var s = v.start.roundToDouble();
-    var e = v.end.roundToDouble();
-    if (e - s < 1) {
-      if (s == _start) {
-        e = s + 1;
-      } else {
-        s = e - 1;
-      }
-    }
-    final cap = widget.maxSeconds;
-    if (cap != null && e - s > cap) {
-      if (s != _start) {
-        e = s + cap;
-      } else {
-        s = e - cap;
-      }
-    }
-    final moved = s != _start;
+  void _applyRange(double s, double e, bool startMoved) {
     setState(() {
       _start = s.clamp(0, _total - 1).toDouble();
       _end = e.clamp(_start + 1, _total.toDouble()).toDouble();
     });
-    _c?.seekTo(Duration(seconds: (moved ? _start : _end - 1).round()));
-  }
-
-  static String _t(double s) {
-    final v = s.round();
-    return '${v ~/ 60}:${(v % 60).toString().padLeft(2, '0')}';
+    // the picture follows the handle that is being moved
+    _c?.seekTo(Duration(seconds: (startMoved ? _start : _end - 1).round()));
   }
 
   void _rotate(int dir) {
@@ -373,6 +465,7 @@ class _EditorScreenState extends State<EditorScreen> {
       _e = PhotoEdits();
       _preset = 0;
       _overlays.clear();
+      _sel = null;
       if (_isVideo) {
         _start = 0;
         _end = widget.maxSeconds == null
@@ -514,6 +607,7 @@ class _EditorScreenState extends State<EditorScreen> {
             child: LayoutBuilder(builder: _preview),
           ),
         ),
+        _selectionBar(),
         _panel(context),
       ],
     );
@@ -560,6 +654,8 @@ class _EditorScreenState extends State<EditorScreen> {
         ..addAll(l);
     }),
     onTap: _tapOverlay,
+    selected: _sel,
+    onBackgroundTap: () => setState(() => _sel = null),
   );
 
   Widget _preview(BuildContext context, BoxConstraints c) {
@@ -805,30 +901,18 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Widget _trimTools() {
-    final keep = (_end - _start).round();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 18, 12, 0),
-      child: Column(
-        children: [
-          Text(
-            'Keeping ${keep}s  (${_t(_start)} - ${_t(_end)})',
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
-          RangeSlider(
-            key: const ValueKey('trimRange'),
-            values: RangeValues(_start, _end),
-            min: 0,
-            max: _total.toDouble(),
-            divisions: _total > 1 ? _total : null,
-            activeColor: AppTheme.volt,
-            onChanged: _total > 1 ? _setRange : null,
-          ),
-          if (widget.maxSeconds != null)
-            Text(
-              'Up to ${widget.maxSeconds}s',
-              style: const TextStyle(color: Colors.white54, fontSize: 12),
-            ),
-        ],
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+      child: TrimTimeline(
+        total: _total,
+        start: _start,
+        end: _end,
+        position: _pos,
+        frames: _frames,
+        maxSeconds: widget.maxSeconds,
+        audioLabel: _music?.title,
+        onRange: (s, e, startMoved) => _applyRange(s, e, startMoved),
+        onSeek: (sec) => _c?.seekTo(Duration(milliseconds: (sec * 1000).round())),
       ),
     );
   }

@@ -286,14 +286,14 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
   }
 
   Future<void> _addEmoji() async {
-    final e = await showEmojiSheet(context);
-    if (e == null) return;
-    setState(() => _overlays.add(StoryOverlay(text: e, dy: 0.45, emoji: true)));
+    final o = await showStickerSheet(context);
+    if (o == null || !mounted) return;
+    setState(() => _overlays.add(o));
   }
 
   Future<void> _tapOverlay(int i) async {
     final o = _overlays[i];
-    if (o.emoji) {
+    if (o.emoji || o.isImage) {
       final ok = await confirm(
         context,
         title: 'Remove sticker?',

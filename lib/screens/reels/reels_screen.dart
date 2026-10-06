@@ -24,7 +24,6 @@ import '../../widgets/music_widgets.dart';
 import '../../widgets/reel_photo.dart';
 import '../../widgets/reel_progress.dart';
 import '../../widgets/reel_video.dart';
-import '../../widgets/post_actions_sheet.dart';
 import '../../widgets/repost_controller.dart';
 import '../../widgets/save_controller.dart';
 import '../../widgets/state_views.dart';
@@ -79,6 +78,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
   );
   final PageController _pages = PageController();
   int _page = 0;
+  bool _headerShown = true;
   bool _started = false;
   bool _wanting = false;
 
@@ -211,7 +211,12 @@ class _ReelsScreenState extends State<ReelsScreen> {
                     controller: _pages,
                     itemCount: _pager.posts.length,
                     onPageChanged: (i) {
-                      setState(() => _page = i);
+                      setState(() {
+                        // scrolling down hides the Clips title and the back button, scrolling
+                        // back up brings them back
+                        _headerShown = i < _page || i == 0;
+                        _page = i;
+                      });
                       _preload();
                       if (i >= _pager.posts.length - 3) _pager.loadMore();
                     },
@@ -221,6 +226,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
                         key: ValueKey(post.id),
                         post: post,
                         playing: widget.active && i == _page,
+                        showHeader: _headerShown,
                         preload: widget.active && i == _page + 1,
                         onBack: widget.onBack,
                         onDeleted: () => _pager.removeById(post.id),
@@ -245,9 +251,11 @@ class _ReelPage extends StatefulWidget {
     required this.preload,
     required this.onBack,
     required this.onDeleted,
+    this.showHeader = true,
   });
 
   final Post post;
+  final bool showHeader;
   final bool playing;
   final bool preload;
   final VoidCallback onBack;
@@ -419,19 +427,41 @@ class _ReelPageState extends State<_ReelPage> {
               padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
               child: Row(
                 children: [
-                  ReelIconButton(
-                    icon: Icons.arrow_back_rounded,
-                    size: 28,
-                    onTap: widget.onBack,
-                  ),
-                  const Text(
-                    'Clips',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.5,
-                      shadows: kReelShadow,
+                  Flexible(
+                    child: AnimatedSlide(
+                      key: const ValueKey('clipHeader'),
+                      offset: widget.showHeader
+                          ? Offset.zero
+                          : const Offset(0, -1.4),
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOut,
+                      child: AnimatedOpacity(
+                        opacity: widget.showHeader ? 1 : 0,
+                        duration: const Duration(milliseconds: 180),
+                        child: IgnorePointer(
+                          ignoring: !widget.showHeader,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ReelIconButton(
+                                icon: Icons.arrow_back_rounded,
+                                size: 26,
+                                onTap: widget.onBack,
+                              ),
+                              const Text(
+                                'Clips',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -0.5,
+                                  shadows: kReelShadow,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                   const Spacer(),
@@ -441,7 +471,7 @@ class _ReelPageState extends State<_ReelPage> {
                       icon: muted
                           ? Icons.volume_off_rounded
                           : Icons.volume_up_rounded,
-                      size: 28,
+                      size: 26,
                       onTap: () => ReelAudio.muted.value = !muted,
                     ),
                   ),
@@ -491,7 +521,11 @@ class _ReelPageState extends State<_ReelPage> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    GestureDetector(
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: () => openScreen(
                         context,
@@ -530,6 +564,13 @@ class _ReelPageState extends State<_ReelPage> {
                           ),
                         ],
                       ),
+                    ),
+                        ),
+                        if (post.authorId != UserService.instance.myUid) ...[
+                          const SizedBox(width: 12),
+                          ReelFollowPill(uid: post.authorId),
+                        ],
+                      ],
                     ),
                     if (post.caption.isNotEmpty) ...[
                       const SizedBox(height: 10),
@@ -588,6 +629,7 @@ class _Rail extends StatelessWidget {
   final VoidCallback onComments;
 
   static const _heart = Color(0xFFFF3B5C);
+  static const double _gap = 6;
 
   @override
   Widget build(BuildContext context) {
@@ -595,27 +637,6 @@ class _Rail extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (!mine) ...[
-          ReelFollowPill(uid: post.authorId),
-          // Report sits right under the Follow button
-          ReelIconButton(
-            key: const ValueKey('clipMore'),
-            icon: Icons.flag_outlined,
-            size: 28,
-            label: 'Report',
-            onTap: () => showReportSheet(context, post),
-          ),
-          const SizedBox(height: 8),
-        ] else ...[
-          ReelIconButton(
-            key: const ValueKey('clipMine'),
-            icon: Icons.more_horiz_rounded,
-            size: 28,
-            label: 'More',
-            onTap: () => showPostActions(context, post),
-          ),
-          const SizedBox(height: 8),
-        ],
         ListenableBuilder(
           listenable: like,
           builder: (_, _) => ReelIconButton(
@@ -624,22 +645,34 @@ class _Rail extends StatelessWidget {
                 : Icons.favorite_border_rounded,
             color: like.liked ? _heart : Colors.white,
             pop: like.liked,
-            size: 34,
             label: SafetyService.instance.showsNumber(post, post.hideLikes)
                 ? '${like.count}'
                 : 'Like',
             onTap: onLike,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: _gap),
         ReelIconButton(
-          icon: Icons.chat_bubble_outline_rounded,
+          icon: Icons.mode_comment_outlined,
           label: SafetyService.instance.showsNumber(post, post.hideComments)
               ? '$comments'
               : 'Comment',
           onTap: onComments,
         ),
-        const SizedBox(height: 8),
+        if (!mine) ...[
+          const SizedBox(height: _gap),
+          ListenableBuilder(
+            listenable: repost,
+            builder: (_, _) => ReelIconButton(
+              key: const ValueKey('clipRepost'),
+              icon: Icons.repeat_rounded,
+              color: repost.reposted ? AppTheme.volt : Colors.white,
+              label: repost.reposted ? 'Reposted' : 'Repost',
+              onTap: onRepost,
+            ),
+          ),
+        ],
+        const SizedBox(height: _gap),
         ListenableBuilder(
           listenable: save,
           builder: (_, _) => ReelIconButton(
@@ -651,7 +684,7 @@ class _Rail extends StatelessWidget {
             onTap: onSave,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: _gap),
         ReelIconButton(
           icon: Icons.ios_share_rounded,
           label:
@@ -661,18 +694,14 @@ class _Rail extends StatelessWidget {
               : 'Share',
           onTap: onShare,
         ),
+        // Report sits right under Share
         if (!mine) ...[
-          const SizedBox(height: 8),
-          ListenableBuilder(
-            listenable: repost,
-            builder: (_, _) => ReelIconButton(
-              key: const ValueKey('clipRepost'),
-              icon: Icons.repeat_rounded,
-              color: repost.reposted ? AppTheme.volt : Colors.white,
-              size: 30,
-              label: repost.reposted ? 'Reposted' : 'Repost',
-              onTap: onRepost,
-            ),
+          const SizedBox(height: _gap),
+          ReelIconButton(
+            key: const ValueKey('clipMore'),
+            icon: Icons.flag_outlined,
+            label: 'Report',
+            onTap: () => showReportSheet(context, post),
           ),
         ],
       ],

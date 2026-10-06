@@ -1,6 +1,12 @@
+import 'dart:async';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../core/errors.dart';
+import '../core/l10n.dart';
 import '../core/theme.dart';
+import '../services/giphy.dart';
 import '../models/finish.dart';
 import '../models/story.dart';
 import 'story_overlays.dart';
@@ -103,6 +109,221 @@ Future<String?> showEmojiSheet(BuildContext context) {
   );
 }
 
+/// Tests set this so the sheet does not depend on the Giphy key of the machine.
+@visibleForTesting
+GiphyClient? debugStickerClient;
+
+/// The sticker sheet: real stickers from Giphy (animated on clips and moments, one frame
+/// when baked into a photo) and, on a second tab, emoji. Returns the finished overlay.
+/// Without a Giphy key only the emoji tab is shown.
+Future<StoryOverlay?> showStickerSheet(
+  BuildContext context, {
+  GiphyClient? client,
+}) {
+  final giphy = client ?? debugStickerClient ?? GiphyClient(stickers: true);
+  return showModalBottomSheet<StoryOverlay>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    showDragHandle: true,
+    builder: (_) => FractionallySizedBox(
+      heightFactor: 0.75,
+      child: StickerSheet(client: giphy),
+    ),
+  );
+}
+
+class StickerSheet extends StatefulWidget {
+  const StickerSheet({super.key, required this.client});
+  final GiphyClient client;
+
+  @override
+  State<StickerSheet> createState() => _StickerSheetState();
+}
+
+class _StickerSheetState extends State<StickerSheet>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs = TabController(
+    length: widget.client.configured ? 2 : 1,
+    vsync: this,
+  );
+  final _q = TextEditingController();
+  Timer? _debounce;
+  List<GifItem> _items = const [];
+  bool _loading = false;
+  String? _error;
+  int _token = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.client.configured) _run('');
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _q.dispose();
+    _tabs.dispose();
+    super.dispose();
+  }
+
+  Future<void> _run(String q) async {
+    final t = ++_token;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final r = await widget.client.search(q);
+      if (!mounted || t != _token) return;
+      setState(() {
+        _items = r;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted || t != _token) return;
+      setState(() {
+        _error = e is MediaException ? e.message : 'Could not load stickers.';
+        _loading = false;
+      });
+    }
+  }
+
+  void _pick(GifItem g) {
+    Navigator.pop(
+      context,
+      StoryOverlay(
+        text: 'sticker',
+        dy: 0.45,
+        image: g.url,
+        still: g.stillUrl,
+        aspect: g.aspect,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final withGiphy = widget.client.configured;
+    return Column(
+      children: [
+        if (withGiphy)
+          TabBar(
+            controller: _tabs,
+            tabs: [
+              Tab(text: context.tr('Stickers')),
+              Tab(text: context.tr('Emoji')),
+            ],
+          ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabs,
+            children: [
+              if (withGiphy) _stickers(context),
+              _emoji(context),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _stickers(BuildContext context) {
+    final cols = MediaQuery.sizeOf(context).width > 700 ? 5 : 3;
+    Widget body;
+    if (_loading && _items.isEmpty) {
+      body = const Center(child: CircularProgressIndicator());
+    } else if (_error != null) {
+      body = Center(child: Text(_error!, textAlign: TextAlign.center));
+    } else if (_items.isEmpty) {
+      body = Center(child: Text(context.tr('No stickers found.')));
+    } else {
+      body = GridView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: cols,
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+        ),
+        itemCount: _items.length,
+        itemBuilder: (context, i) {
+          final g = _items[i];
+          return GestureDetector(
+            key: ValueKey('sticker_${g.id}'),
+            onTap: () => _pick(g),
+            child: Container(
+              decoration: BoxDecoration(
+                color: context.softFill,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              padding: const EdgeInsets.all(8),
+              child: CachedNetworkImage(
+                imageUrl: g.previewUrl,
+                fit: BoxFit.contain,
+                errorWidget: (_, _, _) => const SizedBox.shrink(),
+              ),
+            ),
+          );
+        },
+      );
+    }
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: TextField(
+            key: const ValueKey('stickerSearch'),
+            controller: _q,
+            onChanged: (v) {
+              _debounce?.cancel();
+              _debounce = Timer(
+                const Duration(milliseconds: 400),
+                () => _run(v),
+              );
+            },
+            decoration: InputDecoration(
+              hintText: context.tr('Search stickers'),
+              prefixIcon: const Icon(Icons.search_rounded),
+            ),
+          ),
+        ),
+        Expanded(child: body),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Text(
+            'Powered by GIPHY',
+            style: TextStyle(
+              color: context.muted,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _emoji(BuildContext context) {
+    return GridView.count(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      crossAxisCount: 8,
+      children: [
+        for (final e in kOverlayEmojis)
+          InkWell(
+            key: ValueKey('emoji_$e'),
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => Navigator.pop(
+              context,
+              StoryOverlay(text: e, dy: 0.45, emoji: true),
+            ),
+            child: Center(child: Text(e, style: const TextStyle(fontSize: 28))),
+          ),
+      ],
+    );
+  }
+}
+
 /// Drags, pinches and taps the texts and stickers on a picture of any shape. Positions and
 /// sizes are fractions of the picture, so they look the same everywhere.
 class OverlayEditLayer extends StatefulWidget {
@@ -111,7 +332,15 @@ class OverlayEditLayer extends StatefulWidget {
     required this.overlays,
     required this.onChanged,
     required this.onTap,
+    this.selected,
+    this.onBackgroundTap,
   });
+
+  /// The item that is selected (frame and corner handle), if any.
+  final int? selected;
+
+  /// Called when the picture is tapped while an item is selected.
+  final VoidCallback? onBackgroundTap;
 
   final List<StoryOverlay> overlays;
   final ValueChanged<List<StoryOverlay>> onChanged;
@@ -124,6 +353,61 @@ class OverlayEditLayer extends StatefulWidget {
 class _OverlayEditLayerState extends State<OverlayEditLayer> {
   double _baseScale = 1;
 
+  /// The selected item: a frame around it and a round handle in the corner. Dragging the
+  /// handle makes it bigger or smaller.
+  Widget _selectedChip(List<StoryOverlay> list, int i, double w, double h) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child: DecoratedBox(
+            key: const ValueKey('selectedFrame'),
+            position: DecorationPosition.foreground,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.white, width: 1.5),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(3),
+              child: StoryOverlayChip(overlay: list[i], canvasWidth: w),
+            ),
+          ),
+        ),
+        Positioned(
+          right: 0,
+          bottom: 0,
+          child: GestureDetector(
+            key: const ValueKey('resizeHandle'),
+            behavior: HitTestBehavior.opaque,
+            onScaleUpdate: (d) {
+              final o = widget.overlays[i];
+              final next = [...widget.overlays];
+              final factor =
+                  1 + (d.focalPointDelta.dx + d.focalPointDelta.dy) / (w * 0.45);
+              next[i] = o.copyWith(scale: (o.scale * factor).clamp(0.4, 4.0));
+              widget.onChanged(next);
+            },
+            child: Container(
+              width: 28,
+              height: 28,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+                boxShadow: [BoxShadow(blurRadius: 6, color: Colors.black38)],
+              ),
+              child: const Icon(
+                Icons.open_in_full_rounded,
+                size: 15,
+                color: Colors.black87,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -134,6 +418,14 @@ class _OverlayEditLayerState extends State<OverlayEditLayer> {
         return Stack(
           clipBehavior: Clip.hardEdge,
           children: [
+            if (widget.selected != null)
+              Positioned.fill(
+                child: GestureDetector(
+                  key: const ValueKey('overlayBackground'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: widget.onBackgroundTap,
+                ),
+              ),
             for (var i = 0; i < list.length; i++)
               Positioned(
                 key: ValueKey('overlay$i'),
@@ -160,7 +452,9 @@ class _OverlayEditLayerState extends State<OverlayEditLayer> {
                         );
                         widget.onChanged(next);
                       },
-                      child: StoryOverlayChip(overlay: list[i], canvasWidth: w),
+                      child: widget.selected == i
+                          ? _selectedChip(list, i, w, h)
+                          : StoryOverlayChip(overlay: list[i], canvasWidth: w),
                     ),
                   ),
                 ),

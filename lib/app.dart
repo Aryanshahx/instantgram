@@ -4,6 +4,7 @@ import 'core/a11y.dart';
 import 'core/l10n.dart';
 import 'core/theme.dart';
 import 'screens/auth/auth_gate.dart';
+import 'widgets/hold_haptics.dart';
 
 class InstantgramApp extends StatelessWidget {
   const InstantgramApp({super.key});
@@ -23,7 +24,8 @@ class InstantgramApp extends StatelessWidget {
           builder: (context, child) {
             final a = A11y.instance;
             final mq = MediaQuery.of(context);
-            return MediaQuery(
+            return HoldHaptics(
+              child: MediaQuery(
               data: mq.copyWith(
                 textScaler: TextScaler.linear(
                   mq.textScaler.scale(1) * a.textScale,
@@ -41,6 +43,7 @@ class InstantgramApp extends StatelessWidget {
                 ),
                 child: child ?? const SizedBox.shrink(),
               ),
+            ),
             );
           },
           home: const AuthGate(),

@@ -84,6 +84,20 @@ class StoryOverlayChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final size = overlay.fontSize(canvasWidth);
+    if (overlay.isImage) {
+      // a picture sticker (animated while it is shown on top of a video or in a moment)
+      return SizedBox(
+        key: const ValueKey('imageSticker'),
+        width: size,
+        height: size / overlay.aspect,
+        child: Image.network(
+          overlay.image,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
+          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+        ),
+      );
+    }
     if (overlay.emoji) {
       return Text(overlay.text, style: TextStyle(fontSize: size, height: 1.1));
     }

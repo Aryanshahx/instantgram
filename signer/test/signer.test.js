@@ -273,3 +273,38 @@ test("music: search and download link come from Epidemic Sound, the key never le
     globalThis.fetch = prevFetch;
   }
 });
+
+test("music: a 400 from Epidemic Sound is retried plainly and its reason is shown", async () => {
+  const prevFetch = globalThis.fetch;
+  const seen = [];
+  let mode = "picky";
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes("securetoken@system.gserviceaccount.com")) return new Response(JSON.stringify({ keys: [jwk] }), { status: 200 });
+    if (u.startsWith("https://partner-content-api.epidemicsound.com")) {
+      seen.push({ u, user: init.headers["x-partner-user-id"] });
+      if (mode === "always") return new Response(JSON.stringify({ message: "Bad request", errors: [{ key: "term", messages: ["too short"] }] }), { status: 400 });
+      // picky: only the plain request without the end-user header is accepted
+      if (init.headers["x-partner-user-id"] || u.includes("limit=")) return new Response(JSON.stringify({ message: "Bad request" }), { status: 400 });
+      return new Response(JSON.stringify({ tracks: [], links: { next: null } }), { status: 200 });
+    }
+    return prevFetch(url, init);
+  };
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const t = await token();
+    const env = { ...baseEnv(), EPIDEMIC_API_KEY: "ES_KEY" };
+    const ok = await call("/music", { op: "search", term: "calm" }, t, env);
+    assert.equal(ok.status, 200);
+    assert.ok(seen.length >= 2 && seen.at(-1).user === undefined);
+    mode = "always";
+    const bad = await call("/music", { op: "search", term: "calm" }, t, env);
+    assert.equal(bad.status, 502);
+    const msg = (await bad.json()).detail || "";
+    assert.ok(msg.includes("answered 400") && msg.includes("Bad request") && msg.includes("term"), msg);
+  } finally {
+    globalThis.fetch = prevFetch;
+    console.error = quiet;
+  }
+});

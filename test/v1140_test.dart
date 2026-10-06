@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:instantgram/services/giphy.dart' show GiphyClient;
+import 'package:instantgram/widgets/overlay_tools.dart' show debugStickerClient;
 import 'package:image/image.dart' as img;
 import 'package:instantgram/core/l10n.dart';
 import 'package:instantgram/core/theme.dart';
@@ -36,6 +38,7 @@ Future<void> _settle(WidgetTester t, bool Function() done) async {
 }
 
 void main() {
+  setUp(() => debugStickerClient = GiphyClient(key: ''));
   group('forty languages', () {
     test('the list has 40 languages with unique codes', () {
       expect(kLanguages.length, 40);

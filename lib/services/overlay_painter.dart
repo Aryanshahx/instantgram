@@ -3,6 +3,7 @@ import 'dart:isolate';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show consolidateHttpClientResponseBytes;
 import 'package:flutter/painting.dart';
 import 'package:image/image.dart' as img;
 
@@ -11,10 +12,34 @@ import 'photo_edit.dart';
 
 /// Draws texts and stickers on a canvas the way [StoryOverlayChip] shows them on screen
 /// (same relative position, size, box and shadow).
-void paintOverlays(Canvas canvas, Size size, List<StoryOverlay> overlays) {
+void paintOverlays(
+  Canvas canvas,
+  Size size,
+  List<StoryOverlay> overlays, {
+  Map<String, ui.Image> images = const {},
+}) {
   for (final o in overlays) {
     final fs = o.fontSize(size.width);
     final maxW = size.width * 0.92;
+    if (o.isImage) {
+      final pic = images[o.still.isNotEmpty ? o.still : o.image];
+      if (pic != null) {
+        final w = fs;
+        final h = fs * pic.height / pic.width;
+        canvas.drawImageRect(
+          pic,
+          Rect.fromLTWH(0, 0, pic.width.toDouble(), pic.height.toDouble()),
+          Rect.fromLTWH(
+            o.dx * size.width - w / 2,
+            o.dy * size.height - h / 2,
+            w,
+            h,
+          ),
+          Paint()..filterQuality = FilterQuality.high,
+        );
+      }
+      continue;
+    }
     if (o.emoji) {
       final tp = TextPainter(
         text: TextSpan(text: o.text, style: TextStyle(fontSize: fs, height: 1.1)),
@@ -75,6 +100,34 @@ Uint8List _encode((Uint8List, int, int) a) {
   return img.encodeJpg(im, quality: 95);
 }
 
+/// Downloads the first frame of every picture sticker (needed to paint them into a photo).
+/// A sticker that cannot be fetched is skipped.
+Future<Map<String, ui.Image>> loadStickerImages(
+  List<StoryOverlay> overlays,
+) async {
+  final out = <String, ui.Image>{};
+  for (final o in overlays) {
+    if (!o.isImage) continue;
+    final url = o.still.isNotEmpty ? o.still : o.image;
+    if (out.containsKey(url)) continue;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+    try {
+      final req = await client.getUrl(Uri.parse(url));
+      final res = await req.close().timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) continue;
+      final bytes = await consolidateHttpClientResponseBytes(res);
+      final codec = await ui.instantiateImageCodec(bytes);
+      out[url] = (await codec.getNextFrame()).image;
+      codec.dispose();
+    } catch (_) {
+      // skipped
+    } finally {
+      client.close(force: true);
+    }
+  }
+  return out;
+}
+
 /// Burns [overlays] into a JPEG and returns the new file (the original is not touched).
 Future<File> bakeOverlays(File jpeg, List<StoryOverlay> overlays) async {
   if (overlays.isEmpty) return jpeg;
@@ -86,8 +139,17 @@ Future<File> bakeOverlays(File jpeg, List<StoryOverlay> overlays) async {
   final rec = ui.PictureRecorder();
   final canvas = Canvas(rec);
   canvas.drawImage(base, Offset.zero, Paint()..filterQuality = FilterQuality.high);
-  paintOverlays(canvas, Size(w.toDouble(), h.toDouble()), overlays);
+  final stickers = await loadStickerImages(overlays);
+  paintOverlays(
+    canvas,
+    Size(w.toDouble(), h.toDouble()),
+    overlays,
+    images: stickers,
+  );
   final out = await rec.endRecording().toImage(w, h);
+  for (final p in stickers.values) {
+    p.dispose();
+  }
   final data = await out.toByteData(format: ui.ImageByteFormat.rawRgba);
   base.dispose();
   out.dispose();
