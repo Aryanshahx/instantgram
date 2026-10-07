@@ -7,6 +7,7 @@ import '../../core/app_info.dart';
 import '../../core/l10n.dart';
 import '../../core/theme.dart';
 import '../../core/legal.dart';
+import '../../core/legal_text.dart';
 import '../../core/ui.dart';
 import '../../services/user_service.dart';
 import 'settings_widgets.dart';
@@ -246,76 +247,16 @@ class PrivacyPolicyScreen extends StatelessWidget {
   const PrivacyPolicyScreen({super.key});
 
   @override
-  Widget build(BuildContext context) => TextPage(
-    title: context.tr('Privacy policy'),
-    sections: const [
-      (
-        'What we keep',
-        'Your account details (name, username, email, date of birth, country, language), the photos, clips, moments, comments and messages you post, and simple counts such as likes and views.',
-      ),
-      (
-        'Why we keep it',
-        'To run the app: to show your content to the people you choose, to let people find and message you, and to keep the service safe. We do not sell your personal data.',
-      ),
-      (
-        'Who can see it',
-        'Posts are visible to everyone unless you pick Followers only, Only me, or switch on a private account. Messages are visible to the people in the chat. You can block anyone in Settings.',
-      ),
-      (
-        'Where it is stored',
-        'Account data and messages live in Google Firebase. Photos, clips, voice files and sounds you add from your phone live in our own media storage. Songs in Hit songs are 30 second previews from Apple (iTunes). Free music comes from the Jamendo catalogue through Openverse.',
-      ),
-      (
-        'On your phone',
-        'The app saves your language, accessibility choices, watch history and screen time on your phone only.',
-      ),
-      (
-        'Your choices',
-        'You can edit or delete your posts at any time, clear your history, and ask us to remove your account by writing to $kSupportEmail.',
-      ),
-      (
-        'Children',
-        'You must be at least 13 years old to make an account. That is why we ask for your date of birth.',
-      ),
-      ('Contact', 'Questions: $kSupportEmail'),
-    ],
-  );
+  Widget build(BuildContext context) =>
+      TextPage(title: context.tr('Privacy policy'), sections: kPrivacySections);
 }
 
 class TermsScreen extends StatelessWidget {
   const TermsScreen({super.key});
 
   @override
-  Widget build(BuildContext context) => TextPage(
-    title: context.tr('Terms of use'),
-    sections: const [
-      (
-        'Using the app',
-        'You must be at least 13 years old. You are responsible for your account and for what you post. Keep your password to yourself.',
-      ),
-      (
-        'Your content',
-        'You keep the rights to what you post. By posting you allow $kAppName to store and show it to the audience you choose. Only post what you have the right to share.',
-      ),
-      (
-        'Not allowed',
-        'Hate, harassment, threats, nudity or sexual content involving minors, scams, spam, violence, and content that breaks the law or other people\'s rights.',
-      ),
-      (
-        'Audio',
-        'A sound from your phone is yours: add only audio you have the right to use. It is uploaded when you share your post and removed with it. Hit songs are 30 second previews that Apple offers to promote its music; they belong to their owners and are used only inside the app, with the artist\'s name shown. Free music is shared by its artists under Creative Commons licences (the Jamendo catalogue, found through Openverse). Do not copy or resell any of it.',
-      ),
-      (
-        'Reports and removal',
-        'People can report clips from the Clips screen. We may remove content or accounts that break these terms.',
-      ),
-      (
-        'Changes',
-        'We may update these terms. Using the app after a change means you accept it.',
-      ),
-      ('Contact', 'Questions or reports: $kSupportEmail'),
-    ],
-  );
+  Widget build(BuildContext context) =>
+      TextPage(title: context.tr('Terms of use'), sections: kTermsSections);
 }
 
 /// Settings > App update: asks GitHub for the newest published version.

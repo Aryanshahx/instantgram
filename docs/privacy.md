@@ -1,104 +1,49 @@
----
-layout: default
-title: Privacy Policy
----
+# Privacy Policy
 
-# InstantGram - Privacy Policy
+*InstantGram - last updated 7 October 2026*
 
-**Last updated: 6 October 2026**
+How InstantGram handles your account, your content and your messages.
 
-InstantGram ("the app", "we", "us") is a social app for sharing photos, clips and moments, made by **Hyper Tech Labs**. This policy explains what information the app uses, why, who it is shared with, and the choices you have. By creating an account you confirm that you have read it.
+## The short version
 
-**Contact:** techlabs.hyper@gmail.com
+We keep what the app needs to work: your account, what you post, and who you talk to. We do not sell your personal data. You can delete your account in the app at any time, and that erases your content, your messages and your details.
 
-## 1. Information we collect
+## What we keep
 
-### Information you give us
-- **Account details:** full name, username, email address, password (stored and checked by Google Firebase Authentication; we never see it in plain text), date of birth, country and language.
-- **Profile:** profile photo, banner and bio.
-- **Content you post:** photos, videos (clips), moments, captions, hashtags, comments, replies, music or sticker choices, and the place name if you add one to a post.
-- **Messages and calls:** chat messages, photos, voice notes and the call history (who, when, how long).
-- **Reports and support:** what you write when you report a post, a comment or a problem.
+Your account details (name, username, email, date of birth, country, language), the photos, clips, moments, comments and messages you send, the people you follow and who follows you, what you like, save and repost, and simple counts such as views, reach and watch time.
 
-### Information created while you use the app
-- Likes, saves, reposts, follows, follow requests, blocks, views and share counts.
-- Account settings (private account, hidden counts, post audience, accessibility choices).
-- Technical data that our service providers receive when your phone connects to them, such as your IP address, device and app version, and time of the request.
+## Why we keep it
 
-### Information from your phone (only with your permission)
-- **Camera and photos/videos:** to take or pick media you want to post or send.
-- **Audio files:** only the file you pick yourself, to use as the sound of a post, a clip or a moment. It is uploaded when you share and deleted with the post.
-- **Microphone:** for voice notes and for voice or video calls.
-- **Location:** only when you choose to add your current place to a post. It is never collected in the background.
+To run the app: to show your content to the audience you choose, to let people find and message you, to show you analytics about your own posts, and to keep the service safe. We do not sell your personal data and we do not share it with advertisers.
 
-### Stored only on your phone
-Watch history, screen-time figures, saved language and accessibility choices, and the list of accounts you added for quick switching. This data is not sent to us.
+## Who can see it
 
-### What we do not do
-We do not show ads, we do not sell your personal data, we do not track you across other apps or websites, and we do not use your messages to build advertising profiles.
+Posts are visible to everyone unless you pick Followers only or Only me, or switch on a private account. Messages are visible to the people in the chat. Analytics are only ever shown to you, and they are totals, never a list of who watched. You can block anyone in Settings.
 
-## 2. Why we use your information
+## Where it is stored
 
-- To create and run your account and to sign you in.
-- To show your content to the people you choose and to let people find, follow and message you.
-- To make chats and calls work.
-- To show you content in your language, and to suggest accounts and posts.
-- To keep the app safe: to handle reports, block abuse, spam and fake accounts, and to enforce our [Terms of Use]({{ site.baseurl }}/terms.html).
-- To meet legal duties and to answer your requests.
+Your account and your messages live in Google Firebase (Firebase Authentication and Cloud Firestore). Photos, clips, voice files and sounds you add from your phone live in our own media storage. Songs in Hit songs are 30 second previews from Apple (iTunes). Free music comes from the Jamendo catalogue, found through Openverse.
 
-## 3. Who can see your information
+## On your phone
 
-- Your **username, name, profile photo, bio, posts, clips and moments** can be seen by other users according to your settings: everyone, followers only, only you, or approved followers when your account is private.
-- **Messages** are visible to the people in that chat. Voice and video calls go between you and the other person.
-- Your **date of birth and email address** are not shown to other users.
-- Like and view counts can be hidden by their owner.
-- Private account, blocking and audience settings are applied by the app. Please do not post anything you would not want a person you share with to copy.
+The app saves your language, accessibility choices, watch history and screen time on your phone only. It asks your permission before it uses the camera, the microphone, your photos or your location, and you can take it back in Android settings.
 
-## 4. Service providers we use
+## Deleting your account
 
-We use the following services to run the app. They process data for us under their own terms and privacy policies.
+Settings > Account > Delete account. We send a 6 digit code to the email address of the account and ask for your password; enter both and the account is deleted. That erases your profile and details, your posts, clips, moments and stories, your comments and replies, your likes, saves and reposts, your chats and messages, your followers and following lists, your blocks and your notifications. The photos, clips and sound files you uploaded are removed from storage, and the sign-in itself is removed from Firebase Authentication. It cannot be undone. A short record of reports and blocks may be kept for up to 30 days to keep the service safe, and nothing else is kept. You can also write to techlabs.hyper@gmail.com and we will delete it for you.
 
-| Provider | What it does | Data it receives |
-|---|---|---|
-| **Google Firebase** (Authentication, Cloud Firestore) | Sign-in, profiles, posts data, comments, messages, follows | Account details, content text and settings, messages |
-| **Tigris Global** (object storage) | Stores photos, clips, moments, voice notes and avatars | The media files you upload, including a sound you add from your phone |
-| **Vercel** (our small server) | Checks you are signed in and hands out upload links; looks up music for you | Your account ID, file type and size, search words for music; technical request data |
-| **Agora** | Voice and video calls | Call audio and video, a call room name, technical data |
-| **Apple** (iTunes Search API) | Song search and 30 second previews | Your song search words, sent straight from your phone to Apple, with technical data such as your IP address; your phone then downloads the preview from Apple |
-| **Openverse** (WordPress) and **Jamendo** | Free music search and streaming | Music search words and the track you pick, sent from our server (never your name or email); your phone then streams the song from Jamendo and so Jamendo receives technical data such as your IP address |
-| **Giphy** | GIFs and stickers | Your sticker or GIF search words and technical request data such as your IP address |
-| **GitHub** | Checks whether a new app version exists | A request for the latest release (no account data) |
+## Children
 
-We may also share information when the law requires it, to protect people's safety, or to protect our rights.
+You must be at least 13 years old to make an account. That is why we ask for your date of birth. If a child's account is reported to us, we remove it and its content.
 
-## 5. How long we keep it
+## Your choices
 
-We keep your account and content until you delete it or ask us to delete your account. When you delete a post, comment or message, it is removed from the app. Copies may remain in backups or logs of our providers for a short time. Reports about abuse may be kept longer when needed for safety or legal reasons.
+You can edit or delete any post at any time, clear your watch history and screen time, make your account private, block people, and ask for a copy of what we hold by writing to techlabs.hyper@gmail.com.
 
-## 6. Your choices and rights
+## Changes
 
-- **Edit or delete** your profile, posts, comments and messages in the app.
-- **Control who sees you:** private account, post audience, hidden counts, blocking.
-- **Permissions:** you can turn the camera, microphone and location permission off at any time in your phone settings.
-- **Delete your account and data:** write to techlabs.hyper@gmail.com from the email address of your account, or use the delete-account option in the app when it is available. We delete the account and its content within 30 days.
-- **Access, correction, copy and objection:** you can ask us for a copy of your data, to correct it, or to stop using it in a way you object to. Depending on where you live (for example India, the European Union, the United Kingdom or California) you may have additional rights under local law, and you may complain to your local data protection authority.
+If this policy changes, the new version is published on this page with a new date. Keeping the app installed means you accept it.
 
-## 7. Children
+## Contact
 
-InstantGram is for people who are **at least 13 years old**, or older if the law in your country says so. We ask for your date of birth when you sign up and do not allow younger people to make an account. If you believe a child under 13 has an account, write to us and we will remove it.
-
-## 8. Security
-
-Data travels over encrypted connections. Access to stored data is limited by rules that only let you change your own information, and secret keys are kept on our server, never inside the app. No system is perfectly secure, so please choose a strong password and keep it private.
-
-## 9. International transfers
-
-Our providers run servers in different countries, so your information can be processed outside the country where you live. We use providers that protect data under recognised standards.
-
-## 10. Changes to this policy
-
-If we change this policy, we change the date at the top and, for important changes, tell you in the app. Using the app after a change means you accept the new version.
-
-## 11. Contact
-
-Hyper Tech Labs - techlabs.hyper@gmail.com
+Questions, or anything about your data: techlabs.hyper@gmail.com.

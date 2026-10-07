@@ -83,24 +83,31 @@ void main() {
   });
 
   group('legal and limits', () {
-    test('the pages live next to each other', () {
+    test('the pages the app opens are published as they are', () {
       expect(kPrivacyUrl, endsWith('/privacy.html'));
       expect(kTermsUrl, endsWith('/terms.html'));
       expect(kPrivacyUrl.startsWith(kLegalBaseUrl), isTrue);
+      expect(File('docs/privacy.html').existsSync(), isTrue);
+      expect(File('docs/terms.html').existsSync(), isTrue);
       expect(File('docs/privacy.md').existsSync(), isTrue);
       expect(File('docs/terms.md').existsSync(), isTrue);
       expect(File('docs/profile.html').existsSync(), isTrue);
-      expect(File('docs/privacy.html').existsSync(), isFalse);
-      expect(File('docs/terms.html').existsSync(), isFalse);
+      // They are complete pages, so GitHub Pages needs no Jekyll build and no theme.
+      expect(File('docs/.nojekyll').existsSync(), isTrue);
     });
 
-    test('the markdown pages carry front matter for GitHub Pages', () {
-      for (final f in ['docs/privacy.md', 'docs/terms.md']) {
+    test('the pages carry the contact address', () {
+      for (final f in [
+        'docs/privacy.html',
+        'docs/terms.html',
+        'docs/privacy.md',
+        'docs/terms.md',
+      ]) {
         final text = File(f).readAsStringSync();
-        expect(text.startsWith('---\nlayout: default\n'), isTrue, reason: f);
-        expect(text, contains('techlabs.hyper@gmail.com'));
+        expect(text, contains('techlabs.hyper@gmail.com'), reason: f);
+        expect(text, contains('InstantGram'));
       }
-      expect(File('docs/_config.yml').readAsStringSync(), contains('theme:'));
+      expect(File('docs/_config.yml').readAsStringSync(), contains('title:'));
     });
 
     test('a profile link carries the username', () {
