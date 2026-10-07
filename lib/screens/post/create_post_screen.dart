@@ -19,6 +19,8 @@ import '../../models/finish.dart';
 import '../../models/music.dart';
 import '../../models/post.dart';
 import '../../models/story.dart' show StoryOverlay, kMaxStorySeconds;
+import '../../services/audio_merger.dart';
+import '../../services/itunes_service.dart';
 import '../../services/media_server.dart';
 import '../../services/media_service.dart';
 import '../../services/mp4_faststart.dart';
@@ -87,11 +89,24 @@ class _Item {
 
 /// A video that is ready to go up.
 class _Ready {
-  _Ready(this.file, this.temp, this.width, this.height);
+  _Ready(
+    this.file,
+    this.temp,
+    this.width,
+    this.height, {
+    this.merged,
+    this.seconds,
+  });
   final File file;
   final File? temp;
   final int width;
   final int height;
+
+  /// The video with a song mixed in (a temporary file), when that was done.
+  final File? merged;
+
+  /// Length of the published video when a song cut it (null = unchanged).
+  final int? seconds;
 }
 
 /// New post / new clip, in the way people know from Instagram:
@@ -120,6 +135,9 @@ class CreatePostScreen extends StatefulWidget {
 
 class _CreatePostScreenState extends State<CreatePostScreen> {
   int _mode = 0; // 0 = post, 1 = clips
+
+  /// True when the video that was just prepared has its song mixed in.
+  bool _baked = false;
   int _step = 0; // 0 = preview, 1 = details
 
   final List<_Item> _items = [];
@@ -476,8 +494,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   /// Sound of the video in the preview: off when it was muted in the editor.
-  double _previewVolume(_Item it) =>
-      it.videoEdits?.mute == true ? 0 : 1;
+  double _previewVolume(_Item it) => it.videoEdits?.mute == true ? 0 : 1;
 
   void _syncPreview() {
     final showing = _step == 0 && !_busy && !_previewPaused && _hasMedia;
@@ -509,10 +526,33 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final t = await pickMusic(context, currentId: _music?.id);
     if (!mounted) return;
     if (t != null) {
+      _explainSong(t);
       await _setMusic(t);
     } else {
       _syncPreview();
     }
+  }
+
+  /// The hit song that will be mixed into the clip (clips with one video only).
+  MusicTrack? get _bakeTrack {
+    final m = _music;
+    final f = _first;
+    if (m == null || !m.isApple || _mode != 1 || f == null || !f.video) {
+      return null;
+    }
+    return m;
+  }
+
+  /// Tells what a hit song does to a clip.
+  void _explainSong(MusicTrack t) {
+    if (!t.isApple || _mode != 1 || !(_first?.video ?? false)) return;
+    final long = (_first?.seconds ?? 0) > kSongPreviewSeconds;
+    showToast(
+      context,
+      long
+          ? 'This song replaces the sound of your video, and the clip is cut to $kSongPreviewSeconds seconds.'
+          : 'This song replaces the sound of your video.',
+    );
   }
 
   Future<void> _setMusic(MusicTrack? t) async {
@@ -590,7 +630,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final c = _preview;
       if (c != null) {
         await c.setVolume(_previewVolume(it));
-        await c.seekTo(Duration(seconds: ve != null && ve.trimmed ? ve.start : 0));
+        await c.seekTo(
+          Duration(seconds: ve != null && ve.trimmed ? ve.start : 0),
+        );
       }
     }
     if (r.music?.id != _music?.id) {
@@ -666,6 +708,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _stage = 'Getting ready...';
     });
     _syncPreview();
+    _baked = false;
     final caption = _caption.text.trim();
     final music = _music;
     final title = (music?.remote ?? false) ? music!.title : null;
@@ -721,7 +764,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             musicTitle: title,
             musicArtist: artist,
             musicVolume: kMusicVolume,
-            keepSound: _keepSound,
+            keepSound: _baked ? true : _keepSound,
+            musicBaked: _baked,
             finish: chosen.first.finish,
             options: _options,
           );
@@ -790,15 +834,19 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         videoRef: video,
         thumbRef: thumb,
         duration: seconds,
-        musicId: m?.id ?? '',
-        musicTitle: (m?.remote ?? false) ? m!.title : '',
-        musicArtist: (m?.remote ?? false) ? m!.artist : '',
+        // a song that is part of the video file is not played again over it
+        musicId: _baked ? '' : (m?.id ?? ''),
+        musicTitle: (m?.remote ?? false) && !_baked ? m!.title : '',
+        musicArtist: (m?.remote ?? false) && !_baked ? m!.artist : '',
         musicVolume: kMusicVolume,
         keepSound: _keepSound,
       );
     } catch (e) {
       if (mounted) {
-        showToast(context, 'Posted, but not added to your moments. ${friendlyError(e)}');
+        showToast(
+          context,
+          'Posted, but not added to your moments. ${friendlyError(e)}',
+        );
       }
     }
   }
@@ -878,7 +926,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               thumbRef: media.thumbRef,
               width: r.width,
               height: r.height,
-              seconds: it.seconds,
+              seconds: r.seconds ?? it.seconds,
               finish: it.finish,
             );
           } else {
@@ -904,6 +952,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     } finally {
       for (final r in ready.values) {
         r.temp?.delete().ignore();
+        r.merged?.delete().ignore();
       }
       VideoCompress.deleteAllCache();
     }
@@ -926,11 +975,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               saturation: l.saturation,
             );
       // the cover is the first picture: only what is on screen then is burned in
-      return await finishPhoto(
-        t,
-        edits,
-        [for (final o in f.overlays) if (o.visibleAt(0)) o],
-      );
+      return await finishPhoto(t, edits, [
+        for (final o in f.overlays)
+          if (o.visibleAt(0)) o,
+      ]);
     } catch (_) {
       return t;
     }
@@ -971,6 +1019,39 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       }
       file = shrunk;
     }
+    // A hit song (Apple preview) is mixed into a clip on the phone: it replaces the video's
+    // own sound and the clip is cut to the length of the preview.
+    File? merged;
+    int? cutSeconds;
+    final song = _bakeTrack;
+    if (song != null) {
+      if (mounted) {
+        setState(() {
+          _stage = 'Adding the song...';
+          _progress = null;
+        });
+      }
+      try {
+        final audio = await ItunesService.instance.downloadPreview(song);
+        final m = await AudioMerger.merge(
+          video: file,
+          audio: audio,
+          maxSeconds: kSongPreviewSeconds.toDouble(),
+        );
+        merged = m.file;
+        file = m.file;
+        cutSeconds = math.max(1, m.seconds.round());
+        _baked = true;
+      } catch (e) {
+        _baked = false;
+        if (mounted) {
+          showToast(
+            context,
+            'The song could not be put into the video (${friendlyError(e)}). It plays next to the video instead.',
+          );
+        }
+      }
+    }
     if (mounted) {
       setState(() {
         _stage = 'Getting ready...';
@@ -986,7 +1067,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       w = info?.width ?? 0;
       h = info?.height ?? 0;
     }
-    return _Ready(fast, temp, w, h);
+    return _Ready(fast, temp, w, h, merged: merged, seconds: cutSeconds);
   }
 
   /// "31.2 of 74.0 MB  ·  2.8 MB/s"
@@ -1796,9 +1877,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
     return parts.join('  \u00b7  ');
   }
-
 }
-
 
 /// A picture of the video at [ms]. Every call writes a new file, so a changed cover is never
 /// shown from the picture cache.

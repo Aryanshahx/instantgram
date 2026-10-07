@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../core/theme.dart';
-import '../models/music.dart';
 import '../models/post.dart';
 import '../services/clip_cache.dart';
 import '../services/music_player.dart';
@@ -175,7 +174,7 @@ class _ReelVideoState extends State<ReelVideo> {
       }
       await c.setLooping(true);
       MusicPlayer? music;
-      final track = musicById(widget.post.musicId);
+      final track = widget.post.playableMusic;
       if (track != null) {
         music = MusicPlayer(track);
         await music.init();

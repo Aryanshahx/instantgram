@@ -8,6 +8,7 @@ import '../core/theme.dart';
 import '../core/ui.dart';
 import '../models/music.dart';
 import '../models/post.dart';
+import '../services/itunes_service.dart';
 import '../services/online_music_service.dart';
 import '../services/music_player.dart';
 
@@ -79,7 +80,7 @@ class _MusicToggleChipState extends State<MusicToggleChip> {
   bool _playing = false;
   bool _busy = false;
 
-  MusicTrack? get _track => musicById(widget.post.musicId);
+  MusicTrack? get _track => widget.post.playableMusic;
 
   Future<void> _toggle() async {
     final track = _track;
@@ -179,7 +180,7 @@ class _MusicSheetState extends State<_MusicSheet> {
   String? _playingId;
   String? _loadingId;
 
-  // Free music tab
+  // tabs: 0 = the app's own, 1 = hit songs (Apple), 2 = free music
   int _tab = 0;
   final TextEditingController _term = TextEditingController();
   final ScrollController _scroll = ScrollController();
@@ -188,18 +189,22 @@ class _MusicSheetState extends State<_MusicSheet> {
   bool _searching = false;
   bool _more = false;
   int _nextOffset = 0;
-  bool _loadedOnce = false;
   String? _searchError;
   int _searchGen = 0;
 
   @override
   void initState() {
     super.initState();
-    _tab = (widget.currentId ?? '').startsWith(kOnlinePrefix) ? 1 : 0;
+    final cur = widget.currentId ?? '';
+    _tab = cur.startsWith(kApplePrefix)
+        ? 1
+        : cur.startsWith(kOnlinePrefix)
+        ? 2
+        : 0;
     _scroll.addListener(() {
       if (_scroll.position.extentAfter < 300) _loadMore();
     });
-    if (_tab == 1) _search();
+    if (_tab != 0) _search();
   }
 
   Future<void> _search({bool more = false}) async {
@@ -210,30 +215,31 @@ class _MusicSheetState extends State<_MusicSheet> {
       if (!more) _found = [];
     });
     try {
-      final page = await OnlineMusicService.instance.search(
-        _term.text,
-        offset: more ? _nextOffset : 0,
-      );
+      final offset = more ? _nextOffset : 0;
+      final page = _tab == 1
+          ? await ItunesService.instance.search(_term.text, offset: offset)
+          : await OnlineMusicService.instance.search(
+              _term.text,
+              offset: offset,
+            );
       if (!mounted || gen != _searchGen) return;
       setState(() {
         _found = more ? [..._found, ...page.tracks] : page.tracks;
         _more = page.hasMore;
         _nextOffset = page.next;
         _searching = false;
-        _loadedOnce = true;
       });
     } catch (e) {
       if (!mounted || gen != _searchGen) return;
       setState(() {
         _searching = false;
-        _loadedOnce = true;
         _searchError = friendlyError(e);
       });
     }
   }
 
   void _loadMore() {
-    if (_tab != 1 || _searching || !_more || _searchError != null) return;
+    if (_tab == 0 || _searching || !_more || _searchError != null) return;
     _search(more: true);
   }
 
@@ -352,8 +358,18 @@ class _MusicSheetState extends State<_MusicSheet> {
         key: ValueKey('musicTab$i'),
         onTap: () {
           if (_tab == i) return;
-          setState(() => _tab = i);
-          if (i == 1 && !_loadedOnce) _search();
+          _debounce?.cancel();
+          _searchGen++;
+          _term.clear();
+          setState(() {
+            _tab = i;
+            _found = [];
+            _more = false;
+            _nextOffset = 0;
+            _searching = false;
+            _searchError = null;
+          });
+          if (i != 0) _search();
         },
         child: Container(
           height: 38,
@@ -379,7 +395,13 @@ class _MusicSheetState extends State<_MusicSheet> {
         color: context.cardHigh,
         borderRadius: BorderRadius.circular(22),
       ),
-      child: Row(children: [chip(0, 'InstantGram'), chip(1, 'Free music')]),
+      child: Row(
+        children: [
+          chip(0, 'InstantGram'),
+          chip(1, 'Hit songs'),
+          chip(2, 'Free music'),
+        ],
+      ),
     );
   }
 
@@ -425,6 +447,15 @@ class _MusicSheetState extends State<_MusicSheet> {
             onSubmitted: (_) => _search(),
           ),
         ),
+        if (_tab == 1)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+            child: Text(
+              '30 second previews from Apple. A clip with a hit song is cut to 30 seconds and the song replaces its sound.',
+              key: const ValueKey('appleNote'),
+              style: TextStyle(color: context.muted, fontSize: 12),
+            ),
+          ),
         SizedBox(
           height: 40,
           child: ListView(
@@ -537,6 +568,8 @@ class _MusicSheetState extends State<_MusicSheet> {
 
 /// Quick searches under the search box of the free music tab.
 const List<String> kMusicGenres = [
+  'Bollywood',
+  'Punjabi',
   'Chill',
   'Lo-fi',
   'Pop',

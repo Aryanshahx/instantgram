@@ -198,6 +198,7 @@ class PostService {
     String? musicArtist,
     double musicVolume = 0.8,
     bool keepSound = true,
+    bool musicBaked = false,
     MediaFinish? finish,
     PostOptions options = const PostOptions(),
   }) async {
@@ -221,6 +222,7 @@ class PostService {
       'musicArtist': ?musicArtist,
       if (musicId != null) 'musicVolume': musicVolume,
       if (musicId != null) 'keepSound': keepSound,
+      if (musicId != null && musicBaked) 'musicBaked': true,
       'likeCount': 0,
       'commentCount': 0,
       ...options.toMap(),
@@ -324,7 +326,9 @@ class PostService {
     if (pin) {
       final now = await pinnedPosts(_uid);
       if (now.length >= maxPins && !now.any((p) => p.id == post.id)) {
-        throw PinLimitException('You can pin up to $maxPins posts. Unpin one first.');
+        throw PinLimitException(
+          'You can pin up to $maxPins posts. Unpin one first.',
+        );
       }
     }
     await _posts.doc(post.id).update({'pinned': pin});
@@ -477,12 +481,20 @@ class PostService {
   CollectionReference<Map<String, dynamic>> _commentLikes(
     String postId,
     String commentId,
-  ) => _posts.doc(postId).collection('comments').doc(commentId).collection('likes');
+  ) => _posts
+      .doc(postId)
+      .collection('comments')
+      .doc(commentId)
+      .collection('likes');
 
   Future<bool> isCommentLiked(String postId, String commentId) async =>
       (await _commentLikes(postId, commentId).doc(_uid).get()).exists;
 
-  Future<void> setCommentLike(String postId, String commentId, bool like) async {
+  Future<void> setCommentLike(
+    String postId,
+    String commentId,
+    bool like,
+  ) async {
     final ref = _posts.doc(postId).collection('comments').doc(commentId);
     final likeRef = ref.collection('likes').doc(_uid);
     final batch = _db.batch();

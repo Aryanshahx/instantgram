@@ -28,6 +28,8 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  audio_merge:
+    path: packages/audio_merge
   qr_flutter: ^4.1.0
   shared_preferences: ^2.5.3
   agora_rtc_engine: ^6.6.4

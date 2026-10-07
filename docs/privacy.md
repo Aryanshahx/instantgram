@@ -63,6 +63,7 @@ We use the following services to run the app. They process data for us under the
 | **Tigris Global** (object storage) | Stores photos, clips, moments, voice notes and avatars | The media files you upload |
 | **Vercel** (our small server) | Checks you are signed in and hands out upload links; looks up music for you | Your account ID, file type and size, search words for music; technical request data |
 | **Agora** | Voice and video calls | Call audio and video, a call room name, technical data |
+| **Apple** (iTunes Search API) | Song search and 30 second previews | Your song search words, sent straight from your phone to Apple, with technical data such as your IP address; your phone then downloads the preview from Apple |
 | **Openverse** (WordPress) and **Jamendo** | Free music search and streaming | Music search words and the track you pick, sent from our server (never your name or email); your phone then streams the song from Jamendo and so Jamendo receives technical data such as your IP address |
 | **Giphy** | GIFs and stickers | Your sticker or GIF search words and technical request data such as your IP address |
 | **GitHub** | Checks whether a new app version exists | A request for the latest release (no account data) |

@@ -1,0 +1,19 @@
+name: audio_merge
+description: Puts a song into a video on the phone (Android MediaMuxer, no re-encoding, no extra libraries).
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.3.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.hypertechlabs.audio_merge
+        pluginClass: AudioMergePlugin

@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:video_player/video_player.dart';
 
-import '../models/music.dart';
 import '../models/finish.dart';
 import '../models/post.dart';
 import '../services/clip_cache.dart';
@@ -257,7 +256,7 @@ class _InlineVideoLayerState extends State<InlineVideoLayer>
       c = await _openVideo(post, url);
       if (c == null) return;
     }
-    final track = musicById(post.musicId);
+    final track = post.playableMusic;
     if (track != null) {
       music = MusicPlayer(track);
       await music.init();

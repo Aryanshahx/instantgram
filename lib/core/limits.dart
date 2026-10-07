@@ -10,3 +10,6 @@ String videoTooLongMessage(int ms) {
   final shown = '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
   return 'A video can be at most 1 minute long. This one is $shown. Pick a shorter video.';
 }
+
+/// A video with a hit song (Apple preview) is cut to the length of the preview.
+const int kSongPreviewSeconds = 30;

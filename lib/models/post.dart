@@ -120,6 +120,7 @@ class Post {
     this.musicId = '',
     this.musicVolume = 0.8,
     this.keepSound = true,
+    this.musicBaked = false,
     this.media = const [],
     this.shareCount = 0,
     this.repostCount = 0,
@@ -166,6 +167,10 @@ class Post {
   final String musicId;
   final double musicVolume;
   final bool keepSound;
+
+  /// The song is already mixed into the video file (made on the phone with a hit song). Then
+  /// nothing is played on top of it; the name is still shown.
+  final bool musicBaked;
 
   /// Times it was shared (link or sent to people).
   final int shareCount;
@@ -230,6 +235,10 @@ class Post {
 
   bool get hasMusic => musicId.isNotEmpty;
 
+  /// The track a player has to start next to this post (null when there is none, or when the
+  /// song is part of the video file already).
+  MusicTrack? get playableMusic => musicBaked ? null : musicById(musicId);
+
   /// Posts that can no longer be shown: old "paste a link" videos, and anything that
   /// lived in the removed Telegram storage.
   bool get isLegacyLink =>
@@ -279,6 +288,7 @@ class Post {
           ? (m['musicVolume'] as num).toDouble().clamp(0.0, 1.0)
           : 0.8,
       keepSound: m['keepSound'] is bool ? m['keepSound'] as bool : true,
+      musicBaked: m['musicBaked'] == true,
       shareCount: _int(m['shareCount']),
       repostCount: _int(m['repostCount']),
       pinned: m['pinned'] == true,

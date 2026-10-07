@@ -11,7 +11,29 @@ class MusicTrack {
     required this.bpm,
     this.artist = '',
     this.cover = '',
+    this.previewUrl = '',
   });
+
+  /// A 30 second preview of a song from Apple (iTunes Search API). The app stores it as
+  /// `it:<trackId>`. [previewUrl] is the address of the preview (it is looked up again by
+  /// id when it is not known, for example for a post made by someone else).
+  factory MusicTrack.apple({
+    required String trackId,
+    required String title,
+    String artist = '',
+    int seconds = 30,
+    String cover = '',
+    String previewUrl = '',
+  }) => MusicTrack(
+    id: '$kApplePrefix$trackId',
+    title: title.isEmpty ? 'Song' : title,
+    mood: 'Hit songs',
+    seconds: seconds,
+    bpm: 0,
+    artist: artist,
+    cover: cover,
+    previewUrl: previewUrl,
+  );
 
   /// A track from the free online catalogue (searched through the media service).
   /// [uuid] is the catalogue's own track id; the app stores it as `ov:<id>`.
@@ -46,10 +68,17 @@ class MusicTrack {
   /// Small cover picture address (online tracks only).
   final String cover;
 
-  bool get remote => id.startsWith(kOnlinePrefix);
+  /// Address of the 30 second preview (Apple tracks only; may be empty).
+  final String previewUrl;
 
-  /// The catalogue's id without the `ov:` prefix.
-  String get remoteId => remote ? id.substring(kOnlinePrefix.length) : '';
+  /// A track that comes from the internet (not from the app's own library).
+  bool get remote => isApple || isOnline;
+
+  bool get isApple => id.startsWith(kApplePrefix);
+  bool get isOnline => id.startsWith(kOnlinePrefix);
+
+  /// The catalogue's id without the `ov:` / `it:` prefix.
+  String get remoteId => remote ? id.substring(3) : '';
 
   String get asset => 'assets/music/$id.mp3';
 
@@ -58,18 +87,27 @@ class MusicTrack {
 }
 
 const String kOnlinePrefix = 'ov:';
+const String kApplePrefix = 'it:';
 
 final Map<String, MusicTrack> _remembered = {};
 
 /// Posts and moments only store the id, the title and the artist of an online track.
 /// This keeps them so [musicById] can find the track later (labels, players).
 void rememberMusic(String id, String title, String artist) {
-  if (!id.startsWith(kOnlinePrefix) || _remembered.containsKey(id)) return;
-  _remembered[id] = MusicTrack.online(
-    uuid: id.substring(kOnlinePrefix.length),
-    title: title,
-    artist: artist,
-  );
+  if (_remembered.containsKey(id)) return;
+  if (id.startsWith(kOnlinePrefix)) {
+    _remembered[id] = MusicTrack.online(
+      uuid: id.substring(kOnlinePrefix.length),
+      title: title,
+      artist: artist,
+    );
+  } else if (id.startsWith(kApplePrefix)) {
+    _remembered[id] = MusicTrack.apple(
+      trackId: id.substring(kApplePrefix.length),
+      title: title,
+      artist: artist,
+    );
+  }
 }
 
 /// Fields that describe [t] inside a post or moment document.

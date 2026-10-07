@@ -1,6 +1,7 @@
 import 'package:video_player/video_player.dart';
 
 import '../models/music.dart';
+import 'itunes_service.dart';
 import 'online_music_service.dart';
 
 /// Plays one of the app's own tracks (looping). The native video player can play audio files
@@ -20,7 +21,11 @@ class MusicPlayer {
     try {
       c = track.remote
           ? VideoPlayerController.networkUrl(
-              Uri.parse(await OnlineMusicService.instance.audioUrl(track)),
+              Uri.parse(
+                track.isApple
+                    ? await ItunesService.instance.previewUrl(track)
+                    : await OnlineMusicService.instance.audioUrl(track),
+              ),
               videoPlayerOptions: opts,
             )
           : VideoPlayerController.asset(track.asset, videoPlayerOptions: opts);
