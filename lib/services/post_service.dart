@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/finish.dart';
+import '../models/music.dart';
 import '../models/post.dart';
 import 'post_search.dart';
 import 'media_server.dart';
@@ -266,6 +267,7 @@ class PostService {
       if (p.media.isNotEmpty)
         for (final m in p.media) ...[m.ref, m.thumbRef]
       else ...[p.isVideo ? p.videoRef : p.imageRef, p.thumbRef],
+      deviceMusicRef(p.musicId), // a sound that came from the phone
     ]);
   }
 

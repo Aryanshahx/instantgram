@@ -17,7 +17,7 @@ Map<String, dynamic> _song(int id, {String? preview, String name = 'Song'}) => {
   'trackName': '$name $id',
   'artistName': 'Artist $id',
   'artworkUrl100': 'https://is1.mzstatic.com/x/$id/100x100bb.jpg',
-  if (preview != null) 'previewUrl': preview,
+  'previewUrl': ?preview,
 };
 
 Post _post({bool baked = false}) => Post(

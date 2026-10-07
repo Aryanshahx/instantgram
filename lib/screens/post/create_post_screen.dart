@@ -20,6 +20,7 @@ import '../../models/music.dart';
 import '../../models/post.dart';
 import '../../models/story.dart' show StoryOverlay, kMaxStorySeconds;
 import '../../services/audio_merger.dart';
+import '../../services/device_audio.dart';
 import '../../services/itunes_service.dart';
 import '../../services/media_server.dart';
 import '../../services/media_service.dart';
@@ -138,6 +139,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   /// True when the video that was just prepared has its song mixed in.
   bool _baked = false;
+
+  /// The song from the phone after its upload (what the post and the moment store).
+  MusicTrack? _sentMusic;
   int _step = 0; // 0 = preview, 1 = details
 
   final List<_Item> _items = [];
@@ -523,7 +527,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   Future<void> _chooseMusic() async {
     if (_busy) return;
     _previewMusic?.pause();
-    final t = await pickMusic(context, currentId: _music?.id);
+    final t = await pickMusic(context, current: _music);
     if (!mounted) return;
     if (t != null) {
       _explainSong(t);
@@ -533,27 +537,70 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  /// The hit song that will be mixed into the clip (clips with one video only).
+  /// The song (a hit song or a sound from the phone) that will be mixed into the clip (clips
+  /// with one video only).
   MusicTrack? get _bakeTrack {
     final m = _music;
     final f = _first;
-    if (m == null || !m.isApple || _mode != 1 || f == null || !f.video) {
+    if (m == null ||
+        !(m.isApple || m.isLocal) ||
+        _mode != 1 ||
+        f == null ||
+        !f.video) {
       return null;
     }
     return m;
   }
 
-  /// Tells what a hit song does to a clip.
+  /// How long the clip gets with [t] mixed in (0 = as long as the video).
+  int _songLimit(MusicTrack t) => t.isApple ? kSongPreviewSeconds : t.seconds;
+
+  /// Tells what a song does to a clip.
   void _explainSong(MusicTrack t) {
-    if (!t.isApple || _mode != 1 || !(_first?.video ?? false)) return;
-    final long = (_first?.seconds ?? 0) > kSongPreviewSeconds;
+    if (!(t.isApple || t.isLocal) || _mode != 1 || !(_first?.video ?? false)) {
+      return;
+    }
+    final limit = _songLimit(t);
+    final long = limit > 0 && (_first?.seconds ?? 0) > limit;
     showToast(
       context,
       long
-          ? 'This song replaces the sound of your video, and the clip is cut to $kSongPreviewSeconds seconds.'
+          ? 'This song replaces the sound of your video, and the clip is cut to $limit seconds.'
           : 'This song replaces the sound of your video.',
     );
   }
+
+  /// A song from the phone is uploaded when the post is shared, unless it is part of the video
+  /// file already. Other tracks are returned as they are. A failed upload never loses the post:
+  /// it is shared without the song.
+  Future<MusicTrack?> _sendable(MusicTrack? m) async {
+    if (m == null || !m.isLocal || _baked) return m;
+    if (mounted) {
+      setState(() {
+        _stage = 'Uploading the sound...';
+        _progress = null;
+      });
+    }
+    try {
+      final up = await DeviceAudio.upload(m);
+      _sentMusic = up;
+      return up;
+    } catch (e) {
+      if (mounted) {
+        showToast(
+          context,
+          'The sound could not be uploaded (${friendlyError(e)}). Posted without it.',
+        );
+      }
+      return null;
+    }
+  }
+
+  static String? _titleOf(MusicTrack? m) =>
+      (m?.remote ?? false) ? m!.title : null;
+
+  static String? _artistOf(MusicTrack? m) =>
+      (m?.remote ?? false) && m!.artist.isNotEmpty ? m.artist : null;
 
   Future<void> _setMusic(MusicTrack? t) async {
     final old = _previewMusic;
@@ -709,12 +756,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     });
     _syncPreview();
     _baked = false;
+    _sentMusic = null;
     final caption = _caption.text.trim();
-    final music = _music;
-    final title = (music?.remote ?? false) ? music!.title : null;
-    final artist = (music?.remote ?? false) && music!.artist.isNotEmpty
-        ? music.artist
-        : null;
+    var music = _music;
     try {
       // what a moment made from this post would show
       String storyImage = '';
@@ -732,6 +776,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           _stage = 'Uploading...';
           _progress = 0;
         });
+        music = await _sendable(music);
+        if (mounted) {
+          setState(() {
+            _stage = 'Uploading...';
+            _progress = 0;
+          });
+        }
         final dims = it.width > 0 && it.height > 0
             ? null
             : await PhotoEditor.probeSize(it.file);
@@ -743,14 +794,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           width: dims?.width.round() ?? it.width,
           height: dims?.height.round() ?? it.height,
           musicId: music?.id,
-          musicTitle: title,
-          musicArtist: artist,
+          musicTitle: _titleOf(music),
+          musicArtist: _artistOf(music),
           musicVolume: kMusicVolume,
           clip: _photoClip,
           clipSeconds: kPhotoClipSeconds,
         );
       } else {
         final up = await _uploadAll(chosen);
+        music = await _sendable(music);
         if (mounted) setState(() => _stage = 'Publishing...');
         if (_mode == 1) {
           final r = up.first;
@@ -761,8 +813,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             width: r.width,
             height: r.height,
             musicId: music?.id,
-            musicTitle: title,
-            musicArtist: artist,
+            musicTitle: _titleOf(music),
+            musicArtist: _artistOf(music),
             musicVolume: kMusicVolume,
             keepSound: _baked ? true : _keepSound,
             musicBaked: _baked,
@@ -786,8 +838,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             items: up,
             caption: caption,
             musicId: music?.id,
-            musicTitle: title,
-            musicArtist: artist,
+            musicTitle: _titleOf(music),
+            musicArtist: _artistOf(music),
             musicVolume: kMusicVolume,
             keepSound: _keepSound,
           );
@@ -828,7 +880,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         }
         return;
       }
-      final m = _music;
+      // a song from the phone is the uploaded copy (null when the upload failed)
+      final m = (_music?.isLocal ?? false) ? _sentMusic : _music;
       await StoryService.instance.addStoryFromRefs(
         imageRef: image,
         videoRef: video,
@@ -1032,11 +1085,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         });
       }
       try {
-        final audio = await ItunesService.instance.downloadPreview(song);
+        final audio = song.isLocal
+            ? File(song.localPath)
+            : await ItunesService.instance.downloadPreview(song);
         final m = await AudioMerger.merge(
           video: file,
           audio: audio,
-          maxSeconds: kSongPreviewSeconds.toDouble(),
+          maxSeconds: song.isApple
+              ? kSongPreviewSeconds.toDouble()
+              : kMaxVideoSeconds.toDouble(),
         );
         merged = m.file;
         file = m.file;

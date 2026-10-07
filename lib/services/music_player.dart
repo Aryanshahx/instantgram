@@ -1,10 +1,13 @@
+import 'dart:io';
+
 import 'package:video_player/video_player.dart';
 
 import '../models/music.dart';
 import 'itunes_service.dart';
 import 'online_music_service.dart';
 
-/// Plays one of the app's own tracks (looping). The native video player can play audio files
+/// Plays a track (looping): a file from the phone, an uploaded one, a song from the internet or
+/// one of the app's old built-in loops. The native video player can play audio files
 /// too, so no extra plugin is needed. It mixes with other sounds instead of taking over audio
 /// focus, so a clip's own sound and the music can play together.
 class MusicPlayer {
@@ -19,7 +22,17 @@ class MusicPlayer {
     final opts = VideoPlayerOptions(mixWithOthers: true);
     VideoPlayerController c;
     try {
-      c = track.remote
+      c = track.isLocal
+          ? VideoPlayerController.file(
+              File(track.localPath),
+              videoPlayerOptions: opts,
+            )
+          : track.isDevice
+          ? VideoPlayerController.networkUrl(
+              Uri.parse(track.uploadedUrl),
+              videoPlayerOptions: opts,
+            )
+          : track.remote
           ? VideoPlayerController.networkUrl(
               Uri.parse(
                 track.isApple

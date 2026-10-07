@@ -7,6 +7,36 @@ import '../core/errors.dart';
 import '../models/music.dart';
 import 'online_music_service.dart' show MusicPage;
 
+/// One row of the InstantGram audio tab: [name] is what the user sees, [term] is what is
+/// asked to Apple. Keeping terms instead of fixed songs means the picks refresh themselves.
+class MusicStation {
+  const MusicStation(this.name, this.term);
+  final String name;
+  final String term;
+}
+
+/// The songs of one row of the InstantGram audio tab.
+class StationTracks {
+  const StationTracks(this.station, this.tracks);
+  final MusicStation station;
+  final List<MusicTrack> tracks;
+}
+
+/// The rows of the InstantGram audio tab (8 searches, up to 5 songs each: 40 songs).
+const List<MusicStation> kInstantStations = [
+  MusicStation('Bollywood now', 'bollywood hits'),
+  MusicStation('Punjabi', 'punjabi hits'),
+  MusicStation('Romantic', 'romantic hindi songs'),
+  MusicStation('Party', 'party anthems hindi'),
+  MusicStation('Lo-fi', 'lofi beats'),
+  MusicStation('Desi hip hop', 'desi hip hop'),
+  MusicStation('Chill', 'chill pop'),
+  MusicStation('Workout', 'workout songs hindi'),
+];
+
+/// How many songs are asked for each row of the InstantGram audio tab.
+const int kStationSize = 5;
+
 /// Songs from Apple: the free, public iTunes Search API (no key, no server of ours). It gives
 /// the title, the artist, the cover and a 30 second preview (`previewUrl`) of each song, and
 /// Apple's "most played" chart for the trending list. The phone talks to Apple directly.
@@ -32,12 +62,54 @@ class ItunesService {
   void clearCache() {
     _chart = null;
     _chartAt = DateTime.fromMillisecondsSinceEpoch(0);
+    _curated = null;
+    _curatedAt = DateTime.fromMillisecondsSinceEpoch(0);
     _previews.clear();
   }
 
   List<MusicTrack>? _chart;
   DateTime _chartAt = DateTime.fromMillisecondsSinceEpoch(0);
+  List<StationTracks>? _curated;
+  DateTime _curatedAt = DateTime.fromMillisecondsSinceEpoch(0);
   final Map<String, String> _previews = {};
+
+  /// The InstantGram audio tab: a handful of hand-picked searches, each one a row of songs.
+  /// They are put together here and kept for 30 minutes. A station that fails is left out,
+  /// it never empties the whole tab.
+  Future<List<StationTracks>> curated({bool force = false}) async {
+    final c = _curated;
+    if (!force &&
+        c != null &&
+        DateTime.now().difference(_curatedAt).inMinutes < 30) {
+      return c;
+    }
+    final out = <StationTracks>[];
+    final seen = <String>{};
+    for (final st in kInstantStations) {
+      try {
+        final r = await _get(
+          'https://itunes.apple.com/search?term='
+          '${Uri.encodeQueryComponent(st.term)}'
+          '&media=music&entity=song&limit=$kStationSize&country=$country',
+        );
+        final raw = r['results'];
+        final list = raw is List ? raw : const [];
+        final tracks = <MusicTrack>[];
+        for (final e in list) {
+          final t = _track(e);
+          if (t != null && seen.add(t.id)) tracks.add(t);
+        }
+        if (tracks.isNotEmpty) out.add(StationTracks(st, tracks));
+      } catch (_) {
+        // One slow station must not take the whole tab down.
+      }
+    }
+    if (out.isNotEmpty) {
+      _curated = out;
+      _curatedAt = DateTime.now();
+    }
+    return out;
+  }
 
   Future<Map<String, dynamic>> _get(String url) async {
     final b = backend;

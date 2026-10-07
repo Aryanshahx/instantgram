@@ -11,6 +11,7 @@ import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/music.dart';
 import '../../models/story.dart';
+import '../../services/device_audio.dart';
 import '../../services/media_service.dart';
 import '../../services/music_player.dart';
 import '../../services/story_service.dart';
@@ -221,7 +222,6 @@ class StoryComposerScreen extends StatefulWidget {
   State<StoryComposerScreen> createState() => _StoryComposerScreenState();
 }
 
-
 class _StoryComposerScreenState extends State<StoryComposerScreen> {
   final List<StoryOverlay> _overlays = [];
   VideoPlayerController? _vc;
@@ -339,7 +339,7 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
   }
 
   Future<void> _music() async {
-    final t = await pickMusic(context, currentId: _track?.id);
+    final t = await pickMusic(context, current: _track);
     if (t == null || !mounted) return;
     final old = _player;
     _player = null;
@@ -374,15 +374,18 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
       _progress = 0;
     });
     try {
+      // a sound from the phone goes up together with the moment
+      final track = _track;
+      final sent = track == null ? null : await DeviceAudio.upload(track);
       await StoryService.instance.addStory(
         image: widget.image,
         video: widget.video,
         thumb: widget.thumb,
         duration: widget.seconds,
         overlays: _overlays,
-        musicId: _track?.id ?? '',
-        musicTitle: (_track?.remote ?? false) ? _track!.title : '',
-        musicArtist: _track?.artist ?? '',
+        musicId: sent?.id ?? '',
+        musicTitle: (sent?.remote ?? false) ? sent!.title : '',
+        musicArtist: sent?.artist ?? '',
         keepSound: _keepSound,
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);

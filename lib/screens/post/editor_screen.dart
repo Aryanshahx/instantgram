@@ -319,7 +319,7 @@ class _EditorScreenState extends State<EditorScreen>
 
   Future<void> _audio() async {
     _player?.pause();
-    final t = await pickMusic(context, currentId: _music?.id);
+    final t = await pickMusic(context, current: _music);
     if (!mounted) return;
     if (t == null) {
       if (!_paused) _player?.play();

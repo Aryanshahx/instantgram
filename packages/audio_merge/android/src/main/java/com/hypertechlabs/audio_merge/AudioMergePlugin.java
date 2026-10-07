@@ -16,7 +16,10 @@ import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 
-/** `merge(video, audio, output, maxSeconds)` -> {seconds}. Runs on a background thread. */
+/**
+ * `merge(video, audio, output, maxSeconds)` and `toAac(input, output, maxSeconds)` -> {seconds}.
+ * Both run on a background thread.
+ */
 public class AudioMergePlugin implements FlutterPlugin, MethodCallHandler {
     private MethodChannel channel;
     private final ExecutorService pool = Executors.newSingleThreadExecutor();
@@ -30,24 +33,29 @@ public class AudioMergePlugin implements FlutterPlugin, MethodCallHandler {
 
     @Override
     public void onMethodCall(@NonNull MethodCall call, @NonNull final Result result) {
-        if (!"merge".equals(call.method)) {
+        final boolean merge = "merge".equals(call.method);
+        final boolean convert = "toAac".equals(call.method);
+        if (!merge && !convert) {
             result.notImplemented();
             return;
         }
         final String video = call.argument("video");
         final String audio = call.argument("audio");
+        final String input = call.argument("input");
         final String output = call.argument("output");
         Double max = call.argument("maxSeconds");
         final long maxUs = (long) ((max == null ? 30.0 : max) * 1000000.0);
-        if (video == null || audio == null || output == null) {
-            result.error("bad_args", "video, audio and output are needed", null);
+        if (output == null || (merge && (video == null || audio == null)) || (convert && input == null)) {
+            result.error("bad_args", "the file names are missing", null);
             return;
         }
         pool.execute(new Runnable() {
             @Override
             public void run() {
                 try {
-                    final long us = AudioMerger.merge(video, audio, output, maxUs);
+                    final long us = merge
+                            ? AudioMerger.merge(video, audio, output, maxUs)
+                            : AudioConverter.toAac(input, output, maxUs);
                     final Map<String, Object> out = new HashMap<>();
                     out.put("seconds", us / 1000000.0);
                     main.post(new Runnable() {
@@ -60,7 +68,7 @@ public class AudioMergePlugin implements FlutterPlugin, MethodCallHandler {
                     main.post(new Runnable() {
                         @Override
                         public void run() {
-                            result.error("merge_failed", String.valueOf(e.getMessage()), null);
+                            result.error(merge ? "merge_failed" : "convert_failed", String.valueOf(e.getMessage()), null);
                         }
                     });
                 }

@@ -58,6 +58,48 @@ class AudioMerger {
   )?
   backend;
 
+  /// Tests replace this: (input, output, maxSeconds) -> seconds written.
+  static Future<double> Function(
+    String input,
+    String output,
+    double maxSeconds,
+  )?
+  convertBackend;
+
+  /// Turns any audio file the phone can play (mp3, m4a, wav, ogg, flac...) into a small AAC
+  /// file (in an .mp4 container), keeping the first [maxSeconds] seconds. A file that already
+  /// is AAC is copied without re-encoding.
+  static Future<MergeResult> toAac({
+    required File input,
+    double maxSeconds = 60,
+  }) async {
+    final out = File(
+      '${Directory.systemTemp.path}/instantgram_sound_${DateTime.now().microsecondsSinceEpoch}.mp4',
+    );
+    try {
+      final b = convertBackend;
+      final double seconds;
+      if (b != null) {
+        seconds = await b(input.path, out.path, maxSeconds);
+      } else {
+        final r = await _channel.invokeMapMethod<String, Object?>('toAac', {
+          'input': input.path,
+          'output': out.path,
+          'maxSeconds': maxSeconds,
+        });
+        final s = r?['seconds'];
+        seconds = s is num ? s.toDouble() : 0;
+      }
+      return MergeResult(out, seconds);
+    } on PlatformException catch (e) {
+      throw MediaException(
+        e.message ?? 'Could not use that audio file. Try another one.',
+      );
+    } on MissingPluginException {
+      throw const MediaException('Importing audio is not available here.');
+    }
+  }
+
   /// Merges [audio] (an AAC .m4a) into [video]; the sound of the video is replaced.
   static Future<MergeResult> merge({
     required File video,

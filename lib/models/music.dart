@@ -1,7 +1,13 @@
-/// The app's own music library. Users pick from these; nothing is imported from the phone.
+import '../core/media_url.dart';
+
+/// A song for a post, a clip or a moment. Where it can come from:
 ///
-/// To add a track: put an mp3 in `assets/music/`, add a line here, and publish a new version.
-/// (Old posts keep working: a post only stores the track's [id].)
+/// * the phone: a file the user picks (`my:` ids; the phone turns it into a small AAC file,
+///   which is uploaded to the media storage when the post is shared);
+/// * Hit songs: 30 second previews from Apple (`it:` ids);
+/// * Free music: Creative Commons tracks (`ov:` ids);
+/// * `kMusicLibrary`: the app's old built-in loops. They are no longer offered, but posts that
+///   were made with them keep playing.
 class MusicTrack {
   const MusicTrack({
     required this.id,
@@ -12,7 +18,33 @@ class MusicTrack {
     this.artist = '',
     this.cover = '',
     this.previewUrl = '',
+    this.localPath = '',
   });
+
+  /// A song picked from the phone, already turned into a small AAC file at [path]. It is not
+  /// uploaded yet (that happens when the post is shared; see `DeviceAudio.upload`).
+  factory MusicTrack.device({
+    required String path,
+    required String title,
+    int seconds = 0,
+  }) => MusicTrack(
+    id: kDeviceLocalId,
+    title: title.trim().isEmpty ? 'My sound' : title.trim(),
+    mood: 'My phone',
+    seconds: seconds,
+    bpm: 0,
+    localPath: path,
+  );
+
+  /// A song from the phone after it was uploaded: `my:<storage key>`.
+  factory MusicTrack.uploaded({required String key, required String title}) =>
+      MusicTrack(
+        id: '$kDevicePrefix$key',
+        title: title.trim().isEmpty ? 'My sound' : title.trim(),
+        mood: 'My phone',
+        seconds: 0,
+        bpm: 0,
+      );
 
   /// A 30 second preview of a song from Apple (iTunes Search API). The app stores it as
   /// `it:<trackId>`. [previewUrl] is the address of the preview (it is looked up again by
@@ -58,7 +90,7 @@ class MusicTrack {
   final String title;
   final String mood;
 
-  /// Length of the loop in seconds (it repeats for as long as the clip lasts).
+  /// Length in seconds (a song plays again from the start for as long as the clip lasts).
   final int seconds;
   final int bpm;
 
@@ -71,11 +103,25 @@ class MusicTrack {
   /// Address of the 30 second preview (Apple tracks only; may be empty).
   final String previewUrl;
 
-  /// A track that comes from the internet (not from the app's own library).
-  bool get remote => isApple || isOnline;
+  /// Where the converted file of a song from the phone is (empty once it is uploaded).
+  final String localPath;
+
+  /// A track that is not one of the app's old built-in loops: its title is saved with the post.
+  bool get remote => isApple || isOnline || isDevice;
 
   bool get isApple => id.startsWith(kApplePrefix);
   bool get isOnline => id.startsWith(kOnlinePrefix);
+
+  /// A song from the phone (before or after the upload).
+  bool get isDevice => id.startsWith(kDevicePrefix);
+
+  /// A song from the phone that is still only on this phone.
+  bool get isLocal => isDevice && localPath.isNotEmpty;
+
+  /// Where an uploaded song from the phone can be streamed ('' for the others).
+  String get uploadedUrl => isDevice && !isLocal && id != kDeviceLocalId
+      ? resolveMediaUrl('m:${id.substring(kDevicePrefix.length)}')
+      : '';
 
   /// The catalogue's id without the `ov:` / `it:` prefix.
   String get remoteId => remote ? id.substring(3) : '';
@@ -88,6 +134,17 @@ class MusicTrack {
 
 const String kOnlinePrefix = 'ov:';
 const String kApplePrefix = 'it:';
+const String kDevicePrefix = 'my:';
+
+/// The id of a song from the phone that has not been uploaded yet.
+const String kDeviceLocalId = 'my:local';
+
+/// The storage reference (`m:<key>`) of the audio file of a song from the phone, or '' for any
+/// other id. Used to delete the file together with its post.
+String deviceMusicRef(String musicId) =>
+    musicId.startsWith(kDevicePrefix) && musicId != kDeviceLocalId
+    ? 'm:${musicId.substring(kDevicePrefix.length)}'
+    : '';
 
 final Map<String, MusicTrack> _remembered = {};
 
@@ -100,6 +157,11 @@ void rememberMusic(String id, String title, String artist) {
       uuid: id.substring(kOnlinePrefix.length),
       title: title,
       artist: artist,
+    );
+  } else if (id.startsWith(kDevicePrefix) && id != kDeviceLocalId) {
+    _remembered[id] = MusicTrack.uploaded(
+      key: id.substring(kDevicePrefix.length),
+      title: title,
     );
   } else if (id.startsWith(kApplePrefix)) {
     _remembered[id] = MusicTrack.apple(

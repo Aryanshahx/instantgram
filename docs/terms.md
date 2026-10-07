@@ -43,6 +43,7 @@ You may not use InstantGram to:
 
 ## 5. Music, GIFs, stickers and other third-party content
 
+- **Sounds from your phone:** you may add only audio that you made or have the right to use. It is uploaded with your post and removed when the post is deleted. Audio that breaks someone's rights may be removed (see section 6).
 - **Hit songs** are 30 second previews that Apple offers through its public iTunes Search API. They belong to their artists and labels. They are used only inside the app, with the artist's name shown, and a clip with such a song is cut to 30 seconds. You may not copy, resell or use them outside the app.
 - Free music comes from the **Jamendo** catalogue (found through Openverse), where artists share their songs under Creative Commons licences. In the app it is shown with the artist's name. You may use it only inside the app, as it is offered there, and you may not resell it. Songs whose licence forbids using them in videos are not offered.
 - GIFs and stickers come from **Giphy** and may be used only inside the app.

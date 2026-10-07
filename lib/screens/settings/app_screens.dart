@@ -263,7 +263,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
       ),
       (
         'Where it is stored',
-        'Account data and messages live in Google Firebase. Photos, clips and voice files live in our own media storage. Songs in Hit songs are 30 second previews from Apple (iTunes). Free music comes from the Jamendo catalogue through Openverse.',
+        'Account data and messages live in Google Firebase. Photos, clips, voice files and sounds you add from your phone live in our own media storage. Songs in Hit songs are 30 second previews from Apple (iTunes). Free music comes from the Jamendo catalogue through Openverse.',
       ),
       (
         'On your phone',
@@ -303,7 +303,7 @@ class TermsScreen extends StatelessWidget {
       ),
       (
         'Audio',
-        'Hit songs are 30 second previews that Apple offers to promote its music; they belong to their owners and are used only inside the app, with the artist\'s name shown. Free music is shared by its artists under Creative Commons licences (the Jamendo catalogue, found through Openverse). Do not copy or resell any of it.',
+        'A sound from your phone is yours: add only audio you have the right to use. It is uploaded when you share your post and removed with it. Hit songs are 30 second previews that Apple offers to promote its music; they belong to their owners and are used only inside the app, with the artist\'s name shown. Free music is shared by its artists under Creative Commons licences (the Jamendo catalogue, found through Openverse). Do not copy or resell any of it.',
       ),
       (
         'Reports and removal',

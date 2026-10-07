@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../core/media_url.dart';
+import '../models/music.dart';
 import '../models/story.dart';
 import 'mp4_faststart.dart';
 import 'media_server.dart';
@@ -174,9 +175,10 @@ class StoryService {
   Future<void> deleteStory(Story s) async {
     await _stories.doc(s.id).delete();
     if (s.shared) return; // the post still uses these files
-    await MediaServer.instance.deleteQuietly(
+    await MediaServer.instance.deleteRefs([
       s.isVideo ? s.videoRef : s.imageRef,
-      s.isVideo ? s.thumbRef : null,
-    );
+      if (s.isVideo) s.thumbRef,
+      deviceMusicRef(s.musicId),
+    ]);
   }
 }

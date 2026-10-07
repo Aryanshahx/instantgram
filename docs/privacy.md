@@ -27,6 +27,7 @@ InstantGram ("the app", "we", "us") is a social app for sharing photos, clips an
 
 ### Information from your phone (only with your permission)
 - **Camera and photos/videos:** to take or pick media you want to post or send.
+- **Audio files:** only the file you pick yourself, to use as the sound of a post, a clip or a moment. It is uploaded when you share and deleted with the post.
 - **Microphone:** for voice notes and for voice or video calls.
 - **Location:** only when you choose to add your current place to a post. It is never collected in the background.
 
@@ -60,7 +61,7 @@ We use the following services to run the app. They process data for us under the
 | Provider | What it does | Data it receives |
 |---|---|---|
 | **Google Firebase** (Authentication, Cloud Firestore) | Sign-in, profiles, posts data, comments, messages, follows | Account details, content text and settings, messages |
-| **Tigris Global** (object storage) | Stores photos, clips, moments, voice notes and avatars | The media files you upload |
+| **Tigris Global** (object storage) | Stores photos, clips, moments, voice notes and avatars | The media files you upload, including a sound you add from your phone |
 | **Vercel** (our small server) | Checks you are signed in and hands out upload links; looks up music for you | Your account ID, file type and size, search words for music; technical request data |
 | **Agora** | Voice and video calls | Call audio and video, a call room name, technical data |
 | **Apple** (iTunes Search API) | Song search and 30 second previews | Your song search words, sent straight from your phone to Apple, with technical data such as your IP address; your phone then downloads the preview from Apple |

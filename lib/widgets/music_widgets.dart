@@ -8,9 +8,11 @@ import '../core/theme.dart';
 import '../core/ui.dart';
 import '../models/music.dart';
 import '../models/post.dart';
+import '../services/device_audio.dart';
 import '../services/itunes_service.dart';
 import '../services/online_music_service.dart';
 import '../services/music_player.dart';
+import 'state_views.dart';
 
 /// "♪ Track name": shown right under the username on posts and on clips.
 /// [onDark] = white text with a soft shadow (on top of a video); otherwise the muted theme colour.
@@ -156,20 +158,31 @@ class _MusicToggleChipState extends State<MusicToggleChip> {
   }
 }
 
-/// Bottom sheet with music: the app's own tracks and the free online catalogue.
+/// Bottom sheet with audio: a file from the phone, the InstantGram picks, hit songs and
+/// free music.
 /// Tap a track to hear it, then "Use". Returns the chosen track (null when closed).
-Future<MusicTrack?> pickMusic(BuildContext context, {String? currentId}) {
+/// [current] is the track that is chosen now; a song from the phone that was picked before
+/// is shown again in the first tab.
+Future<MusicTrack?> pickMusic(
+  BuildContext context, {
+  String? currentId,
+  MusicTrack? current,
+}) {
   return showModalBottomSheet<MusicTrack>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (_) => _MusicSheet(currentId: currentId),
+    builder: (_) => _MusicSheet(
+      currentId: currentId ?? current?.id,
+      mine: (current?.isLocal ?? false) ? current : null,
+    ),
   );
 }
 
 class _MusicSheet extends StatefulWidget {
-  const _MusicSheet({this.currentId});
+  const _MusicSheet({this.currentId, this.mine});
   final String? currentId;
+  final MusicTrack? mine;
 
   @override
   State<_MusicSheet> createState() => _MusicSheetState();
@@ -180,8 +193,11 @@ class _MusicSheetState extends State<_MusicSheet> {
   String? _playingId;
   String? _loadingId;
 
-  // tabs: 0 = the app's own, 1 = hit songs (Apple), 2 = free music
+  // tabs: 0 = my phone, 1 = InstantGram audio (picked rows), 2 = hit songs (Apple),
+  // 3 = free music
   int _tab = 0;
+  MusicTrack? _mine;
+  bool _importing = false;
   final TextEditingController _term = TextEditingController();
   final ScrollController _scroll = ScrollController();
   Timer? _debounce;
@@ -191,20 +207,50 @@ class _MusicSheetState extends State<_MusicSheet> {
   int _nextOffset = 0;
   String? _searchError;
   int _searchGen = 0;
+  List<StationTracks> _stations = [];
+  bool _curLoading = false;
+  Object? _curError;
 
   @override
   void initState() {
     super.initState();
     final cur = widget.currentId ?? '';
+    _mine = widget.mine;
     _tab = cur.startsWith(kApplePrefix)
-        ? 1
-        : cur.startsWith(kOnlinePrefix)
         ? 2
+        : cur.startsWith(kOnlinePrefix)
+        ? 3
         : 0;
     _scroll.addListener(() {
       if (_scroll.position.extentAfter < 300) _loadMore();
     });
-    if (_tab != 0) _search();
+    if (_tab == 1) {
+      _loadCurated();
+    } else if (_tab != 0) {
+      _search();
+    }
+  }
+
+  /// Fills the InstantGram audio tab (kept for 30 minutes inside the service).
+  Future<void> _loadCurated({bool force = false}) async {
+    setState(() {
+      _curLoading = true;
+      _curError = null;
+    });
+    try {
+      final list = await ItunesService.instance.curated(force: force);
+      if (!mounted) return;
+      setState(() {
+        _stations = list;
+        _curLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _curLoading = false;
+        _curError = e;
+      });
+    }
   }
 
   Future<void> _search({bool more = false}) async {
@@ -216,7 +262,7 @@ class _MusicSheetState extends State<_MusicSheet> {
     });
     try {
       final offset = more ? _nextOffset : 0;
-      final page = _tab == 1
+      final page = _tab == 2
           ? await ItunesService.instance.search(_term.text, offset: offset)
           : await OnlineMusicService.instance.search(
               _term.text,
@@ -238,8 +284,35 @@ class _MusicSheetState extends State<_MusicSheet> {
     }
   }
 
+  /// Opens the phone's file picker; the file is turned into a small AAC file right here.
+  Future<void> _fromPhone() async {
+    if (_importing) return;
+    final old = _player;
+    _player = null;
+    setState(() {
+      _importing = true;
+      _playingId = null;
+      _loadingId = null;
+    });
+    await old?.dispose();
+    try {
+      final t = await DeviceAudio.pick();
+      if (!mounted) return;
+      setState(() {
+        _importing = false;
+        if (t != null) _mine = t;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _importing = false);
+      showToast(context, friendlyError(e));
+    }
+  }
+
   void _loadMore() {
-    if (_tab == 0 || _searching || !_more || _searchError != null) return;
+    if (_tab == 0 || _tab == 1 || _searching || !_more || _searchError != null) {
+      return;
+    }
     _search(more: true);
   }
 
@@ -369,7 +442,11 @@ class _MusicSheetState extends State<_MusicSheet> {
             _searching = false;
             _searchError = null;
           });
-          if (i != 0) _search();
+          if (i == 1) {
+            _loadCurated();
+          } else if (i != 0) {
+            _search();
+          }
         },
         child: Container(
           height: 38,
@@ -397,23 +474,133 @@ class _MusicSheetState extends State<_MusicSheet> {
       ),
       child: Row(
         children: [
-          chip(0, 'InstantGram'),
-          chip(1, 'Hit songs'),
-          chip(2, 'Free music'),
+          chip(0, 'My phone'),
+          chip(1, 'InstantGram audio'),
+          chip(2, 'Hit songs'),
+          chip(3, 'Free music'),
         ],
       ),
     );
   }
 
-  Widget _ownList() {
-    return ListView.builder(
-      shrinkWrap: true,
+  Widget _phoneTab() {
+    final mine = _mine;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: context.cardHigh,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            children: [
+              const Icon(Icons.library_music_rounded, size: 40),
+              const SizedBox(height: 10),
+              const Text(
+                'Use a sound from your phone',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Pick an audio file (mp3, m4a, wav...). The first minute is used. On a clip it replaces the sound of your video.',
+                key: const ValueKey('phoneNote'),
+                textAlign: TextAlign.center,
+                style: TextStyle(color: context.muted, fontSize: 12.5),
+              ),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                key: const ValueKey('pickDeviceAudio'),
+                onPressed: _importing ? null : _fromPhone,
+                icon: _importing
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2.5),
+                      )
+                    : const Icon(Icons.folder_open_rounded),
+                label: Text(
+                  _importing
+                      ? 'Getting your audio ready...'
+                      : (mine == null ? 'Choose audio' : 'Choose another'),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (mine != null) ...[
+          const SizedBox(height: 12),
+          _row(
+            mine,
+            'From your phone${mine.seconds > 0 ? '  \u00b7  ${formatDuration(mine.seconds)}' : ''}',
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// The InstantGram audio tab: rows of picked songs, no typing needed.
+  Widget _instantTab() {
+    if (_curLoading) {
+      return const CenteredLoader(key: ValueKey('instantLoading'));
+    }
+    if (_curError != null) {
+      return ErrorState(
+        error: _curError!,
+        onRetry: () => _loadCurated(force: true),
+      );
+    }
+    if (_stations.isEmpty) {
+      return EmptyState(
+        icon: Icons.music_off_rounded,
+        title: 'No songs right now',
+        subtitle: 'Check your connection and try again.',
+        action: FilledButton(
+          onPressed: () => _loadCurated(force: true),
+          child: const Text('Try again'),
+        ),
+      );
+    }
+    return ListView(
+      key: const ValueKey('instantList'),
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
-      itemCount: kMusicLibrary.length,
-      itemBuilder: (context, i) {
-        final t = kMusicLibrary[i];
-        return _row(t, '${t.mood}  \u00b7  ${t.bpm} BPM');
-      },
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Picked rows, refreshed from Apple. Real songs, 30 second previews.',
+                  key: const ValueKey('instantNote'),
+                  style: TextStyle(color: context.muted, fontSize: 12),
+                ),
+              ),
+              TextButton(
+                key: const ValueKey('instantRefresh'),
+                onPressed: () => _loadCurated(force: true),
+                child: const Text('Refresh'),
+              ),
+            ],
+          ),
+        ),
+        for (final st in _stations) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 14, 8, 2),
+            child: Text(
+              st.station.name,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+            ),
+          ),
+          for (final t in st.tracks)
+            _row(
+              t,
+              '${t.artist}${t.seconds > 0 ? '  \u00b7  ${formatDuration(t.seconds)}' : ''}',
+            ),
+        ],
+      ],
     );
   }
 
@@ -447,7 +634,7 @@ class _MusicSheetState extends State<_MusicSheet> {
             onSubmitted: (_) => _search(),
           ),
         ),
-        if (_tab == 1)
+        if (_tab == 2)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
             child: Text(
@@ -556,7 +743,9 @@ class _MusicSheetState extends State<_MusicSheet> {
             _tabs(),
             Expanded(
               child: _tab == 0
-                  ? Align(alignment: Alignment.topCenter, child: _ownList())
+                  ? _phoneTab()
+                  : _tab == 1
+                  ? _instantTab()
                   : _onlineList(),
             ),
           ],
