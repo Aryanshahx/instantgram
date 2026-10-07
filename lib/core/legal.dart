@@ -5,8 +5,14 @@ import 'package:url_launcher/url_launcher.dart';
 /// `docs/privacy.md` and `docs/terms.md` of the repository, shown by GitHub Pages.
 /// Change the address here if you host them somewhere else.
 const String kLegalBaseUrl = 'https://aryanshahx.github.io/instantgram';
-const String kPrivacyUrl = '$kLegalBaseUrl/privacy.html';
-const String kTermsUrl = '$kLegalBaseUrl/terms.html';
+
+/// The two pages the app opens, right in the repository, so they are always the current
+/// version and there is nothing to publish:
+///   https://github.com/Aryanshahx/instantgram/blob/main/docs/privacy.md
+///   https://github.com/Aryanshahx/instantgram/blob/main/docs/terms.md
+const String kRepoBaseUrl = 'https://github.com/Aryanshahx/instantgram/blob/main/docs';
+const String kPrivacyUrl = '$kRepoBaseUrl/privacy.md';
+const String kTermsUrl = '$kRepoBaseUrl/terms.md';
 
 /// Opens [url] in the browser. Returns false when that did not work, so the caller can show
 /// the in-app copy of the text instead.

@@ -47,8 +47,9 @@ void main() {
       expect(section.$1.trim(), isNotEmpty);
       expect(section.$2.length, greaterThan(40));
     }
-    expect(kPrivacyUrl, '$kLegalBaseUrl/privacy.html');
-    expect(kTermsUrl, '$kLegalBaseUrl/terms.html');
+    // the pages the app opens are the files in the repository
+    expect(kPrivacyUrl, '$kRepoBaseUrl/privacy.md');
+    expect(kTermsUrl, '$kRepoBaseUrl/terms.md');
     expect(File('docs/privacy.html').existsSync(), isTrue);
     expect(File('docs/terms.html').existsSync(), isTrue);
     // Pages must not build the files with Jekyll: they are complete pages already.

@@ -163,6 +163,18 @@ class _MusicToggleChipState extends State<MusicToggleChip> {
 /// Tap a track to hear it, then "Use". Returns the chosen track (null when closed).
 /// [current] is the track that is chosen now; a song from the phone that was picked before
 /// is shown again in the first tab.
+/// What the "My phone" tab says under the title (v1.19.3: your own audio, spelled out).
+const String kPhoneNote =
+    'Pick an audio file (mp3, m4a, wav...) from your phone. The first minute is used. On a clip it replaces the sound of your video. Any song you own is fine.';
+
+/// What the "InstantGram audio" tab says under its rows.
+const String kInstantNote =
+    'Picked rows, refreshed from Apple. Real songs, 30 second previews. You can also use your own audio: open "My phone" and choose a file.';
+
+/// What the "Hit songs" tab says above the search box.
+const String kAppleNote =
+    '30 second previews from Apple. A clip with a hit song is cut to 30 seconds and the song replaces its sound. Your own sound instead? Use "My phone".';
+
 Future<MusicTrack?> pickMusic(
   BuildContext context, {
   String? currentId,
@@ -505,7 +517,7 @@ class _MusicSheetState extends State<_MusicSheet> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Pick an audio file (mp3, m4a, wav...). The first minute is used. On a clip it replaces the sound of your video.',
+                kPhoneNote,
                 key: const ValueKey('phoneNote'),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: context.muted, fontSize: 12.5),
@@ -573,7 +585,7 @@ class _MusicSheetState extends State<_MusicSheet> {
             children: [
               Expanded(
                 child: Text(
-                  'Picked rows, refreshed from Apple. Real songs, 30 second previews.',
+                  kInstantNote,
                   key: const ValueKey('instantNote'),
                   style: TextStyle(color: context.muted, fontSize: 12),
                 ),
@@ -638,7 +650,7 @@ class _MusicSheetState extends State<_MusicSheet> {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
             child: Text(
-              '30 second previews from Apple. A clip with a hit song is cut to 30 seconds and the song replaces its sound.',
+              kAppleNote,
               key: const ValueKey('appleNote'),
               style: TextStyle(color: context.muted, fontSize: 12),
             ),

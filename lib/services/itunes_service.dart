@@ -22,7 +22,8 @@ class StationTracks {
   final List<MusicTrack> tracks;
 }
 
-/// The rows of the InstantGram audio tab (8 searches, up to 5 songs each: 40 songs).
+/// The rows of the InstantGram audio tab (14 searches, up to 5 songs each: 70 songs).
+/// Nothing is bundled: every row is a search Apple answers, so the picks refresh themselves.
 const List<MusicStation> kInstantStations = [
   MusicStation('Bollywood now', 'bollywood hits'),
   MusicStation('Punjabi', 'punjabi hits'),
@@ -32,6 +33,12 @@ const List<MusicStation> kInstantStations = [
   MusicStation('Desi hip hop', 'desi hip hop'),
   MusicStation('Chill', 'chill pop'),
   MusicStation('Workout', 'workout songs hindi'),
+  MusicStation('Sad & soulful', 'sad hindi songs'),
+  MusicStation('Bhakti', 'bhakti songs'),
+  MusicStation('Sufi & qawwali', 'sufi qawwali'),
+  MusicStation('90s & 2000s', '90s hindi songs'),
+  MusicStation('Wedding', 'wedding songs hindi'),
+  MusicStation('EDM & drop', 'edm hindi'),
 ];
 
 /// How many songs are asked for each row of the InstantGram audio tab.

@@ -9,7 +9,7 @@ import os
 UPDATED = "7 October 2026"
 APP = "InstantGram"
 MAIL = "techlabs.hyper@gmail.com"
-BASE = "https://aryanshahx.github.io/instantgram"
+BASE = "https://github.com/Aryanshahx/instantgram/blob/main/docs"
 
 PRIVACY = [
     (
@@ -171,8 +171,8 @@ hr{{border:0;border-top:1px solid var(--line);margin:36px 0}}
 <p class="mut">{APP} &middot; Last updated {UPDATED}</p>
 <p>{lead}</p>
 {body}
-<hr><p class="mut">This page is part of the {APP} app. The app opens it from Settings &gt; About,
-and from the sign-up screen. In-app address: {BASE}/{'privacy' if 'Privacy' in title else 'terms'}.html</p>
+<hr><p class="mut">This page is part of the {APP} app, and it is the page the app opens from
+Settings &gt; About and from the sign-up screen: <a href="{BASE}/{'privacy' if 'Privacy' in title else 'terms'}.md">{BASE}/{'privacy' if 'Privacy' in title else 'terms'}.md</a></p>
 </main></body></html>
 """
 

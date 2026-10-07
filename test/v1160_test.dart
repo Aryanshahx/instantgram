@@ -84,9 +84,10 @@ void main() {
 
   group('legal and limits', () {
     test('the pages the app opens are published as they are', () {
-      expect(kPrivacyUrl, endsWith('/privacy.html'));
-      expect(kTermsUrl, endsWith('/terms.html'));
-      expect(kPrivacyUrl.startsWith(kLegalBaseUrl), isTrue);
+      expect(kPrivacyUrl, endsWith('/docs/privacy.md'));
+      expect(kTermsUrl, endsWith('/docs/terms.md'));
+      expect(kPrivacyUrl, contains('github.com'));
+      expect(kTermsUrl, contains('github.com'));
       expect(File('docs/privacy.html').existsSync(), isTrue);
       expect(File('docs/terms.html').existsSync(), isTrue);
       expect(File('docs/privacy.md').existsSync(), isTrue);
