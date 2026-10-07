@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/app_events.dart';
+import '../../core/clip_focus.dart';
 import '../../core/errors.dart';
 import '../../widgets/share_sheet.dart';
 import '../../core/theme.dart';
@@ -27,24 +28,28 @@ import '../../widgets/reel_video.dart';
 import '../../widgets/repost_controller.dart';
 import '../../widgets/save_controller.dart';
 import '../../widgets/state_views.dart';
-import '../post/comments_screen.dart';
+import '../post/comments_screen.dart' show commentsSheetHeight, showCommentsSheet;
 import '../profile/profile_screen.dart';
 
 /// Opens the Clips screen on top of everything, starting with [post] (used when someone taps a
 /// video in Discover, on a profile or in a grid). Back returns to where they were.
 void openClips(BuildContext context, Post post) {
-  Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (ctx) => Scaffold(
-        backgroundColor: Colors.black,
-        body: ReelsScreen(
-          active: true,
-          initialPost: post,
-          onBack: () => Navigator.of(ctx).maybePop(),
+  final token = ClipFocus.instance.push();
+  Navigator.of(context)
+      .push(
+        MaterialPageRoute<void>(
+          builder: (ctx) => Scaffold(
+            backgroundColor: Colors.black,
+            body: ReelsScreen(
+              active: true,
+              initialPost: post,
+              focusToken: token,
+              onBack: () => Navigator.of(ctx).maybePop(),
+            ),
+          ),
         ),
-      ),
-    ),
-  );
+      )
+      .whenComplete(() => ClipFocus.instance.pop(token));
 }
 
 /// Vertical feed of uploaded clips. Only the visible clip (and the next one,
@@ -55,10 +60,15 @@ class ReelsScreen extends StatefulWidget {
     required this.active,
     required this.onBack,
     this.initialPost,
+    this.focusToken,
   });
 
   /// false while another tab is selected (stops playback).
   final bool active;
+
+  /// The place this screen took in [ClipFocus] (null for the Clips tab). Only the screen on
+  /// top plays, so a clip opened from a comment does not play under the running one.
+  final Object? focusToken;
 
   /// Top-left back button.
   final VoidCallback onBack;
@@ -78,6 +88,15 @@ class _ReelsScreenState extends State<ReelsScreen> {
   );
   final PageController _pages = PageController();
   int _page = 0;
+  bool _front = false;
+  final ValueNotifier<bool> _sheetOpen = ValueNotifier<bool>(false);
+
+  bool get _canPlay => widget.active && _front;
+
+  void _onFocus() {
+    final now = ClipFocus.instance.canPlay(widget.focusToken);
+    if (now != _front && mounted) setState(() => _front = now);
+  }
   bool _headerShown = true;
   bool _started = false;
   bool _wanting = false;
@@ -87,6 +106,8 @@ class _ReelsScreenState extends State<ReelsScreen> {
     super.initState();
     AppEvents.feedRefresh.addListener(_refresh);
     _pager.addListener(_preload);
+    ClipFocus.instance.version.addListener(_onFocus);
+    _onFocus();
     // Warm-up: shortly after the app opens, the first clips are fetched quietly so the Clips
     // tab starts at once the first time.
     _warm = Timer(const Duration(seconds: 3), () {
@@ -140,6 +161,8 @@ class _ReelsScreenState extends State<ReelsScreen> {
   void dispose() {
     _warm?.cancel();
     AppEvents.feedRefresh.removeListener(_refresh);
+    ClipFocus.instance.version.removeListener(_onFocus);
+    _sheetOpen.dispose();
     _pager.removeListener(_preload);
     if (_wanting) ClipCache.instance.want(const []);
     _pager.dispose();
@@ -203,10 +226,24 @@ class _ReelsScreenState extends State<ReelsScreen> {
                   ),
                 );
               }
-              return Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 560),
-                  child: PageView.builder(
+              return ValueListenableBuilder<bool>(
+                valueListenable: _sheetOpen,
+                builder: (context, open, _) {
+                  // With the comments open the clip shrinks into the space above the sheet,
+                  // so you keep watching it while you read and type.
+                  final h = MediaQuery.of(context).size.height;
+                  final scale = open
+                      ? ((h - commentsSheetHeight(context)) / h).clamp(0.34, 1.0)
+                      : 1.0;
+                  return AnimatedScale(
+                    scale: scale,
+                    alignment: Alignment.topCenter,
+                    duration: const Duration(milliseconds: 240),
+                    curve: Curves.easeOutCubic,
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 560),
+                        child: PageView.builder(
                     scrollDirection: Axis.vertical,
                     controller: _pages,
                     itemCount: _pager.posts.length,
@@ -221,19 +258,23 @@ class _ReelsScreenState extends State<ReelsScreen> {
                       if (i >= _pager.posts.length - 3) _pager.loadMore();
                     },
                     itemBuilder: (context, i) {
-                      final post = _pager.posts[i];
-                      return _ReelPage(
-                        key: ValueKey(post.id),
-                        post: post,
-                        playing: widget.active && i == _page,
-                        showHeader: _headerShown,
-                        preload: widget.active && i == _page + 1,
-                        onBack: widget.onBack,
-                        onDeleted: () => _pager.removeById(post.id),
-                      );
-                    },
+                        final post = _pager.posts[i];
+                        return _ReelPage(
+                          key: ValueKey(post.id),
+                          post: post,
+                          playing: _canPlay && i == _page,
+                          showHeader: _headerShown,
+                          preload: _canPlay && i == _page + 1,
+                          sheetOpen: _sheetOpen,
+                          onBack: widget.onBack,
+                          onDeleted: () => _pager.removeById(post.id),
+                        );
+                        },
+                      ),
+                    ),
                   ),
-                ),
+                );
+                },
               );
             },
           ),
@@ -248,6 +289,7 @@ class _ReelPage extends StatefulWidget {
     super.key,
     required this.post,
     required this.playing,
+    this.sheetOpen,
     required this.preload,
     required this.onBack,
     required this.onDeleted,
@@ -258,6 +300,9 @@ class _ReelPage extends StatefulWidget {
   final bool showHeader;
   final bool playing;
   final bool preload;
+
+  /// Set to true while the comments sheet is open (the clip shrinks into the space left).
+  final ValueNotifier<bool>? sheetOpen;
   final VoidCallback onBack;
   final VoidCallback onDeleted;
 
@@ -498,13 +543,17 @@ class _ReelPageState extends State<_ReelPage> {
                     onSave: _toggleSave,
                     onRepost: _toggleRepost,
                     onShare: _share,
-                    onComments: () => showCommentsSheet(
-                      context,
-                      post: post,
-                      onCountChanged: (d) {
-                        if (mounted) setState(() => _comments += d);
-                      },
-                    ),
+                    onComments: () async {
+                      widget.sheetOpen?.value = true;
+                      await showCommentsSheet(
+                        context,
+                        post: post,
+                        onCountChanged: (d) {
+                          if (mounted) setState(() => _comments += d);
+                        },
+                      );
+                      widget.sheetOpen?.value = false;
+                    },
                   ),
                 ),
               ),

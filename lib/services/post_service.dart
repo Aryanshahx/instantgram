@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -10,6 +11,7 @@ import '../models/music.dart';
 import '../models/post.dart';
 import 'post_search.dart';
 import 'media_server.dart';
+import 'notification_service.dart';
 import 'safety_service.dart';
 import 'user_service.dart';
 
@@ -409,6 +411,35 @@ class PostService {
       batch.update(postRef, {'likeCount': FieldValue.increment(-1)});
     }
     await batch.commit();
+    if (like) unawaited(_notifyLike(postId));
+  }
+
+  /// Tells the author of [postId] that someone liked it (one line in their activity).
+  Future<void> _notifyLike(String postId) async {
+    try {
+      final d = await _posts.doc(postId).get();
+      final m = d.data();
+      if (m == null) return;
+      final author = m['authorId'] is String ? m['authorId'] as String : '';
+      if (author.isEmpty || author == _uid) return;
+      await NotificationService.instance.notify(
+        toUid: author,
+        type: 'like',
+        postId: postId,
+        thumb: _thumbOf(m),
+      );
+    } catch (_) {
+      // The activity line is optional.
+    }
+  }
+
+  /// The small picture of a post, whatever its kind.
+  static String _thumbOf(Map<String, dynamic> m) {
+    for (final k in const ['thumbRef', 'imageRef', 'coverRef']) {
+      final v = m[k];
+      if (v is String && v.isNotEmpty) return v;
+    }
+    return '';
   }
 
   // ---------------------------------------------------------------- comments
@@ -455,6 +486,57 @@ class PostService {
     });
     batch.update(postRef, {'commentCount': FieldValue.increment(1)});
     await batch.commit();
+    unawaited(
+      _notifyComment(
+        postId: postId,
+        text: text.trim(),
+        parentId: parentId,
+      ),
+    );
+  }
+
+  /// Tells the author of the post, and the person being replied to.
+  Future<void> _notifyComment({
+    required String postId,
+    required String text,
+    required String parentId,
+  }) async {
+    try {
+      final d = await _posts.doc(postId).get();
+      final m = d.data();
+      if (m == null) return;
+      final author = m['authorId'] is String ? m['authorId'] as String : '';
+      final thumb = _thumbOf(m);
+      if (author.isNotEmpty && author != _uid) {
+        await NotificationService.instance.notify(
+          toUid: author,
+          type: parentId.isEmpty ? 'comment' : 'reply',
+          postId: postId,
+          thumb: thumb,
+          text: text,
+        );
+      }
+      if (parentId.isNotEmpty) {
+        final p = await _posts
+            .doc(postId)
+            .collection('comments')
+            .doc(parentId)
+            .get();
+        final pm = p.data();
+        if (pm == null) return;
+        final who = pm['authorId'] is String ? pm['authorId'] as String : '';
+        if (who.isEmpty || who == _uid || who == author) return;
+        await NotificationService.instance.notify(
+          toUid: who,
+          type: 'reply',
+          postId: postId,
+          thumb: thumb,
+          text: text,
+        );
+      }
+    } catch (_) {
+      // The activity line is optional.
+    }
   }
 
   Future<void> editComment(String postId, String commentId, String text) {

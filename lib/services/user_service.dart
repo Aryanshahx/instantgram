@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -5,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/app_user.dart';
 import 'safety_service.dart';
+import 'notification_service.dart';
 import '../core/errors.dart';
 import 'media_server.dart';
 
@@ -90,6 +92,9 @@ class UserService {
     });
     await batch.commit();
     SafetyService.instance.following.add(targetUid);
+    unawaited(
+      NotificationService.instance.notify(toUid: targetUid, type: 'follow'),
+    );
   }
 
   Future<void> unfollow(String targetUid) async {

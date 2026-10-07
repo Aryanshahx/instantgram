@@ -69,6 +69,17 @@ service cloud.firestore {
       }
     }
 
+    // Activity: likes, comments, replies and follows.
+    // Anybody signed in may write a line into somebody else's list (that is how a like
+    // reaches its author); only the owner reads it and marks it as seen.
+    match /notifications/{uid} {
+      match /items/{itemId} {
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow create: if signedIn();
+        allow update, delete: if signedIn() && request.auth.uid == uid;
+      }
+    }
+
     match /posts/{postId} {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;

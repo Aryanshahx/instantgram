@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:video_player/video_player.dart';
 
+import '../core/clip_focus.dart';
 import '../models/finish.dart';
 import '../models/post.dart';
 import '../services/clip_cache.dart';
@@ -64,7 +65,10 @@ abstract class InlineHost {
 
 /// Keeps track of every clip in the feed and decides which single one plays.
 class InlineVideoHub {
-  InlineVideoHub._();
+  InlineVideoHub._() {
+    // A clips screen opened on top of the feed stops the clip that plays here.
+    ClipFocus.instance.version.addListener(poke);
+  }
   static final InlineVideoHub instance = InlineVideoHub._();
 
   final ValueNotifier<String?> active = ValueNotifier<String?>(null);
@@ -93,7 +97,8 @@ class InlineVideoHub {
   }
 
   void _evaluate() {
-    if (!resumed) {
+    // quiet while the app is in the background, and while a clips screen is open
+    if (!resumed || ClipFocus.instance.anyOpen) {
       active.value = null;
       return;
     }

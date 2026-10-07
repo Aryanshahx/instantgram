@@ -3,12 +3,15 @@ import 'package:flutter/material.dart';
 import '../../core/app_events.dart';
 import '../../core/responsive.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
+import '../../services/notification_service.dart';
 import '../../widgets/brand_logo.dart';
 import '../../widgets/post_card.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/stories_bar.dart';
+import '../activity/activity_screen.dart';
 
 class FeedScreen extends StatefulWidget {
   const FeedScreen({super.key});
@@ -71,15 +74,58 @@ class _FeedHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: EdgeInsets.fromLTRB(20, 10, 20, 6),
-          child: Center(child: BrandWordmark(size: 26)),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 6),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              const Center(child: BrandWordmark(size: 26)),
+              // The bell: your activity while the app is open (no push notifications).
+              Align(
+                alignment: Alignment.centerRight,
+                child: StreamBuilder<int>(
+                  stream: NotificationService.instance.watchUnread(),
+                  builder: (context, snap) {
+                    final unread = snap.data ?? 0;
+                    return IconButton(
+                      key: const ValueKey('activityButton'),
+                      tooltip: 'Activity',
+                      icon: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          const Icon(Icons.notifications_none_rounded),
+                          if (unread > 0)
+                            Positioned(
+                              right: -1,
+                              top: -1,
+                              child: Container(
+                                key: const ValueKey('activityDot'),
+                                width: 9,
+                                height: 9,
+                                decoration: const BoxDecoration(
+                                  color: AppTheme.coral,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      onPressed: () => openScreen(
+                        context,
+                        const ActivityScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
-        StoriesBar(),
-        SizedBox(height: 4),
+        const StoriesBar(),
+        const SizedBox(height: 4),
       ],
     );
   }

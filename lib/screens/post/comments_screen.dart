@@ -29,6 +29,17 @@ import '../reels/reels_screen.dart';
 /// Discover, the video in Clips). The video keeps playing behind it.
 ///
 /// [onCountChanged] gets +1 when a comment is added and -1 when one is removed.
+/// How tall the sheet is. The clips screen uses it to shrink the clip into the space that
+/// stays visible above the comments.
+double commentsSheetHeight(BuildContext context) {
+  final mq = MediaQuery.of(context);
+  final keyboard = mq.viewInsets.bottom;
+  return math.max(
+    260.0,
+    math.min(mq.size.height * 0.72, mq.size.height - keyboard - 90),
+  );
+}
+
 Future<void> showCommentsSheet(
   BuildContext context, {
   required Post post,
@@ -41,14 +52,9 @@ Future<void> showCommentsSheet(
     backgroundColor: Colors.transparent,
     constraints: const BoxConstraints(maxWidth: 640),
     builder: (ctx) {
-      final mq = MediaQuery.of(ctx);
-      final keyboard = mq.viewInsets.bottom;
-      final height = math.max(
-        260.0,
-        math.min(mq.size.height * 0.72, mq.size.height - keyboard - 90),
-      );
+      final height = commentsSheetHeight(ctx);
       return Padding(
-        padding: EdgeInsets.only(bottom: keyboard),
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
         child: Container(
           height: height,
           decoration: BoxDecoration(
