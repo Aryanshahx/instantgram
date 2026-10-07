@@ -29,7 +29,7 @@ class DeviceAudio {
   static Future<File?> pickFile() async {
     final b = pickBackend;
     if (b != null) return b();
-    final r = await FilePicker.pickFiles(type: FileType.audio);
+    final r = await FilePicker.platform.pickFiles(type: FileType.audio);
     final path = (r == null || r.files.isEmpty) ? null : r.files.first.path;
     return path == null ? null : File(path);
   }
