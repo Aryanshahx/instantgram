@@ -43,7 +43,7 @@ You may not use InstantGram to:
 
 ## 5. Music, GIFs, stickers and other third-party content
 
-- Music from **Epidemic Sound** may be used only inside the app, as it is offered there. You may not copy, download, resell or use it outside the app through the app.
+- Free music comes from the **Jamendo** catalogue (found through Openverse), where artists share their songs under Creative Commons licences. In the app it is shown with the artist's name. You may use it only inside the app, as it is offered there, and you may not resell it. Songs whose licence forbids using them in videos are not offered.
 - GIFs and stickers come from **Giphy** and may be used only inside the app.
 - Your use of those services is also subject to their own terms.
 

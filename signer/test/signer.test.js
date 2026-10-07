@@ -167,7 +167,7 @@ test("delete: only your own files", async () => {
 test("health and unknown routes", async () => {
   const health = await call("/health", null, null, baseEnv(), "GET");
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { ok: true, ready: true, music: false });
+  assert.deepEqual(await health.json(), { ok: true, ready: true, music: true, musicKey: false });
   const half = baseEnv(); delete half.TIGRIS_BUCKET;
   assert.equal((await (await call("/health", null, null, half, "GET")).json()).ready, false);
   assert.equal((await call("/nope", {}, await token())).status, 404);
@@ -232,61 +232,77 @@ test("s3Store talks to a signed S3 API: head / ranged get / delete, and sign lin
   }
 });
 
-test("music: search and download link come from Epidemic Sound, the key never leaves the server", async () => {
+const ID1 = "74230e03-50fd-4dcf-b665-90731e275907";
+const ID2 = "cc41efd9-ab00-4e06-a21a-ba3e7d2ae5e8";
+
+test("music: search and stream link come from Openverse, no key needed", async () => {
   const prevFetch = globalThis.fetch;
   const seen = [];
   globalThis.fetch = async (url, init) => {
     const u = String(url);
     if (u.includes("securetoken@system.gserviceaccount.com")) return new Response(JSON.stringify({ keys: [jwk] }), { status: 200 });
-    if (u.startsWith("https://partner-content-api.epidemicsound.com")) {
-      seen.push({ u, auth: init.headers.authorization, user: init.headers["x-partner-user-id"] });
-      if (u.includes("/tracks/search")) {
-        return new Response(JSON.stringify({
-          tracks: [{ id: "abc123", title: "Sunrise", mainArtists: ["Ann"], featuredArtists: ["Bo"], length: 143, bpm: 90, images: { XS: "https://cdn/x.jpg" }, hasVocals: false, secret: "x" }],
-          links: { next: "/v0/tracks/search?offset=30" },
-        }), { status: 200 });
-      }
-      if (u.includes("/download")) return new Response(JSON.stringify({ url: "https://cdn/abc.mp3", expires: "soon" }), { status: 200 });
-      return new Response("{}", { status: 404 });
+    if (u.startsWith("https://api.openverse.org/v1/")) {
+      seen.push({ url: new URL(u), auth: init && init.headers && init.headers.authorization });
+      if (u.includes("/audio/" + ID1 + "/")) return new Response(JSON.stringify({ id: ID1, url: "https://prod-1.storage.jamendo.com/?trackid=1&format=mp32" }), { status: 200 });
+      if (u.includes("/audio/" + ID2 + "/")) return new Response(JSON.stringify({ id: ID2, url: "http://insecure/x.mp3" }), { status: 200 });
+      return new Response(JSON.stringify({
+        page_count: 3,
+        results: [
+          { id: ID1, title: "Sunrise", creator: "Ann", duration: 143000, thumbnail: "https://api.openverse.org/v1/audio/x/thumb/", secret: "x" },
+          { id: "not-a-uuid", title: "Broken", creator: "Bo", duration: 1000 },
+        ],
+      }), { status: 200 });
     }
     return prevFetch(url, init);
   };
   try {
     const t = await token();
-    const env = { ...baseEnv(), EPIDEMIC_API_KEY: "ES_KEY" };
+    const env = baseEnv();
     const found = await (await call("/music", { op: "search", term: "sunrise" }, t, env)).json();
-    assert.deepEqual(found.tracks, [{ id: "abc123", title: "Sunrise", artist: "Ann, Bo", seconds: 143, bpm: 90, cover: "https://cdn/x.jpg", vocals: false }]);
+    assert.deepEqual(found.tracks, [{ id: ID1, title: "Sunrise", artist: "Ann", seconds: 143, bpm: 0, cover: "https://api.openverse.org/v1/audio/x/thumb/" }]);
     assert.equal(found.hasMore, true);
-    assert.equal(seen[0].auth, "Bearer ES_KEY");
-    assert.equal(seen[0].user, "user1abc");
-    assert.ok(seen[0].u.includes("term=sunrise"));
-    // nothing typed: Epidemic Sound needs a term (it answers 400 without one)
+    assert.equal(found.nextOffset, 30);
+    const q = seen[0].url.searchParams;
+    assert.equal(q.get("q"), "sunrise");
+    assert.equal(q.get("category"), "music");
+    assert.ok(!q.get("license").includes("nd"), "No-Derivatives licences are never asked for");
+    assert.equal(seen[0].auth, undefined);
+    // second page, and the last page has no more
+    await call("/music", { op: "search", term: "sunrise", offset: 60 }, t, env);
+    assert.equal(seen.at(-1).url.searchParams.get("page"), "3");
+    const last = await (await call("/music", { op: "search", term: "sunrise", offset: 60 }, t, env)).json();
+    assert.equal(last.hasMore, false);
+    // nothing typed: a default word
     await call("/music", { op: "search", term: "" }, t, env);
-    assert.ok(seen[1].u.includes("term=popular"));
-    const link = await (await call("/music", { op: "url", id: "abc123" }, t, env)).json();
-    assert.equal(link.url, "https://cdn/abc.mp3");
-    // bad id, no login, no key
+    assert.equal(seen.at(-1).url.searchParams.get("q"), "chill");
+    // the same search is not asked twice
+    const before = seen.length;
+    await call("/music", { op: "search", term: "sunrise" }, t, env);
+    assert.equal(seen.length, before);
+    // stream link
+    const link = await (await call("/music", { op: "url", id: ID1 }, t, env)).json();
+    assert.ok(link.url.startsWith("https://prod-1.storage.jamendo.com/"));
+    assert.equal((await call("/music", { op: "url", id: ID2 }, t, env)).status, 404);
+    // bad id, no login
     assert.equal((await call("/music", { op: "url", id: "../x" }, t, env)).status, 400);
     assert.equal((await call("/music", { op: "search" }, null, env)).status, 401);
-    assert.equal((await call("/music", { op: "search" }, t, baseEnv())).status, 503);
   } finally {
     globalThis.fetch = prevFetch;
   }
 });
 
-test("music: a 400 from Epidemic Sound is retried plainly and its reason is shown", async () => {
+test("music: a busy Openverse gives a friendly message, a registered key is used", async () => {
   const prevFetch = globalThis.fetch;
-  const seen = [];
-  let mode = "picky";
+  let busy = true;
+  const auths = [];
   globalThis.fetch = async (url, init) => {
     const u = String(url);
     if (u.includes("securetoken@system.gserviceaccount.com")) return new Response(JSON.stringify({ keys: [jwk] }), { status: 200 });
-    if (u.startsWith("https://partner-content-api.epidemicsound.com")) {
-      seen.push({ u, user: init.headers["x-partner-user-id"] });
-      if (mode === "always") return new Response(JSON.stringify({ message: "Bad request", errors: [{ key: "term", messages: ["too short"] }] }), { status: 400 });
-      // picky: only the plain request without the end-user header is accepted
-      if (init.headers["x-partner-user-id"] || u.includes("limit=")) return new Response(JSON.stringify({ message: "Bad request" }), { status: 400 });
-      return new Response(JSON.stringify({ tracks: [], links: { next: null } }), { status: 200 });
+    if (u.endsWith("/auth_tokens/token/")) return new Response(JSON.stringify({ access_token: "TOK", expires_in: 36000 }), { status: 200 });
+    if (u.startsWith("https://api.openverse.org/v1/audio/")) {
+      auths.push(init.headers.authorization);
+      if (busy) return new Response(JSON.stringify({ detail: "Request was throttled." }), { status: 429 });
+      return new Response(JSON.stringify({ page_count: 1, results: [] }), { status: 200 });
     }
     return prevFetch(url, init);
   };
@@ -294,15 +310,14 @@ test("music: a 400 from Epidemic Sound is retried plainly and its reason is show
   console.error = () => {};
   try {
     const t = await token();
-    const env = { ...baseEnv(), EPIDEMIC_API_KEY: "ES_KEY" };
-    const ok = await call("/music", { op: "search", term: "calm" }, t, env);
-    assert.equal(ok.status, 200);
-    assert.ok(seen.length >= 2 && seen.at(-1).user === undefined);
-    mode = "always";
-    const bad = await call("/music", { op: "search", term: "calm" }, t, env);
+    const env = { ...baseEnv(), OPENVERSE_CLIENT_ID: "cid", OPENVERSE_CLIENT_SECRET: "sec" };
+    const bad = await call("/music", { op: "search", term: "busyword" }, t, env);
     assert.equal(bad.status, 502);
-    const msg = (await bad.json()).detail || "";
-    assert.ok(msg.includes("answered 400") && msg.includes("Bad request") && msg.includes("term"), msg);
+    assert.ok(((await bad.json()).detail || "").includes("busy"));
+    busy = false;
+    const ok = await call("/music", { op: "search", term: "freeword" }, t, env);
+    assert.equal(ok.status, 200);
+    assert.deepEqual(auths, ["Bearer TOK", "Bearer TOK"]);
   } finally {
     globalThis.fetch = prevFetch;
     console.error = quiet;

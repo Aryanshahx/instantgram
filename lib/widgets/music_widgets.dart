@@ -8,7 +8,7 @@ import '../core/theme.dart';
 import '../core/ui.dart';
 import '../models/music.dart';
 import '../models/post.dart';
-import '../services/epidemic_service.dart';
+import '../services/online_music_service.dart';
 import '../services/music_player.dart';
 
 /// "♪ Track name": shown right under the username on posts and on clips.
@@ -155,7 +155,7 @@ class _MusicToggleChipState extends State<MusicToggleChip> {
   }
 }
 
-/// Bottom sheet with music: the app's own tracks and the Epidemic Sound catalogue.
+/// Bottom sheet with music: the app's own tracks and the free online catalogue.
 /// Tap a track to hear it, then "Use". Returns the chosen track (null when closed).
 Future<MusicTrack?> pickMusic(BuildContext context, {String? currentId}) {
   return showModalBottomSheet<MusicTrack>(
@@ -179,7 +179,7 @@ class _MusicSheetState extends State<_MusicSheet> {
   String? _playingId;
   String? _loadingId;
 
-  // Epidemic Sound tab
+  // Free music tab
   int _tab = 0;
   final TextEditingController _term = TextEditingController();
   final ScrollController _scroll = ScrollController();
@@ -187,6 +187,7 @@ class _MusicSheetState extends State<_MusicSheet> {
   List<MusicTrack> _found = [];
   bool _searching = false;
   bool _more = false;
+  int _nextOffset = 0;
   bool _loadedOnce = false;
   String? _searchError;
   int _searchGen = 0;
@@ -194,7 +195,7 @@ class _MusicSheetState extends State<_MusicSheet> {
   @override
   void initState() {
     super.initState();
-    _tab = (widget.currentId ?? '').startsWith(kEpidemicPrefix) ? 1 : 0;
+    _tab = (widget.currentId ?? '').startsWith(kOnlinePrefix) ? 1 : 0;
     _scroll.addListener(() {
       if (_scroll.position.extentAfter < 300) _loadMore();
     });
@@ -209,14 +210,15 @@ class _MusicSheetState extends State<_MusicSheet> {
       if (!more) _found = [];
     });
     try {
-      final page = await EpidemicService.instance.search(
+      final page = await OnlineMusicService.instance.search(
         _term.text,
-        offset: more ? _found.length : 0,
+        offset: more ? _nextOffset : 0,
       );
       if (!mounted || gen != _searchGen) return;
       setState(() {
         _found = more ? [..._found, ...page.tracks] : page.tracks;
         _more = page.hasMore;
+        _nextOffset = page.next;
         _searching = false;
         _loadedOnce = true;
       });
@@ -377,7 +379,7 @@ class _MusicSheetState extends State<_MusicSheet> {
         color: context.cardHigh,
         borderRadius: BorderRadius.circular(22),
       ),
-      child: Row(children: [chip(0, 'InstantGram'), chip(1, 'Epidemic Sound')]),
+      child: Row(children: [chip(0, 'InstantGram'), chip(1, 'Free music')]),
     );
   }
 
@@ -393,7 +395,7 @@ class _MusicSheetState extends State<_MusicSheet> {
     );
   }
 
-  Widget _epidemicList() {
+  Widget _onlineList() {
     return Column(
       children: [
         Padding(
@@ -423,6 +425,35 @@ class _MusicSheetState extends State<_MusicSheet> {
             onSubmitted: (_) => _search(),
           ),
         ),
+        SizedBox(
+          height: 40,
+          child: ListView(
+            key: const ValueKey('musicGenres'),
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+            children: [
+              for (final g in kMusicGenres)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    key: ValueKey('genre_$g'),
+                    label: Text(g),
+                    selected:
+                        _term.text.trim().toLowerCase() == g.toLowerCase(),
+                    onSelected: (_) {
+                      _debounce?.cancel();
+                      _term.text = g;
+                      _term.selection = TextSelection.collapsed(
+                        offset: g.length,
+                      );
+                      setState(() {});
+                      _search();
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
         Expanded(
           child: _searchError != null
               ? Center(
@@ -431,10 +462,7 @@ class _MusicSheetState extends State<_MusicSheet> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (isMusicSetupError(_searchError!))
-                          const MusicSetupGuide()
-                        else
-                          Text(_searchError!, textAlign: TextAlign.center),
+                        Text(_searchError!, textAlign: TextAlign.center),
                         const SizedBox(height: 12),
                         OutlinedButton(
                           onPressed: _search,
@@ -498,7 +526,7 @@ class _MusicSheetState extends State<_MusicSheet> {
             Expanded(
               child: _tab == 0
                   ? Align(alignment: Alignment.topCenter, child: _ownList())
-                  : _epidemicList(),
+                  : _onlineList(),
             ),
           ],
         ),
@@ -507,70 +535,18 @@ class _MusicSheetState extends State<_MusicSheet> {
   }
 }
 
-
-/// True for the signer's "Epidemic Sound is not set up" answer.
-bool isMusicSetupError(String message) =>
-    message.contains('not set up') || message.contains('EPIDEMIC_API_KEY');
-
-/// Step by step: what to do once so that Epidemic Sound search works.
-class MusicSetupGuide extends StatelessWidget {
-  const MusicSetupGuide({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    Widget step(String n, String text) => Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 24,
-            height: 24,
-            alignment: Alignment.center,
-            decoration: const BoxDecoration(
-              color: AppTheme.volt,
-              shape: BoxShape.circle,
-            ),
-            child: Text(
-              n,
-              style: const TextStyle(
-                color: AppTheme.ink,
-                fontWeight: FontWeight.w900,
-                fontSize: 13,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(child: Text(text, style: const TextStyle(height: 1.3))),
-        ],
-      ),
-    );
-    return Column(
-      key: const ValueKey('musicSetupGuide'),
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Epidemic Sound needs one setup step',
-          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Your Epidemic key is not on the server yet. It takes two minutes:',
-          style: TextStyle(color: context.muted),
-        ),
-        const SizedBox(height: 12),
-        step('1', 'Open vercel.com and your signer project.'),
-        step('2', 'Settings > Environment Variables.'),
-        step('3', 'Name: EPIDEMIC_API_KEY. Value: your Epidemic Sound key. Save.'),
-        step('4', 'Deployments > the top one > the three dots > Redeploy.'),
-        step('5', 'Come back here and press Try again.'),
-        const SizedBox(height: 4),
-        Text(
-          'The InstantGram tab works without this.',
-          style: TextStyle(color: context.muted, fontSize: 12.5),
-        ),
-      ],
-    );
-  }
-}
+/// Quick searches under the search box of the free music tab.
+const List<String> kMusicGenres = [
+  'Chill',
+  'Lo-fi',
+  'Pop',
+  'Hip hop',
+  'Electronic',
+  'Rock',
+  'Happy',
+  'Sad',
+  'Cinematic',
+  'Acoustic',
+  'Dance',
+  'Jazz',
+];

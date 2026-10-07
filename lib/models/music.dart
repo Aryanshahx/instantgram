@@ -13,9 +13,9 @@ class MusicTrack {
     this.cover = '',
   });
 
-  /// A track from the Epidemic Sound catalogue (searched through the media service).
-  /// [uuid] is Epidemic's own track id; the app stores it as `es:<uuid>`.
-  factory MusicTrack.epidemic({
+  /// A track from the free online catalogue (searched through the media service).
+  /// [uuid] is the catalogue's own track id; the app stores it as `ov:<id>`.
+  factory MusicTrack.online({
     required String uuid,
     required String title,
     String artist = '',
@@ -23,9 +23,9 @@ class MusicTrack {
     int bpm = 0,
     String cover = '',
   }) => MusicTrack(
-    id: '$kEpidemicPrefix$uuid',
-    title: title.isEmpty ? 'Epidemic Sound track' : title,
-    mood: 'Epidemic Sound',
+    id: '$kOnlinePrefix$uuid',
+    title: title.isEmpty ? 'Online track' : title,
+    mood: 'Free music',
     seconds: seconds,
     bpm: bpm,
     artist: artist,
@@ -40,16 +40,16 @@ class MusicTrack {
   final int seconds;
   final int bpm;
 
-  /// Name of the artist (Epidemic Sound tracks only).
+  /// Name of the artist (online tracks only).
   final String artist;
 
-  /// Small cover picture address (Epidemic Sound tracks only).
+  /// Small cover picture address (online tracks only).
   final String cover;
 
-  bool get remote => id.startsWith(kEpidemicPrefix);
+  bool get remote => id.startsWith(kOnlinePrefix);
 
-  /// Epidemic's id without the `es:` prefix.
-  String get remoteId => remote ? id.substring(kEpidemicPrefix.length) : '';
+  /// The catalogue's id without the `ov:` prefix.
+  String get remoteId => remote ? id.substring(kOnlinePrefix.length) : '';
 
   String get asset => 'assets/music/$id.mp3';
 
@@ -57,16 +57,16 @@ class MusicTrack {
   String get label => artist.isEmpty ? title : '$title \u00b7 $artist';
 }
 
-const String kEpidemicPrefix = 'es:';
+const String kOnlinePrefix = 'ov:';
 
 final Map<String, MusicTrack> _remembered = {};
 
-/// Posts and moments only store the id, the title and the artist of an Epidemic Sound track.
+/// Posts and moments only store the id, the title and the artist of an online track.
 /// This keeps them so [musicById] can find the track later (labels, players).
 void rememberMusic(String id, String title, String artist) {
-  if (!id.startsWith(kEpidemicPrefix) || _remembered.containsKey(id)) return;
-  _remembered[id] = MusicTrack.epidemic(
-    uuid: id.substring(kEpidemicPrefix.length),
+  if (!id.startsWith(kOnlinePrefix) || _remembered.containsKey(id)) return;
+  _remembered[id] = MusicTrack.online(
+    uuid: id.substring(kOnlinePrefix.length),
     title: title,
     artist: artist,
   );

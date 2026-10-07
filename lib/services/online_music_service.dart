@@ -5,18 +5,19 @@ import '../core/errors.dart';
 import '../core/media_url.dart';
 import '../models/music.dart';
 
-/// One page of Epidemic Sound search results.
+/// One page of music search results. [next] is where the following page starts.
 class MusicPage {
-  const MusicPage(this.tracks, this.hasMore);
+  const MusicPage(this.tracks, this.hasMore, [this.next = 0]);
   final List<MusicTrack> tracks;
   final bool hasMore;
+  final int next;
 }
 
-/// Epidemic Sound music, reached through the media service (the Epidemic key stays on the
-/// server; the app only sends the user's own login).
-class EpidemicService {
-  EpidemicService._();
-  static final EpidemicService instance = EpidemicService._();
+/// Free music (Creative Commons), reached through the media service. The app only sends the
+/// user's own login.
+class OnlineMusicService {
+  OnlineMusicService._();
+  static final OnlineMusicService instance = OnlineMusicService._();
 
   /// Tests replace this to answer without a network.
   Future<Map<String, dynamic>> Function(Map<String, dynamic> request)? backend;
@@ -57,14 +58,10 @@ class EpidemicService {
     }
   }
 
-  /// Epidemic Sound answers 400 to a search without a word, so the first list (nothing typed
-  /// yet) is the catalogue's best match for this word.
-  static const String defaultTerm = 'popular';
-
   Future<MusicPage> search(String term, {int offset = 0}) async {
     final r = await _call({
       'op': 'search',
-      'term': term.trim().isEmpty ? defaultTerm : term.trim(),
+      'term': term.trim(),
       'offset': offset,
       'limit': 30,
     });
@@ -75,7 +72,7 @@ class EpidemicService {
         if (e is! Map) continue;
         final id = e['id'];
         if (id is! String || id.isEmpty) continue;
-        final t = MusicTrack.epidemic(
+        final t = MusicTrack.online(
           uuid: id,
           title: e['title'] is String ? e['title'] as String : '',
           artist: e['artist'] is String ? e['artist'] as String : '',
@@ -87,7 +84,12 @@ class EpidemicService {
         out.add(t);
       }
     }
-    return MusicPage(out, r['hasMore'] == true);
+    final next = r['nextOffset'];
+    return MusicPage(
+      out,
+      r['hasMore'] == true,
+      next is num ? next.toInt() : offset + out.length,
+    );
   }
 
   /// A link the player can open (valid for a while; kept for 20 minutes).

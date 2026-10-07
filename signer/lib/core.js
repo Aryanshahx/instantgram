@@ -15,7 +15,7 @@
 // Settings (Vercel environment variables):
 //   FIREBASE_PROJECT_ID, TIGRIS_BUCKET, TIGRIS_ACCESS_KEY_ID, TIGRIS_SECRET_ACCESS_KEY
 //   (optional) TIGRIS_ENDPOINT, default t3.storage.dev
-//   (optional, for music) EPIDEMIC_API_KEY  - the Epidemic Sound key stays here, never in the app
+//   (optional, for music) OPENVERSE_CLIENT_ID and OPENVERSE_CLIENT_SECRET - raise the music search limit
 
 const MB = 1024 * 1024;
 export const LIMITS = { image: 30 * MB, video: 300 * MB, thumb: 2 * MB };
@@ -281,103 +281,131 @@ async function handleDelete(request, env, uid, store) {
   return json({ ok: true, deleted: mine.length });
 }
 
-// ------------------------------------------------------- Epidemic Sound (music)
-const EPIDEMIC_BASE = "https://partner-content-api.epidemicsound.com";
+// ------------------------------------------------------- Openverse (free music)
+// Openverse (openverse.org, run by WordPress) searches Creative Commons audio. Its music is
+// the Jamendo catalogue. No sign-up is needed; with OPENVERSE_CLIENT_ID and
+// OPENVERSE_CLIENT_SECRET (optional) the daily limit is much higher.
+const OPENVERSE = "https://api.openverse.org/v1";
+// Licences that allow music under a video: no "No Derivatives" ones.
+const OK_LICENSES = "by,by-sa,by-nc,by-nc-sa,cc0,pdm";
+const DEFAULT_TERM = "chill";
+const PAGE = 30;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-async function epidemic(env, uid, path, withUser = true) {
-  const headers = {
-    authorization: `Bearer ${env.EPIDEMIC_API_KEY}`,
-    accept: "application/json",
-  };
-  if (withUser && uid) headers["x-partner-user-id"] = uid;
-  return fetch(EPIDEMIC_BASE + path, { headers });
+let tokenCache = { value: "", until: 0 };
+const answers = new Map();
+
+/** Remembers answers for ten minutes, so the same search is not asked twice. */
+function remember(key, value) {
+  if (answers.size > 300) answers.delete(answers.keys().next().value);
+  answers.set(key, { value, until: Date.now() + 10 * 60 * 1000 });
 }
-
-/**
- * Asks Epidemic Sound. A 400 means "something in the request is not accepted", so the
- * request is tried again in plainer forms (fewer parameters, then without the end-user header)
- * before giving up. Returns the first answer that is not a 400, or the last 400.
- */
-export async function epidemicTry(env, uid, paths) {
-  let last = null;
-  for (const path of paths) {
-    for (const withUser of [true, false]) {
-      const res = await epidemic(env, uid, path, withUser);
-      if (res.status !== 400) return res;
-      last = res;
-      console.error(`epidemic 400 for ${path} (user header ${withUser}): ${await reason(res)}`);
-    }
+function recall(key) {
+  const hit = answers.get(key);
+  if (!hit) return null;
+  if (hit.until < Date.now()) {
+    answers.delete(key);
+    return null;
   }
-  return last;
+  return hit.value;
 }
 
-/** What Epidemic Sound wrote in its error answer (a short text), or "". */
-export async function reason(res) {
+async function openverseHeaders(env) {
+  const headers = { accept: "application/json" };
+  if (env.OPENVERSE_CLIENT_ID && env.OPENVERSE_CLIENT_SECRET) {
+    if (!tokenCache.value || tokenCache.until < Date.now() + 60000) {
+      const res = await fetch(`${OPENVERSE}/auth_tokens/token/`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "client_credentials",
+          client_id: env.OPENVERSE_CLIENT_ID,
+          client_secret: env.OPENVERSE_CLIENT_SECRET,
+        }),
+      });
+      if (res.ok) {
+        const j = await res.json();
+        tokenCache = { value: String(j.access_token || ""), until: Date.now() + (Number(j.expires_in) || 3600) * 1000 };
+      } else {
+        console.error(`openverse token ${res.status}`);
+      }
+    }
+    if (tokenCache.value) headers.authorization = `Bearer ${tokenCache.value}`;
+  }
+  return headers;
+}
+
+/** Asks Openverse; returns {data} or {error} (a short text for the user). */
+async function openverse(env, path) {
+  const res = await fetch(OPENVERSE + path, { headers: await openverseHeaders(env) });
+  if (res.status === 429) {
+    console.error("openverse 429 (limit reached)");
+    return { error: "Music search is busy right now. Try again in a minute." };
+  }
+  if (!res.ok) {
+    console.error(`openverse ${res.status} for ${path.split("?")[0]}`);
+    return { error: `The music service answered ${res.status}. Try again later.` };
+  }
   try {
-    const text = (await res.clone().text()).trim();
-    if (!text) return "";
-    try {
-      const j = JSON.parse(text);
-      const extra = Array.isArray(j.errors)
-        ? j.errors.map((e) => `${e.key}: ${(e.messages || []).join(" ")}`).join("; ")
-        : "";
-      return [j.message, extra].filter(Boolean).join(" - ").slice(0, 200);
-    } catch {
-      return text.slice(0, 200);
-    }
+    return { data: await res.json() };
   } catch {
-    return "";
+    return { error: "The music service sent an unreadable answer." };
   }
-}
-
-async function epidemicFail(res) {
-  const why = await reason(res);
-  return fail(502, `Epidemic Sound answered ${res.status}${why ? `: ${why}` : "."}`);
 }
 
 /** Keeps only what the app shows. */
 export function slimTrack(t) {
-  const artists = [...(t.mainArtists || []), ...(t.featuredArtists || [])].filter(Boolean);
-  const img = t.images || {};
   return {
     id: String(t.id),
-    title: String(t.title || ""),
-    artist: artists.slice(0, 2).join(", "),
-    seconds: Number(t.length) || 0,
-    bpm: Number(t.bpm) || 0,
-    cover: img.XS || img.S || img.default || "",
-    vocals: t.hasVocals === true,
+    title: String(t.title || "").slice(0, 120),
+    artist: String(t.creator || "").slice(0, 80),
+    seconds: Math.round((Number(t.duration) || 0) / 1000),
+    bpm: 0,
+    cover: typeof t.thumbnail === "string" && t.thumbnail.startsWith("https://") ? t.thumbnail : "",
   };
 }
 
 async function handleMusic(request, env, uid) {
-  if (!env.EPIDEMIC_API_KEY) return fail(503, "Audio search is not set up yet (EPIDEMIC_API_KEY is missing).");
   const body = await readJson(request);
   if (body.op === "search") {
-    const term = String(body.term || "").slice(0, 80);
-    const limit = Math.min(Math.max(parseInt(body.limit, 10) || 30, 1), 60);
+    const term = String(body.term || "").trim().slice(0, 80) || DEFAULT_TERM;
     const offset = Math.max(parseInt(body.offset, 10) || 0, 0);
-    // Epidemic Sound answers 400 to a search without a term: use a default one
-    const word = term.trim() || "popular";
-    const full = new URLSearchParams({ term: word, limit: String(limit), offset: String(offset) });
-    const plain = new URLSearchParams({ term: word });
-    const res = await epidemicTry(env, uid, [`/v0/tracks/search?${full}`, `/v0/tracks/search?${plain}`]);
-    if (res.status === 401 || res.status === 403) return fail(502, "Epidemic Sound refused the key. Check EPIDEMIC_API_KEY and your partner access.");
-    if (!res.ok) return epidemicFail(res);
-    const data = await res.json();
-    const tracks = (data.tracks || []).map(slimTrack);
-    return json({ tracks, hasMore: Boolean(data.links && data.links.next) });
+    const page = Math.floor(offset / PAGE) + 1;
+    const q = new URLSearchParams({
+      q: term,
+      category: "music",
+      license: OK_LICENSES,
+      page: String(page),
+      page_size: String(PAGE),
+      filter_dead: "true",
+    });
+    const key = `s|${q}`;
+    const cached = recall(key);
+    if (cached) return json(cached);
+    const r = await openverse(env, `/audio/?${q}`);
+    if (r.error) return fail(502, r.error);
+    const results = Array.isArray(r.data.results) ? r.data.results : [];
+    const out = {
+      tracks: results.filter((t) => t && UUID.test(String(t.id))).map(slimTrack),
+      hasMore: page < (Number(r.data.page_count) || 0),
+      nextOffset: page * PAGE,
+    };
+    remember(key, out);
+    return json(out);
   }
   if (body.op === "url") {
     const id = String(body.id || "");
-    if (!/^[A-Za-z0-9_-]{4,64}$/.test(id)) return fail(400, "Bad track id.");
-    const base = `/v0/tracks/${encodeURIComponent(id)}/download`;
-    const res = await epidemicTry(env, uid, [`${base}?format=mp3&quality=normal`, `${base}?format=mp3`, base]);
-    if (res.status === 401 || res.status === 403) return fail(502, "Epidemic Sound refused this download (check your partner access).");
-    if (!res.ok) return epidemicFail(res);
-    const data = await res.json();
-    if (!data.url) return fail(502, "Epidemic Sound sent no link.");
-    return json({ url: data.url, expires: data.expires || null });
+    if (!UUID.test(id)) return fail(400, "Bad track id.");
+    const key = `u|${id}`;
+    const cached = recall(key);
+    if (cached) return json(cached);
+    const r = await openverse(env, `/audio/${id}/`);
+    if (r.error) return fail(502, r.error);
+    const url = r.data && r.data.url;
+    if (typeof url !== "string" || !url.startsWith("https://")) return fail(404, "That track is not available any more.");
+    const out = { url, expires: null };
+    remember(key, out);
+    return json(out);
   }
   return fail(400, "Unknown music request.");
 }
@@ -387,7 +415,7 @@ const ROUTES = { sign: handleSign, confirm: handleConfirm, delete: handleDelete,
 /** One entry point for every function in api/. `store` is only replaced in tests. */
 export async function handle(request, env, route, store = null) {
   if (route === "health") {
-    return request.method === "GET" ? json({ ok: true, ready: configured(env), music: Boolean(env.EPIDEMIC_API_KEY) }) : fail(404, "Not found");
+    return request.method === "GET" ? json({ ok: true, ready: configured(env), music: true, musicKey: Boolean(env.OPENVERSE_CLIENT_ID && env.OPENVERSE_CLIENT_SECRET) }) : fail(404, "Not found");
   }
   const fn = ROUTES[route];
   if (!fn || request.method !== "POST") return fail(404, "Not found");

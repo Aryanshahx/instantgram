@@ -68,11 +68,11 @@ void main() {
 
   group('music names', () {
     test('a remote track shows title and artist', () {
-      rememberMusic('es:abc', 'Night Drive', 'Some Artist');
-      final t = musicById('es:abc')!;
+      rememberMusic('ov:abc', 'Night Drive', 'Some Artist');
+      final t = musicById('ov:abc')!;
       expect(t.label, contains('Night Drive'));
       expect(t.label, contains('Some Artist'));
-      expect(t.label.contains('es:'), isFalse);
+      expect(t.label.contains('ov:'), isFalse);
     });
 
     test('a library track has just its title', () {
@@ -81,11 +81,11 @@ void main() {
     });
 
     testWidgets('the label under a username shows the track', (t) async {
-      rememberMusic('es:xyz', 'Slow Burn', 'Band');
+      rememberMusic('ov:xyz', 'Slow Burn', 'Band');
       await t.pumpWidget(
         MaterialApp(
           theme: AppTheme.dark,
-          home: const Scaffold(body: MusicLabel(musicId: 'es:xyz')),
+          home: const Scaffold(body: MusicLabel(musicId: 'ov:xyz')),
         ),
       );
       expect(find.textContaining('Slow Burn'), findsOneWidget);

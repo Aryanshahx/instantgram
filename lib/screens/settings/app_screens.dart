@@ -263,7 +263,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
       ),
       (
         'Where it is stored',
-        'Account data and messages live in Google Firebase. Photos, clips and voice files live in our own media storage. Audio comes from Epidemic Sound.',
+        'Account data and messages live in Google Firebase. Photos, clips and voice files live in our own media storage. Free music comes from the Jamendo catalogue through Openverse.',
       ),
       (
         'On your phone',
@@ -303,7 +303,7 @@ class TermsScreen extends StatelessWidget {
       ),
       (
         'Audio',
-        'Audio from Epidemic Sound may only be used inside the app as it is offered. Do not copy or resell it.',
+        'Free music is shared by its artists under Creative Commons licences (the Jamendo catalogue, found through Openverse). It is used inside the app with the artist\'s name shown. Do not resell it.',
       ),
       (
         'Reports and removal',

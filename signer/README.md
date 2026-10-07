@@ -45,15 +45,25 @@ payment method on the Tigris account (verification only).
   `bash tools/set_media_url.sh <signer-url> <your-domain>`.
 * Tests: `cd signer && npm test` (needs Node 18+).
 * Settings (Vercel -> Settings -> Environment Variables): FIREBASE_PROJECT_ID, TIGRIS_BUCKET,
-  TIGRIS_ACCESS_KEY_ID, TIGRIS_SECRET_ACCESS_KEY, EPIDEMIC_API_KEY (music). After changing one,
+  TIGRIS_ACCESS_KEY_ID, TIGRIS_SECRET_ACCESS_KEY, OPENVERSE_CLIENT_ID and OPENVERSE_CLIENT_SECRET (music, optional). After changing one,
   Redeploy.
 
-## Music from Epidemic Sound
+## Music from Openverse
 
-`POST /api/music` searches Epidemic Sound and returns a playable address for a track. The API key
-stays here, in the Vercel environment variable `EPIDEMIC_API_KEY`, and is never in the app or in
-git. Only logged-in users can use it. Without the key the app still has its built-in music.
+`POST /api/music` searches Openverse (openverse.org), a free search for Creative Commons audio. Its
+music is the Jamendo catalogue, streamed from Jamendo. **No sign-up and no key are needed**: it
+works as soon as the signer is deployed. Only logged-in users can use it. Tracks with a "No
+Derivatives" licence are never asked for (they may not be put under a video). Answers are kept for
+ten minutes so the same search is not asked twice.
 
-1. Vercel -> your project -> Settings -> Environment Variables -> add `EPIDEMIC_API_KEY`.
-2. Deployments -> the latest one -> Redeploy.
-3. Check in the app: Create > Music > Epidemic Sound, and search for a word like "calm".
+Without a key Openverse allows about 200 searches per day for the whole server. When that is
+used up, the app says "Music search is busy" until the next day. To raise the limit (optional),
+register once, in a terminal:
+
+    curl -s -X POST https://api.openverse.org/v1/auth_tokens/register/ \
+      -H "Content-Type: application/json" \
+      -d '{"name":"InstantGram","description":"Music search for a social app","email":"YOUR_EMAIL"}'
+
+It prints a `client_id` and a `client_secret`; open the verification email it sends you. Then add
+both in Vercel (Settings -> Environment Variables) as `OPENVERSE_CLIENT_ID` and
+`OPENVERSE_CLIENT_SECRET`, and Redeploy. `<signer>/api/health` then shows `"musicKey":true`.

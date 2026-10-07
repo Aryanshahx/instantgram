@@ -1,7 +1,7 @@
 import 'package:video_player/video_player.dart';
 
 import '../models/music.dart';
-import 'epidemic_service.dart';
+import 'online_music_service.dart';
 
 /// Plays one of the app's own tracks (looping). The native video player can play audio files
 /// too, so no extra plugin is needed. It mixes with other sounds instead of taking over audio
@@ -20,7 +20,7 @@ class MusicPlayer {
     try {
       c = track.remote
           ? VideoPlayerController.networkUrl(
-              Uri.parse(await EpidemicService.instance.audioUrl(track)),
+              Uri.parse(await OnlineMusicService.instance.audioUrl(track)),
               videoPlayerOptions: opts,
             )
           : VideoPlayerController.asset(track.asset, videoPlayerOptions: opts);
