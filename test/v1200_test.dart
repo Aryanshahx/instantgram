@@ -142,7 +142,8 @@ void main() {
       'tap the clip to select it; its handles trim (and keep the longest allowed)',
       (t) async {
         await pump(t);
-        expect(find.byKey(const ValueKey('trimEnd')), findsNothing);
+        // the handles are always there now
+        expect(find.byKey(const ValueKey('trimEnd')), findsOneWidget);
         await t.tapAt(
           t.getRect(find.byKey(const ValueKey('videoTrack'))).centerLeft +
               const Offset(60, 0),

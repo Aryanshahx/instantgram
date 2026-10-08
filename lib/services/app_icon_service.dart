@@ -49,4 +49,24 @@ class AppIconService {
     if (!kAppIcons.any((i) => i.id == id)) throw ArgumentError(id);
     await channel.invokeMethod<String>('set', {'id': id});
   }
+
+  /// Puts my own picture on the home screen as an InstantGram shortcut ([png] = the
+  /// adaptive picture, see custom_icon.dart). Android only lets apps change their real
+  /// icon to pictures built into the app, so this is a pinned shortcut. Returns 'pinned'
+  /// (the phone asks to add it), 'updated' (the shortcut already there got the new
+  /// picture) or 'unsupported'.
+  Future<String> pinCustom(
+    Uint8List png, {
+    String label = 'InstantGram',
+  }) async {
+    try {
+      return await channel.invokeMethod<String>('pinCustom', {
+            'png': png,
+            'label': label,
+          }) ??
+          'unsupported';
+    } on MissingPluginException {
+      return 'unsupported';
+    }
+  }
 }

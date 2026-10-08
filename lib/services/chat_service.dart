@@ -530,6 +530,14 @@ class ChatService {
         );
       });
 
+  /// When [uid] last opened the chat (for "Seen" under my last message), live.
+  Stream<DateTime?> watchSeenBy(String chatId, String uid) =>
+      _chats.doc(chatId).snapshots().map((d) {
+        final s = d.data()?['seen'];
+        final v = s is Map ? s[uid] : null;
+        return v is Timestamp ? v.toDate() : null;
+      });
+
   /// Marks the chat as read for me.
   Future<void> markSeen(String chatId) async {
     try {

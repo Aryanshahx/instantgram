@@ -176,28 +176,6 @@ void main() {
       expect(c.superCount, 0);
     });
 
-    testWidgets('hold the heart: burst, purple heart, count', (t) async {
-      final c = LikeController('p', 4);
-      await t.pumpWidget(_app(Center(child: HeartButton(controller: c))));
-      await _settle(t);
-      expect(find.byKey(const ValueKey('superCount')), findsNothing);
-      await t.longPress(find.byType(HeartButton));
-      await t.pump(const Duration(milliseconds: 200));
-      expect(find.byKey(const ValueKey('superBurst')), findsOneWidget);
-      await t.pump(const Duration(seconds: 2));
-      expect(find.byKey(const ValueKey('superBurst')), findsNothing);
-      expect(find.text('5'), findsOneWidget);
-      expect(find.byKey(const ValueKey('superCount')), findsOneWidget);
-      final icon = t.widget<Icon>(find.byIcon(Icons.favorite_rounded));
-      expect(icon.color, kSuperHeartColor);
-
-      await t.longPress(find.byType(HeartButton)); // a second one: just a note
-      await t.pump(const Duration(milliseconds: 200));
-      expect(find.text('You already sent a super heart here.'), findsOneWidget);
-      await t.pump(const Duration(seconds: 4));
-      c.dispose();
-    });
-
     test('activity line', () {
       expect(
         const AppNotification(id: 'n', type: 'super').verb,

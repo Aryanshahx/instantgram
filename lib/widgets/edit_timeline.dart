@@ -46,6 +46,9 @@ class EditTimeline extends StatefulWidget {
     this.onSeek,
     this.onSeekEnd,
     this.onRange,
+    this.onRangeStart,
+    this.onRangeEnd,
+    this.onTouch,
     this.onVideoTap,
     this.onMuteTap,
     this.onAddClip,
@@ -80,6 +83,13 @@ class EditTimeline extends StatefulWidget {
 
   /// New kept part: start, end, and whether the start handle moved.
   final void Function(double start, double end, bool startMoved)? onRange;
+
+  /// A trim handle was grabbed / let go.
+  final VoidCallback? onRangeStart;
+  final VoidCallback? onRangeEnd;
+
+  /// Any finger came down on the timeline (the editor pauses the video).
+  final VoidCallback? onTouch;
   final VoidCallback? onVideoTap;
   final VoidCallback? onMuteTap;
   final VoidCallback? onAddClip;
@@ -92,10 +102,10 @@ class EditTimeline extends StatefulWidget {
   final double height;
 
   /// Room for the time marks above the tracks.
-  static const double rulerHeight = 30;
-  static const double videoHeight = 60;
-  static const double trackHeight = 46;
-  static const double gap = 8;
+  static const double rulerHeight = 22;
+  static const double videoHeight = 46;
+  static const double trackHeight = 32;
+  static const double gap = 6;
 
   /// Points per second at zoom 1.
   static const double basePps = 48;
@@ -123,6 +133,7 @@ class _EditTimelineState extends State<EditTimeline> {
   // ------------------------------------------------------------- gestures
 
   void _down(PointerDownEvent e) {
+    if (_fingers.isEmpty) widget.onTouch?.call();
     _fingers[e.pointer] = e.localPosition;
     if (_fingers.length == 2) {
       final p = _fingers.values.toList();
@@ -277,13 +288,13 @@ class _EditTimelineState extends State<EditTimeline> {
               key: const ValueKey('timelineMute'),
               onTap: widget.onMuteTap,
               child: SizedBox(
-                width: 52,
+                width: 40,
                 child: Icon(
                   widget.muted
                       ? Icons.volume_off_rounded
                       : Icons.volume_up_rounded,
                   color: widget.muted ? Colors.redAccent : Colors.white60,
-                  size: 22,
+                  size: 18,
                 ),
               ),
             ),
@@ -415,7 +426,7 @@ class _EditTimelineState extends State<EditTimeline> {
               ),
             ),
           ),
-          if (sel) ...[
+          ...[
             _handle(
               const ValueKey('trimStart'),
               _x(s) - 14,
@@ -484,18 +495,21 @@ class _EditTimelineState extends State<EditTimeline> {
     child: GestureDetector(
       key: key,
       behavior: HitTestBehavior.opaque,
+      onHorizontalDragStart: (_) => widget.onRangeStart?.call(),
       onHorizontalDragUpdate: (d) => onDrag(d.delta.dx),
+      onHorizontalDragEnd: (_) => widget.onRangeEnd?.call(),
+      onHorizontalDragCancel: () => widget.onRangeEnd?.call(),
       child: Center(
         child: Container(
-          width: 14,
-          height: math.min(height - 8, 36),
+          width: 12,
+          height: math.min(height - 6, 30),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(5),
             boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 4)],
           ),
           child: Center(
-            child: Container(width: 2, height: 14, color: Colors.black54),
+            child: Container(width: 2, height: 10, color: Colors.black54),
           ),
         ),
       ),
@@ -543,8 +557,8 @@ class _EditTimelineState extends State<EditTimeline> {
                 ),
               Row(
                 children: [
-                  Icon(icon, size: 16, color: Colors.white),
-                  const SizedBox(width: 6),
+                  Icon(icon, size: 14, color: Colors.white),
+                  const SizedBox(width: 5),
                   Expanded(
                     child: Text(
                       label,
@@ -552,8 +566,8 @@ class _EditTimelineState extends State<EditTimeline> {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 11.5,
                       ),
                     ),
                   ),
@@ -670,13 +684,13 @@ class _EditTimelineState extends State<EditTimeline> {
             padding: const EdgeInsets.symmetric(horizontal: 14),
             child: Row(
               children: [
-                Icon(icon, color: Colors.white70, size: 24),
-                const SizedBox(width: 10),
+                Icon(icon, color: Colors.white54, size: 18),
+                const SizedBox(width: 6),
                 Text(
                   label,
                   style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 16,
+                    color: Colors.white54,
+                    fontSize: 12.5,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -713,8 +727,8 @@ class _RulerPainter extends CustomPainter {
           text: TextSpan(
             text: _fmt(t),
             style: const TextStyle(
-              color: Colors.white60,
-              fontSize: 13,
+              color: Colors.white54,
+              fontSize: 10.5,
               fontWeight: FontWeight.w600,
             ),
           ),

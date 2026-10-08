@@ -18,6 +18,8 @@ class StoryView {
     required this.first,
     required this.last,
     this.count = 1,
+    this.liked = false,
+    this.superHeart = false,
   });
 
   final String uid;
@@ -31,6 +33,10 @@ class StoryView {
   /// How many times they watched it (more than 1 = rewatched).
   final int count;
 
+  /// They liked it / sent it a super heart.
+  final bool liked;
+  final bool superHeart;
+
   bool get rewatched => count > 1;
 
   factory StoryView.fromMap(String uid, Map<String, dynamic> m) {
@@ -43,6 +49,8 @@ class StoryView {
       first: m['first'] is Timestamp ? t(m['first']) : last,
       last: last,
       count: m['count'] is num ? (m['count'] as num).toInt().clamp(1, 9999) : 1,
+      liked: m['liked'] == true || m['superHeart'] == true,
+      superHeart: m['superHeart'] == true,
     );
   }
 

@@ -166,6 +166,8 @@ export function activityBody(item) {
     case "mention": return `${who} mentioned you`;
     case "follow": return `${who} started following you`;
     case "story_view": return `${who} viewed your moment`;
+    case "story_like": return `${who} liked your moment`;
+    case "story_super": return `${who} sent your moment a super heart 💖`;
     default: return `${who} interacted with your post`;
   }
 }
@@ -189,7 +191,42 @@ export async function notify(body, env, uid, deps = {}) {
   const kind = body && body.kind;
 
   let to, title, text, data, android = {};
-  if (kind === "message") {
+  if (kind === "test") {
+    // Settings > Notifications > Send a test: to my own phones, with every step reported
+    const reg = await db.get(`pushTokens/${uid}`);
+    const tokens = reg && Array.isArray(reg.tokens) ? reg.tokens.filter((t) => typeof t === "string").slice(-5) : [];
+    if (!tokens.length) return { status: 200, body: { ok: false, sent: 0, detail: "This account has no phone registered for notifications yet." } };
+    let accessToken;
+    try {
+      accessToken = await googleToken(sa, fetchFn, nowMs);
+    } catch (e) {
+      return { status: 200, body: { ok: false, sent: 0, detail: `Google sign-in of the signer failed (${e.message}). Check FIREBASE_SERVICE_ACCOUNT in Vercel.` } };
+    }
+    let sent = 0;
+    const errors = [];
+    for (const token of tokens) {
+      const res = await fetchFn(`https://fcm.googleapis.com/v1/projects/${project}/messages:send`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({ message: {
+          token,
+          notification: { title: "InstantGram", body: "Notifications work \u{1F389}" },
+          data: { type: "test" },
+          android: { priority: "HIGH", notification: { channel_id: "activity", icon: "ic_stat_instantgram", color: "#C6FF3D" } },
+        } }),
+      });
+      if (res.ok) { sent++; continue; }
+      let why = "";
+      try { const j = await res.json(); why = (j && j.error && (j.error.status || j.error.message)) || ""; } catch { /* no body */ }
+      errors.push(`${res.status}${why ? " " + why : ""}`);
+    }
+    const hint = errors.some((e) => e.startsWith("403"))
+      ? " Turn on \"Firebase Cloud Messaging API\" in Google Cloud for this project."
+      : errors.some((e) => e.startsWith("404") || e.includes("UNREGISTERED"))
+        ? " The phone address is old: open the app again so it registers."
+        : "";
+    return { status: 200, body: { ok: sent > 0, sent, errors, detail: sent > 0 ? `Sent to ${sent} phone(s).` : `Not sent: ${errors.join(", ")}.${hint}` } };
+  } else if (kind === "message") {
     const { chatId, messageId } = body;
     if (!SAFE_ID.test(chatId || "") || !SAFE_ID.test(messageId || "")) return bad("chatId and messageId are needed.");
     const chat = await db.get(`chats/${chatId}`);
@@ -295,8 +332,9 @@ export async function notify(body, env, uid, deps = {}) {
     });
     if (res.ok) {
       sent++;
-    } else if (res.status === 404) {
-      stale.push(token); // the app was removed or the token is old
+    } else {
+      if (res.status === 404) stale.push(token); // the app was removed or the token is old
+      console.error("fcm send failed", res.status);
     }
   }
   if (stale.length) {

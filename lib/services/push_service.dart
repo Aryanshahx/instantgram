@@ -38,6 +38,12 @@ class PushService {
 
   StreamSubscription<String>? _refreshSub;
   StreamSubscription<RemoteMessage>? _openSub;
+  StreamSubscription<RemoteMessage>? _fgSub;
+
+  /// A notification that came while the app is open (Android does not show those itself):
+  /// the main screen shows it as a banner.
+  final ValueNotifier<({String title, String body, String type})?> shown =
+      ValueNotifier(null);
   String _token = '';
   String _uid = '';
 
@@ -114,6 +120,16 @@ class PushService {
       _refreshSub = fm.onTokenRefresh.listen(_save);
       await _openSub?.cancel();
       _openSub = FirebaseMessaging.onMessageOpenedApp.listen(_tapped);
+      await _fgSub?.cancel();
+      _fgSub = FirebaseMessaging.onMessage.listen((m) {
+        final n = m.notification;
+        if (n == null) return;
+        shown.value = (
+          title: n.title ?? 'InstantGram',
+          body: n.body ?? '',
+          type: '${m.data['type'] ?? ''}',
+        );
+      });
       final first = await fm.getInitialMessage();
       if (first != null) _tapped(first);
     } catch (_) {
@@ -151,8 +167,10 @@ class PushService {
     _uid = '';
     await _refreshSub?.cancel();
     await _openSub?.cancel();
+    await _fgSub?.cancel();
     _refreshSub = null;
     _openSub = null;
+    _fgSub = null;
     if (uid.isEmpty || token.isEmpty || !_firebaseReady) return;
     try {
       await _doc(uid)
@@ -162,6 +180,72 @@ class PushService {
           .timeout(const Duration(seconds: 5));
     } catch (_) {
       // the signer drops dead addresses by itself
+    }
+  }
+
+  /// Settings > Notifications > Send a test: registers this phone again and asks the signer
+  /// to notify my own phones. Returns what happened, in words.
+  Future<({bool ok, String detail})> sendTest() async {
+    if (!_firebaseReady) return (ok: false, detail: 'Firebase is not ready.');
+    if (!mediaServerConfigured) {
+      return (
+        ok: false,
+        detail: 'The media signer is not set up in this build.',
+      );
+    }
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return (ok: false, detail: 'Log in first.');
+    try {
+      final fm = FirebaseMessaging.instance;
+      final perm = await fm.requestPermission();
+      if (perm.authorizationStatus == AuthorizationStatus.denied) {
+        return (
+          ok: false,
+          detail:
+              'Notifications are blocked for InstantGram. Turn them on in Android Settings > Apps > InstantGram > Notifications.',
+        );
+      }
+      final t = await fm.getToken() ?? '';
+      if (t.isEmpty) {
+        return (
+          ok: false,
+          detail:
+              'This phone got no notification address (Google Play services missing?).',
+        );
+      }
+      _uid = user.uid;
+      await _save(t);
+      final id = await user.getIdToken() ?? '';
+      final r = await _api.post<dynamic>(
+        '$mediaApiBase/notify',
+        data: {'kind': 'test'},
+        options: Options(
+          headers: {'Authorization': 'Bearer $id'},
+          validateStatus: (_) => true,
+        ),
+      );
+      final body = r.data is Map ? r.data as Map : const {};
+      final detail = '${body['detail'] ?? ''}';
+      if (r.statusCode == 404) {
+        return (
+          ok: false,
+          detail: 'The signer is an old version. Redeploy it in Vercel.',
+        );
+      }
+      if (r.statusCode != 200) {
+        return (
+          ok: false,
+          detail: detail.isEmpty
+              ? 'The signer answered ${r.statusCode}.'
+              : detail,
+        );
+      }
+      return (
+        ok: body['ok'] == true,
+        detail: detail.isEmpty ? 'Sent.' : detail,
+      );
+    } catch (e) {
+      return (ok: false, detail: 'Could not reach the signer: $e');
     }
   }
 

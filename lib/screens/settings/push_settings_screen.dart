@@ -17,6 +17,23 @@ class PushSettingsScreen extends StatefulWidget {
 class _PushSettingsScreenState extends State<PushSettingsScreen> {
   bool _on = true;
   bool _loaded = false;
+  bool _testing = false;
+  String? _result;
+  bool _resultOk = false;
+
+  Future<void> _test() async {
+    setState(() {
+      _testing = true;
+      _result = null;
+    });
+    final r = await PushService.instance.sendTest();
+    if (!mounted) return;
+    setState(() {
+      _testing = false;
+      _result = r.detail;
+      _resultOk = r.ok;
+    });
+  }
 
   @override
   void initState() {
@@ -68,6 +85,36 @@ class _PushSettingsScreenState extends State<PushSettingsScreen> {
             style: TextStyle(color: context.muted),
           ),
         ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              key: const ValueKey('pushTest'),
+              onPressed: _testing ? null : _test,
+              icon: _testing
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.notifications_active_outlined),
+              label: const Text('Send me a test notification'),
+            ),
+          ),
+        ),
+        if (_result != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+            child: Text(
+              _result!,
+              key: const ValueKey('pushTestResult'),
+              style: TextStyle(
+                color: _resultOk ? AppTheme.volt : Colors.redAccent,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
       ],
     );
   }

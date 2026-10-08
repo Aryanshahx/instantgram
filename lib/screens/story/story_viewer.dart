@@ -17,6 +17,8 @@ import '../../services/story_views.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/highlights.dart';
+import '../../widgets/like_button.dart'
+    show kSuperHeartColor, showSuperHeartBurst;
 import '../../widgets/music_widgets.dart';
 import '../../widgets/story_overlays.dart';
 import '../../widgets/story_viewers_sheet.dart';
@@ -229,7 +231,10 @@ class _GroupPlayerState extends State<_GroupPlayer>
       _loaded = true;
       _failed = failed;
     });
-    if (!failed && !_mine && _hl == null) StoryViews.instance.record(story);
+    if (!failed && !_mine && _hl == null) {
+      StoryViews.instance.record(story);
+      _loadLike(story, gen);
+    }
     if (!_holding) {
       _anim.forward(from: 0);
       _vc?.play();
@@ -364,6 +369,109 @@ class _GroupPlayerState extends State<_GroupPlayer>
     }
   }
 
+  // ------------------------------------------------------------------ likes
+
+  bool _liked = false;
+  bool _super = false;
+  bool _likeBusy = false;
+
+  Future<void> _loadLike(Story story, int gen) async {
+    if (_liked || _super) setState(() => _liked = _super = false);
+    try {
+      final r = await StoryViews.instance.likeOf(story);
+      if (!mounted || gen != _gen) return;
+      setState(() {
+        _liked = r.liked || r.superHeart;
+        _super = r.superHeart;
+      });
+    } catch (_) {
+      // the heart stays empty
+    }
+  }
+
+  /// Tap the heart: like / unlike.
+  Future<void> _toggleLike() async {
+    if (_likeBusy) return;
+    final story = _story;
+    final was = (_liked, _super);
+    final like = !_liked;
+    setState(() {
+      _liked = like;
+      if (!like) _super = false;
+    });
+    _likeBusy = true;
+    try {
+      await StoryViews.instance.setLike(story, liked: like);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _liked = was.$1;
+          _super = was.$2;
+        });
+        showToast(context, 'Could not save. Try again.');
+      }
+    } finally {
+      _likeBusy = false;
+    }
+  }
+
+  /// Hold the heart: a super heart (once per moment).
+  Future<void> _sendSuper() async {
+    if (_likeBusy) return;
+    if (_super) {
+      showToast(context, 'You already sent a super heart here.');
+      return;
+    }
+    final story = _story;
+    final was = (_liked, _super);
+    showSuperHeartBurst(context);
+    setState(() {
+      _liked = true;
+      _super = true;
+    });
+    _likeBusy = true;
+    try {
+      await StoryViews.instance.setLike(story, liked: true, superHeart: true);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _liked = was.$1;
+          _super = was.$2;
+        });
+        showToast(context, 'Could not send. Try again.');
+      }
+    } finally {
+      _likeBusy = false;
+    }
+  }
+
+  Widget _heart() => Positioned(
+    right: 8,
+    bottom: 8,
+    child: SafeArea(
+      child: Tooltip(
+        message: 'Like · hold for a super heart',
+        child: GestureDetector(
+          key: const ValueKey('storyLike'),
+          behavior: HitTestBehavior.opaque,
+          onTap: _toggleLike,
+          onLongPress: _sendSuper,
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Icon(
+              _liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+              size: 32,
+              color: _super
+                  ? kSuperHeartColor
+                  : (_liked ? const Color(0xFFFF3B5C) : Colors.white),
+              shadows: const [Shadow(blurRadius: 8, color: Colors.black54)],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
   /// My own moment: who watched it (the moment waits meanwhile).
   Future<void> _viewers() async {
     _anim.stop();
@@ -422,6 +530,7 @@ class _GroupPlayerState extends State<_GroupPlayer>
             )
           else
             StoryCanvas(media: _media(story), overlays: story.overlays),
+          if (!_mine && _hl == null && _loaded && !_failed) _heart(),
           if (_mine && _hl == null)
             Positioned(
               right: 12,

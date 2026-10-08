@@ -238,7 +238,7 @@ class _BurstState extends State<_Burst> with SingleTickerProviderStateMixin {
 /// The colour of a liked heart.
 const Color kHeartColor = Color(0xFFFF3B5C);
 
-/// Heart + count, no background. Used under posts. Hold it for a super heart.
+/// Heart + count, no background. Used under posts (super hearts are for moments only).
 class HeartButton extends StatelessWidget {
   const HeartButton({
     super.key,
@@ -261,14 +261,12 @@ class HeartButton extends StatelessWidget {
       listenable: controller,
       builder: (context, _) {
         final liked = controller.liked;
-        final sup = controller.superHeart;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () async {
             final err = await controller.toggle();
             if (err != null) onError?.call(err);
           },
-          onLongPress: () => superHeartFrom(context, controller),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
             child: Row(
@@ -283,14 +281,7 @@ class HeartButton extends StatelessWidget {
                         ? Icons.favorite_rounded
                         : Icons.favorite_border_rounded,
                     size: size,
-                    color: sup
-                        ? kSuperHeartColor
-                        : (liked ? kHeartColor : null),
-                    shadows: sup
-                        ? const [
-                            Shadow(color: kSuperHeartColor, blurRadius: 12),
-                          ]
-                        : null,
+                    color: liked ? kHeartColor : null,
                   ),
                 ),
                 if (showCount) ...[
@@ -302,24 +293,6 @@ class HeartButton extends StatelessWidget {
                       fontSize: 13,
                     ),
                   ),
-                  if (controller.superCount > 0) ...[
-                    const SizedBox(width: 6),
-                    const Icon(
-                      Icons.auto_awesome_rounded,
-                      size: 13,
-                      color: kSuperHeartColor,
-                    ),
-                    const SizedBox(width: 2),
-                    Text(
-                      '${controller.superCount}',
-                      key: const ValueKey('superCount'),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13,
-                        color: kSuperHeartColor,
-                      ),
-                    ),
-                  ],
                 ],
               ],
             ),

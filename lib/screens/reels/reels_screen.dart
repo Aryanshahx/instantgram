@@ -695,11 +695,8 @@ class _Rail extends StatelessWidget {
             icon: like.liked
                 ? Icons.favorite_rounded
                 : Icons.favorite_border_rounded,
-            color: like.superHeart
-                ? kSuperHeartColor
-                : (like.liked ? _heart : Colors.white),
+            color: like.liked ? _heart : Colors.white,
             pop: like.liked,
-            onLongPress: () => superHeartFrom(context, like),
             label: SafetyService.instance.showsNumber(post, post.hideLikes)
                 ? '${like.count}'
                 : 'Like',

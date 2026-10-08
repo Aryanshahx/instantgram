@@ -293,7 +293,9 @@ class _InboxScreenState extends State<InboxScreen> {
                       uid: gone ? null : otherUid,
                       avatarUrl: u?.photoUrl ?? '',
                       name: gone ? kUserNotAvailable : (u?.username ?? '...'),
-                      subtitle: '${mine ? 'You: ' : ''}${t.lastText}',
+                      subtitle: mine
+                          ? '${t.seenByOther(me) ? 'Seen' : 'Sent'} · You: ${t.lastText}'
+                          : t.lastText,
                       time: t.lastAt == null
                           ? ''
                           : timeago.format(t.lastAt!, locale: 'en_short'),

@@ -93,6 +93,13 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Disappearing messages of this chat ('' = off); pull down and hold to change it.
   String _vanish = Vanish.off;
   StreamSubscription<String>? _vanishSub;
+
+  /// When the other person last opened this chat ("Seen" under my last message).
+  DateTime? _otherSeen;
+  StreamSubscription<DateTime?>? _seenSub;
+
+  /// My newest message when nothing of theirs came after it (it gets Sent / Seen).
+  String? _statusFor;
   late final PullHold _pull = PullHold(onFire: _slideVanish);
   String? _highlight;
 
@@ -110,6 +117,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // "after seen" messages I had on screen are gone once I leave
     if (id != null) unawaited(_service.removeSeen(id, _current));
     _vanishSub?.cancel();
+    _seenSub?.cancel();
     _pull.dispose();
     _recTimer?.cancel();
     _voice.dispose();
@@ -139,6 +147,10 @@ class _ChatScreenState extends State<ChatScreen> {
       _vanishSub?.cancel();
       _vanishSub = _service.watchVanish(id).listen((v) {
         if (mounted && v != _vanish) setState(() => _vanish = v);
+      }, onError: (_) {});
+      _seenSub?.cancel();
+      _seenSub = _service.watchSeenBy(id, widget.otherUid).listen((t) {
+        if (mounted && t != _otherSeen) setState(() => _otherSeen = t);
       }, onError: (_) {});
       unawaited(_service.sweepExpired(id));
       _service.markSeen(id);
@@ -838,6 +850,12 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           );
         }
+        final lastReal = msgs
+            .where((m) => m.type != MsgType.system)
+            .firstOrNull;
+        _statusFor = lastReal != null && lastReal.senderId == _me
+            ? lastReal.id
+            : null;
         // someone else's new message is on screen: mark the chat as read
         final newest = msgs.isEmpty ? null : msgs.first;
         if (newest != null &&
@@ -870,8 +888,39 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// "Seen" / "Sent" under my last message.
+  Widget _status(ChatMessage m) {
+    final seenAt = _otherSeen;
+    final seen = seenAt != null && !seenAt.isBefore(m.createdAt);
+    return Padding(
+      padding: const EdgeInsets.only(right: 6, bottom: 4),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: Text(
+          seen ? 'Seen' : 'Sent',
+          key: const ValueKey('msgStatus'),
+          style: TextStyle(
+            color: context.muted,
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _item(ChatMessage m) {
     if (m.type == MsgType.system) return _systemLine(context, m);
+    if (m.id == _statusFor && !m.pending) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [_bubbleItem(m), _status(m)],
+      );
+    }
+    return _bubbleItem(m);
+  }
+
+  Widget _bubbleItem(ChatMessage m) {
     final mine = m.senderId == _me;
     return KeyedSubtree(
       key: _keys.putIfAbsent(m.id, GlobalKey.new),

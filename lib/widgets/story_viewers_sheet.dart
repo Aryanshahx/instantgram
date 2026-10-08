@@ -5,6 +5,7 @@ import '../core/ui.dart';
 import '../models/story_view.dart';
 import '../services/story_views.dart';
 import 'avatar.dart';
+import 'like_button.dart' show kSuperHeartColor;
 
 /// Opens the list of people who watched my moment [storyId].
 Future<void> showStoryViewers(
@@ -197,6 +198,18 @@ class _StoryViewersSheetState extends State<StoryViewersSheet> {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (v.liked)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Icon(
+                Icons.favorite_rounded,
+                key: ValueKey('viewerLike_${v.uid}'),
+                size: 20,
+                color: v.superHeart
+                    ? kSuperHeartColor
+                    : const Color(0xFFFF3B5C),
+              ),
+            ),
           if (v.rewatched)
             Container(
               key: ValueKey('rewatch_${v.uid}'),

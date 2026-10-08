@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/story.dart';
 import '../models/story_view.dart';
+import 'notification_service.dart';
 import 'push_service.dart';
 import 'user_service.dart';
 
@@ -32,11 +36,25 @@ class StoryViews {
   final Set<String> _countedNow = {};
 
   /// A new visit of the moments viewer starts.
-  void newVisit() => _countedNow.clear();
+  void newVisit() {
+    _countedNow.clear();
+    _recording.clear();
+  }
+
+  /// The writes of [record] still running, so a like waits until the view line exists.
+  final Map<String, Future<void>> _recording = {};
 
   /// I watched [story]. Never for my own; never throws.
-  Future<void> record(Story story) async {
-    if (!_countedNow.add(story.id)) return;
+  Future<void> record(Story story) {
+    if (!_countedNow.add(story.id)) {
+      return _recording[story.id] ?? Future.value();
+    }
+    final f = _record(story);
+    _recording[story.id] = f;
+    return f;
+  }
+
+  Future<void> _record(Story story) async {
     try {
       final b = recordBackend;
       if (b != null) {
@@ -45,31 +63,82 @@ class StoryViews {
       }
       final me = _me;
       if (me.isEmpty || story.authorId == me) return;
-      final ref = _db
-          .collection(story.collection)
-          .doc(story.id)
-          .collection('views')
-          .doc(me);
-      try {
+      final ref = _view(story, me);
+      // read first: an update of a line that does not exist yet is refused by the rules
+      // (it never says "not found"), so the first view was never written
+      final snap = await ref.get();
+      if (snap.exists) {
         await ref.update({
           'last': FieldValue.serverTimestamp(),
           'count': FieldValue.increment(1),
         });
-      } on FirebaseException catch (e) {
-        if (e.code != 'not-found') rethrow;
-        final u = await UserService.instance.getUser(me);
-        await ref.set({
-          'username': u?.username ?? '',
-          'photoUrl': u?.photoUrl ?? '',
-          'first': FieldValue.serverTimestamp(),
-          'last': FieldValue.serverTimestamp(),
-          'count': 1,
-        });
-        // first view: the author hears about it if they asked for alerts about me
-        PushService.instance.storyView(story.id, limited: story.limited);
+        return;
       }
-    } catch (_) {
-      // a missing view is not worth an error on screen
+      final u = await UserService.instance.getUser(me);
+      await ref.set({
+        'username': u?.username ?? '',
+        'photoUrl': u?.photoUrl ?? '',
+        'first': FieldValue.serverTimestamp(),
+        'last': FieldValue.serverTimestamp(),
+        'count': 1,
+      });
+      // first view: the author hears about it if they asked for alerts about me
+      PushService.instance.storyView(story.id, limited: story.limited);
+    } catch (e) {
+      debugPrint('story view not saved: $e');
+    }
+  }
+
+  DocumentReference<Map<String, dynamic>> _view(Story story, String uid) => _db
+      .collection(story.collection)
+      .doc(story.id)
+      .collection('views')
+      .doc(uid);
+
+  // ------------------------------------------------------------- moment likes
+
+  /// Tests: replace reading and writing my like of a moment.
+  Future<({bool liked, bool superHeart})> Function(Story story)? likeBackend;
+  Future<void> Function(Story story, bool liked, bool superHeart)?
+  setLikeBackend;
+
+  /// Did I like [story] (and send it a super heart)?
+  Future<({bool liked, bool superHeart})> likeOf(Story story) async {
+    final b = likeBackend;
+    if (b != null) return b(story);
+    final me = _me;
+    if (me.isEmpty || story.authorId == me) {
+      return (liked: false, superHeart: false);
+    }
+    final d = (await _view(story, me).get()).data();
+    return (liked: d?['liked'] == true, superHeart: d?['superHeart'] == true);
+  }
+
+  /// Likes / unlikes [story]; [superHeart] = a super heart (it also likes). The author gets
+  /// a line in Notifications for a new like or super heart.
+  Future<void> setLike(
+    Story story, {
+    required bool liked,
+    bool superHeart = false,
+    bool notify = true,
+  }) async {
+    final sup = liked && superHeart;
+    final b = setLikeBackend;
+    if (b != null) {
+      await b(story, liked, sup);
+      return;
+    }
+    final me = _me;
+    if (me.isEmpty || story.authorId == me) return;
+    await (_recording[story.id] ?? record(story)); // the line must exist first
+    await _view(story, me).update({'liked': liked, 'superHeart': sup});
+    if (liked && notify) {
+      unawaited(
+        NotificationService.instance.notify(
+          toUid: story.authorId,
+          type: sup ? 'story_super' : 'story_like',
+        ),
+      );
     }
   }
 
@@ -127,5 +196,6 @@ class StoryViews {
   void forget() {
     _alerts = null;
     _countedNow.clear();
+    _recording.clear();
   }
 }

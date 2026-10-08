@@ -1,9 +1,16 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/errors.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../services/app_icon_service.dart';
+import '../../services/custom_icon.dart';
+
+/// Tests: replaces the photo picker of the custom icon (returns the picture's bytes).
+Future<Uint8List?> Function()? debugPickIconPhoto;
 
 /// Settings > App icon: pick how InstantGram looks on the home screen.
 class AppIconScreen extends StatefulWidget {
@@ -54,6 +61,129 @@ class _AppIconScreenState extends State<AppIconScreen> {
     }
   }
 
+  Uint8List?
+  _custom; // the 512 x 512 picture, before it is put on the home screen
+
+  Future<void> _chooseCustom() async {
+    try {
+      final pick = debugPickIconPhoto;
+      Uint8List? bytes;
+      if (pick != null) {
+        bytes = await pick();
+      } else {
+        final x = await ImagePicker().pickImage(source: ImageSource.gallery);
+        bytes = await x?.readAsBytes();
+      }
+      if (bytes == null) return;
+      final sq = await squareIcon(bytes);
+      if (mounted) setState(() => _custom = sq);
+    } catch (_) {
+      if (mounted) showToast(context, 'That picture could not be used.');
+    }
+  }
+
+  Future<void> _addCustom() async {
+    final sq = _custom;
+    if (sq == null || _busy) return;
+    setState(() => _busy = true);
+    try {
+      final r = await AppIconService.instance.pinCustom(await adaptiveIcon(sq));
+      if (!mounted) return;
+      showToast(context, switch (r) {
+        'pinned' => 'Tap "Add" to put your icon on the home screen.',
+        'updated' => 'Your home-screen icon got the new picture.',
+        _ => 'This phone cannot add custom icons.',
+      });
+    } catch (e) {
+      if (mounted) showToast(context, friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _round(Widget child, {bool on = false}) => AspectRatio(
+    aspectRatio: 1,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: on ? AppTheme.volt : Colors.transparent,
+          width: 3,
+        ),
+      ),
+      child: ClipOval(child: child),
+    ),
+  );
+
+  Widget _customSection(BuildContext context) {
+    final img = _custom;
+    return Container(
+      key: const ValueKey('customIconCard'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: context.card,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 72,
+            child: _round(
+              img == null
+                  ? ColoredBox(
+                      color: context.muted.withValues(alpha: 0.15),
+                      child: const Icon(Icons.add_photo_alternate_outlined),
+                    )
+                  : Image.memory(
+                      img,
+                      key: const ValueKey('customIconPreview'),
+                      fit: BoxFit.cover,
+                    ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Your own icon',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Any photo, cut square to $kCustomIconSize × $kCustomIconSize. '
+                  'It is added to your home screen as an InstantGram icon.',
+                  style: TextStyle(color: context.muted, fontSize: 12.5),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    OutlinedButton(
+                      key: const ValueKey('customIconPick'),
+                      onPressed: _busy ? null : _chooseCustom,
+                      child: Text(img == null ? 'Choose photo' : 'Change'),
+                    ),
+                    if (img != null)
+                      FilledButton(
+                        key: const ValueKey('customIconAdd'),
+                        onPressed: _busy ? null : _addCustom,
+                        child: const Text('Add to home screen'),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ok = _available;
@@ -91,28 +221,17 @@ class _AppIconScreenState extends State<AppIconScreen> {
                           child: Column(
                             children: [
                               Expanded(
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 180),
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(26),
-                                    border: Border.all(
-                                      color: o.id == _current
-                                          ? AppTheme.volt
-                                          : Colors.transparent,
-                                      width: 3,
-                                    ),
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(20),
-                                    child: Image.asset(
+                                child: Center(
+                                  child: _round(
+                                    Image.asset(
                                       o.asset,
-                                      fit: BoxFit.contain,
+                                      fit: BoxFit.cover,
                                       errorBuilder: (_, _, _) => const Icon(
                                         Icons.apps_rounded,
                                         size: 40,
                                       ),
                                     ),
+                                    on: o.id == _current,
                                   ),
                                 ),
                               ),
@@ -146,6 +265,8 @@ class _AppIconScreenState extends State<AppIconScreen> {
                       ),
                   ],
                 ),
+                const SizedBox(height: 20),
+                _customSection(context),
               ],
             ),
     );

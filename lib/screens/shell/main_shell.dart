@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/app_events.dart';
 import '../../core/l10n.dart';
+import '../../core/ui.dart';
 import '../../services/app_prefs.dart';
 import '../../services/safety_service.dart';
 import '../../services/presence_service.dart';
@@ -53,7 +54,17 @@ class _MainShellState extends State<MainShell> {
     UsageTracker.instance.limitReached.addListener(_onLimit);
     _syncProfile();
     PushService.instance.opened.addListener(_onPushTap);
+    PushService.instance.shown.addListener(_onPushShown);
     PushService.instance.start().then((_) => _onPushTap());
+  }
+
+  /// A notification came while the app is open: a short banner (calls ring by themselves).
+  void _onPushShown() {
+    final n = PushService.instance.shown.value;
+    if (n == null || !mounted) return;
+    PushService.instance.shown.value = null;
+    if (n.type == 'call') return;
+    showToast(context, n.body.isEmpty ? n.title : '${n.title}: ${n.body}');
   }
 
   /// A push notification was tapped: open that chat, or Notifications. (A call opens the
@@ -145,6 +156,7 @@ class _MainShellState extends State<MainShell> {
     CallService.instance.incoming.removeListener(_onIncomingCall);
     UsageTracker.instance.limitReached.removeListener(_onLimit);
     PushService.instance.opened.removeListener(_onPushTap);
+    PushService.instance.shown.removeListener(_onPushShown);
     CallService.instance.stop();
     ChatService.instance.stop();
     super.dispose();

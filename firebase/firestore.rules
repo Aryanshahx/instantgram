@@ -243,8 +243,11 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly(['username', 'photoUrl', 'first', 'last', 'count'])
           && request.resource.data.count == 1;
         allow update: if signedIn() && request.auth.uid == viewerId
-          && onlyChanges(['last', 'count'])
-          && request.resource.data.count == resource.data.count + 1;
+          && ((onlyChanges(['last', 'count'])
+               && request.resource.data.count == resource.data.count + 1)
+              || (onlyChanges(['liked', 'superHeart'])
+               && request.resource.data.liked is bool
+               && request.resource.data.superHeart is bool));
         allow delete: if signedIn() && story().authorId == request.auth.uid;
       }
     }
@@ -270,8 +273,11 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly(['username', 'photoUrl', 'first', 'last', 'count'])
           && request.resource.data.count == 1;
         allow update: if signedIn() && request.auth.uid == viewerId
-          && onlyChanges(['last', 'count'])
-          && request.resource.data.count == resource.data.count + 1;
+          && ((onlyChanges(['last', 'count'])
+               && request.resource.data.count == resource.data.count + 1)
+              || (onlyChanges(['liked', 'superHeart'])
+               && request.resource.data.liked is bool
+               && request.resource.data.superHeart is bool));
         allow delete: if signedIn() && pstory().authorId == request.auth.uid;
       }
     }

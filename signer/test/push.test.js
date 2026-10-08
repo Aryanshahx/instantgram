@@ -223,3 +223,28 @@ test("story view of a list-only moment reads privateStories", async () => {
   // without col it looks in stories (not there)
   assert.equal((await notify({ kind: "storyView", storyId: "s9" }, ENV, "a", { fetch, now: NOW })).status, 403);
 });
+
+test("test kind: to my own phones, and says why it failed", async () => {
+  forgetToken();
+  const g = fakeGoogle({ "pushTokens/b": { tokens: ["t1"] } });
+  const r = await notify({ kind: "test" }, ENV, "b", { fetch: g.fetch, now: NOW });
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.sent, 1);
+  assert.equal(g.sent[0].token, "t1");
+
+  const none = await notify({ kind: "test" }, ENV, "zz", { fetch: g.fetch, now: NOW });
+  assert.equal(none.body.ok, false);
+  assert.match(none.body.detail, /no phone/);
+
+  forgetToken();
+  const bad = fakeGoogle({ "pushTokens/b": { tokens: ["t1"] } }, { fcmStatus: () => 403 });
+  const r2 = await notify({ kind: "test" }, ENV, "b", { fetch: bad.fetch, now: NOW });
+  assert.equal(r2.body.ok, false);
+  assert.match(r2.body.detail, /403/);
+  assert.match(r2.body.detail, /Cloud Messaging API/);
+});
+
+test("moment likes have their own lines", () => {
+  assert.equal(activityBody({ type: "story_like", actorName: "a" }), "a liked your moment");
+  assert.match(activityBody({ type: "story_super", actorName: "a" }), /super heart/);
+});

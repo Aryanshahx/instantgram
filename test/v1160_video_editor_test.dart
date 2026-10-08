@@ -132,7 +132,7 @@ void main() {
       expect(find.text('Add audio'), findsOneWidget);
       expect(find.text('Add text'), findsOneWidget);
       expect(
-        find.text('Tap on a track to trim. Pinch to zoom.'),
+        find.text('Drag the white handles to trim. Pinch to zoom.'),
         findsOneWidget,
       );
       expect(find.text('0:00 / 0:20'), findsOneWidget);
@@ -252,7 +252,10 @@ void main() {
     await t.tap(find.byKey(const ValueKey('tool_captions')));
     await t.pump(const Duration(seconds: 1));
     await t.pump(const Duration(seconds: 1));
-    await t.enterText(find.byKey(const ValueKey('storyTextInput')), 'Hello there');
+    await t.enterText(
+      find.byKey(const ValueKey('storyTextInput')),
+      'Hello there',
+    );
     await t.tap(find.byKey(const ValueKey('storyTextDone')));
     await t.pump(const Duration(seconds: 1));
     expect(find.byKey(const ValueKey('textLane0')), findsOneWidget);

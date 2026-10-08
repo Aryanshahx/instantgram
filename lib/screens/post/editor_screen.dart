@@ -114,7 +114,7 @@ class _EditorScreenState extends State<EditorScreen>
   double _start = 0;
   double _end = 1;
   bool _mute = false;
-  bool _paused = false;
+  bool _paused = false; // videos open paused (set in initState)
 
   Object? _loadError;
   late PhotoEdits _e = _initialEdits();
@@ -152,7 +152,6 @@ class _EditorScreenState extends State<EditorScreen>
 
   // timeline: the clip is selected (white frame with trim handles); playing before a scrub
   bool _videoSel = false;
-  bool _playBeforeScrub = false;
 
   // undo / redo: a fingerprint of every edit; quick changes in a row are one step
   final List<_Snap> _undo = [];
@@ -199,6 +198,7 @@ class _EditorScreenState extends State<EditorScreen>
     _music = widget.music;
     if (_isVideo) {
       _tool = null;
+      _paused = true; // nothing plays until play is tapped
       _loadVideo();
     } else {
       _loadPhoto();
@@ -261,7 +261,6 @@ class _EditorScreenState extends State<EditorScreen>
       await c.seekTo(Duration(seconds: _start.round()));
       _smooth.seek(_start, _clock.elapsed);
       _pos.value = _start;
-      await c.play();
       final m = _music;
       if (m != null) unawaited(_startPlayer(m));
       if (_a.hasVoice) unawaited(_startVoice());
@@ -697,6 +696,8 @@ class _EditorScreenState extends State<EditorScreen>
       _player?.pause();
       _voice?.pause();
     } else {
+      final p = _pos.value;
+      if (p < _start || p >= _end - 0.05) _scrubTo(_start);
       c.play();
       _player?.play();
       _syncSound(force: true);
@@ -713,8 +714,19 @@ class _EditorScreenState extends State<EditorScreen>
     _end = e.clamp(_start + 1, _total.toDouble()).toDouble();
     _rangeN.value = (_start, _end);
     _noteChange();
-    // the picture follows the handle that is being moved
-    _scrubTo(startMoved ? _start : _end - 1);
+    // the picture shows the handle being moved; the tracks (and playhead) stay still so
+    // the handle stays under the finger
+    final at = startMoved ? _start : math.max(_start, _end - 0.1);
+    _seek.request(Duration(milliseconds: (at * 1000).round()));
+  }
+
+  /// A trim handle was grabbed: the video pauses.
+  void _trimStart() => _timelineTouched();
+
+  /// A trim handle was let go: the playhead goes to the start of the kept part.
+  void _trimEnd() {
+    final p = _pos.value;
+    _scrubTo(p < _start || p > _end - 0.05 ? _start : p);
   }
 
   /// Moves the picture (and the playhead) to [sec] without flooding the player with seeks.
@@ -900,9 +912,8 @@ class _EditorScreenState extends State<EditorScreen>
   void _scrubStart() {
     final c = _c;
     if (c == null || _recording) return;
-    _playBeforeScrub = !_paused;
     if (!_paused) {
-      _paused = true;
+      setState(() => _paused = true);
       c.pause();
       _player?.pause();
       _voice?.pause();
@@ -914,14 +925,20 @@ class _EditorScreenState extends State<EditorScreen>
     _scrubTo(sec.clamp(_start, math.max(_start, _end - 0.05)));
   }
 
+  /// The video stays paused after touching the timeline (play continues it).
   void _scrubEnd() {
     if (_recording) return;
-    if (_playBeforeScrub) {
-      setState(() => _paused = true);
-      _togglePause();
-    } else {
-      setState(() {});
-    }
+    setState(() {});
+  }
+
+  /// Any touch on the timeline pauses the video.
+  void _timelineTouched() {
+    final c = _c;
+    if (c == null || _recording || _paused) return;
+    setState(() => _paused = true);
+    c.pause();
+    _player?.pause();
+    _voice?.pause();
   }
 
   // ------------------------------------------------------------------- done
@@ -1022,12 +1039,12 @@ class _EditorScreenState extends State<EditorScreen>
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: onTap,
-          child: SizedBox(width: 52, height: 52, child: Center(child: child)),
+          child: SizedBox(width: 40, height: 40, child: Center(child: child)),
         ),
       ),
     );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
       child: Row(
         children: [
           round(
@@ -1037,26 +1054,26 @@ class _EditorScreenState extends State<EditorScreen>
             child: const Icon(
               Icons.keyboard_arrow_down_rounded,
               color: Colors.white,
-              size: 32,
+              size: 26,
             ),
           ),
           Expanded(
             child: Center(
               child: Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 22,
-                  vertical: 12,
+                  horizontal: 14,
+                  vertical: 6,
                 ),
                 decoration: BoxDecoration(
                   color: const Color(0xFF1F1F23),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
                   _isVideo ? 'Edit clip' : 'Edit photo',
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
@@ -1069,17 +1086,17 @@ class _EditorScreenState extends State<EditorScreen>
             onTap: _busy || !ready ? null : _done,
             child: _busy
                 ? const SizedBox(
-                    width: 20,
-                    height: 20,
+                    width: 16,
+                    height: 16,
                     child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
+                      strokeWidth: 2,
                       color: Colors.black,
                     ),
                   )
                 : const Icon(
                     Icons.arrow_forward_rounded,
                     color: Colors.black,
-                    size: 28,
+                    size: 22,
                   ),
           ),
         ],
@@ -1135,12 +1152,12 @@ class _EditorScreenState extends State<EditorScreen>
           )
         else if (_isVideo && _sel == null)
           const Padding(
-            padding: EdgeInsets.symmetric(vertical: 6),
+            padding: EdgeInsets.symmetric(vertical: 3),
             child: Text(
-              'Tap on a track to trim. Pinch to zoom.',
+              'Drag the white handles to trim. Pinch to zoom.',
               key: ValueKey('timelineHint'),
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white, fontSize: 14.5),
+              style: TextStyle(color: Colors.white38, fontSize: 11.5),
             ),
           ),
         _panel(context),
@@ -1154,7 +1171,7 @@ class _EditorScreenState extends State<EditorScreen>
       Key key,
       IconData icon,
       VoidCallback? onTap, {
-      double size = 26,
+      double size = 20,
     }) => Material(
       key: key,
       color: const Color(0xFF1F1F23),
@@ -1163,8 +1180,8 @@ class _EditorScreenState extends State<EditorScreen>
         customBorder: const CircleBorder(),
         onTap: onTap,
         child: SizedBox(
-          width: 48,
-          height: 48,
+          width: 34,
+          height: 34,
           child: Icon(
             icon,
             size: size,
@@ -1174,7 +1191,7 @@ class _EditorScreenState extends State<EditorScreen>
       ),
     );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 2, 14, 8),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
       child: Row(
         children: [
           if (_isVideo)
@@ -1182,10 +1199,10 @@ class _EditorScreenState extends State<EditorScreen>
               const ValueKey('editorPlay'),
               _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
               _recording ? null : _togglePause,
-              size: 30,
+              size: 22,
             )
           else
-            const SizedBox(width: 48),
+            const SizedBox(width: 34),
           Expanded(
             child: _isVideo
                 ? ValueListenableBuilder<double>(
@@ -1200,7 +1217,7 @@ class _EditorScreenState extends State<EditorScreen>
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Colors.white70,
-                          fontSize: 17,
+                          fontSize: 13,
                           fontFeatures: [FontFeature.tabularFigures()],
                         ),
                       );
@@ -1213,7 +1230,7 @@ class _EditorScreenState extends State<EditorScreen>
             Icons.undo_rounded,
             _canUndo ? _undoStep : null,
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 6),
           circle(
             const ValueKey('editorRedo'),
             Icons.redo_rounded,
@@ -1409,17 +1426,6 @@ class _EditorScreenState extends State<EditorScreen>
                   ),
                 ),
               ),
-            if (_paused)
-              const IgnorePointer(
-                child: Center(
-                  child: Icon(
-                    Icons.play_arrow_rounded,
-                    color: Colors.white,
-                    size: 72,
-                    shadows: [Shadow(blurRadius: 14, color: Colors.black54)],
-                  ),
-                ),
-              ),
           ],
         ),
       ),
@@ -1433,10 +1439,10 @@ class _EditorScreenState extends State<EditorScreen>
     return SafeArea(
       top: false,
       child: SizedBox(
-        height: 104,
+        height: 70,
         child: ListView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
           children: [
             _actionButton(
               const ValueKey('tool_audio'),
@@ -1570,13 +1576,13 @@ class _EditorScreenState extends State<EditorScreen>
     final locked = _recording && key != const ValueKey('tool_voice');
     final fg = on ? AppTheme.volt : Colors.white;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 2),
       child: InkWell(
         key: key,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         onTap: _busy || locked ? null : onTap,
         child: SizedBox(
-          width: 82,
+          width: 60,
           child: Column(
             children: [
               Stack(
@@ -1584,27 +1590,28 @@ class _EditorScreenState extends State<EditorScreen>
                 alignment: Alignment.topCenter,
                 children: [
                   Container(
-                    width: 74,
-                    height: 56,
+                    width: 40,
+                    height: 34,
                     decoration: BoxDecoration(
                       color: on
                           ? AppTheme.volt.withValues(alpha: 0.16)
-                          : const Color(0xFF1F1F23),
-                      borderRadius: BorderRadius.circular(16),
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(
                       icon,
-                      size: 28,
+                      size: 22,
                       color: locked ? Colors.white30 : fg,
                     ),
                   ),
                   if (badge != null)
                     Positioned(
-                      top: -9,
+                      top: -6,
+                      right: -4,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
+                          horizontal: 4,
+                          vertical: 1,
                         ),
                         decoration: BoxDecoration(
                           color: const Color(0xFF5B6CFF),
@@ -1614,7 +1621,7 @@ class _EditorScreenState extends State<EditorScreen>
                           badge,
                           style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 11,
+                            fontSize: 8.5,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
@@ -1622,14 +1629,14 @@ class _EditorScreenState extends State<EditorScreen>
                     ),
                 ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 2),
               Text(
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
                   color: on ? AppTheme.volt : Colors.white,
                 ),
               ),
@@ -1655,7 +1662,7 @@ class _EditorScreenState extends State<EditorScreen>
         builder: (context, _) {
           final r = _rangeN.value;
           return EditTimeline(
-            height: compact ? 150 : 214,
+            height: compact ? 124 : 172,
             total: _total,
             start: r.$1,
             end: r.$2,
@@ -1684,6 +1691,9 @@ class _EditorScreenState extends State<EditorScreen>
             onSeek: _scrubMove,
             onSeekEnd: _scrubEnd,
             onRange: (s, e, startMoved) => _applyRange(s, e, startMoved),
+            onRangeStart: _trimStart,
+            onRangeEnd: _trimEnd,
+            onTouch: _timelineTouched,
             onVideoTap: () => setState(() {
               _videoSel = !_videoSel;
               _sel = null;

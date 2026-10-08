@@ -67,6 +67,14 @@ class ChatThread {
     return s == null || s.isBefore(at);
   }
 
+  /// My last message was opened by the other person ("Seen"); false = only "Sent".
+  bool seenByOther(String me) {
+    if (!hasMessages || lastSender != me) return false;
+    final at = lastAt;
+    final s = seen[other(me)];
+    return at != null && s != null && !s.isBefore(at);
+  }
+
   /// Pin / mute flag of [me]: a map uid -> true (each person their own), or an old plain bool.
   static bool flagFor(Object? v, String me) =>
       v is Map ? v[me] == true : v == true;

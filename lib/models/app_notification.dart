@@ -86,6 +86,10 @@ class AppNotification {
         return 'started following you';
       case 'story_view':
         return 'viewed your moment';
+      case 'story_like':
+        return 'liked your moment';
+      case 'story_super':
+        return 'sent your moment a super heart 💖';
       default:
         return 'interacted with your post';
     }
@@ -93,7 +97,7 @@ class AppNotification {
 
   bool get isFollow => type == 'follow';
 
-  bool get isStoryView => type == 'story_view';
+  bool get isStoryView => type.startsWith('story_');
 }
 
 /// Empty list helper (keeps the stream contract simple in tests).
