@@ -8,6 +8,7 @@
 //   POST /api/sign     {kind:"image"|"video", ext:"jpg", thumb:true}  -> upload links
 //   POST /api/confirm  {key}                                          -> checks size + file type
 //   POST /api/delete   {keys:[...]}                                   -> removes your own files
+//   POST /api/notify   {kind:"message"|"call"|"activity", ...}      -> push to the other phone (lib/push.js)
 //   POST /api/music    {op:"search", term, offset, limit}             -> Epidemic Sound tracks
 //   POST /api/music    {op:"url", id}                                 -> short-lived mp3 link
 //   POST /api/admin    {op:"check"|"wipe", uid}  header x-admin-key   -> developer only
@@ -18,8 +19,10 @@
 //   (optional) TIGRIS_ENDPOINT, default t3.storage.dev
 //   (optional, for music) OPENVERSE_CLIENT_ID and OPENVERSE_CLIENT_SECRET - raise the music search limit
 //   (optional, for deleting accounts) ADMIN_KEY - a long random secret only the developer has
+//   (optional, for push notifications) FIREBASE_SERVICE_ACCOUNT - see lib/push.js
 
 const MB = 1024 * 1024;
+import { notify, serviceAccount } from "./push.js";
 export const LIMITS = { image: 30 * MB, video: 300 * MB, thumb: 2 * MB };
 const TYPES = {
   jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif",
@@ -476,12 +479,23 @@ async function handleMusic(request, env, uid) {
   return fail(400, "Unknown music request.");
 }
 
-const ROUTES = { sign: handleSign, confirm: handleConfirm, delete: handleDelete, music: handleMusic };
+async function handleNotify(request, env, uid, deps) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return fail(400, "Send JSON.");
+  }
+  const r = await notify(body, env, uid, deps || {});
+  return json(r.body, r.status);
+}
+
+const ROUTES = { sign: handleSign, confirm: handleConfirm, delete: handleDelete, music: handleMusic, notify: handleNotify };
 
 /** One entry point for every function in api/. `store` is only replaced in tests. */
 export async function handle(request, env, route, store = null) {
   if (route === "health") {
-    return request.method === "GET" ? json({ ok: true, ready: configured(env), music: true, musicKey: Boolean(env.OPENVERSE_CLIENT_ID && env.OPENVERSE_CLIENT_SECRET) }) : fail(404, "Not found");
+    return request.method === "GET" ? json({ ok: true, ready: configured(env), push: Boolean(serviceAccount(env)), music: true, musicKey: Boolean(env.OPENVERSE_CLIENT_ID && env.OPENVERSE_CLIENT_SECRET) }) : fail(404, "Not found");
   }
   if (route === "admin") {
     if (request.method !== "POST") return fail(404, "Not found");
@@ -500,6 +514,14 @@ export async function handle(request, env, route, store = null) {
     uid = await authenticate(request, env);
   } catch (e) {
     return fail(401, "Please log in again.");
+  }
+  if (route === "notify") {
+    try {
+      return await fn(request, env, uid, store);
+    } catch (e) {
+      console.error("push error", e && e.stack ? e.stack : e);
+      return fail(502, "Could not send the notification.");
+    }
   }
   if (route !== "music" && !store && !configured(env)) return fail(500, "The media service is not fully set up (missing settings).");
   try {

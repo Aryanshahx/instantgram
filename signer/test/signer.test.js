@@ -173,7 +173,7 @@ test("delete: only your own files", async () => {
 test("health and unknown routes", async () => {
   const health = await call("/health", null, null, baseEnv(), "GET");
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { ok: true, ready: true, music: true, musicKey: false });
+  assert.deepEqual(await health.json(), { ok: true, ready: true, push: false, music: true, musicKey: false });
   const half = baseEnv(); delete half.TIGRIS_BUCKET;
   assert.equal((await (await call("/health", null, null, half, "GET")).json()).ready, false);
   assert.equal((await call("/nope", {}, await token())).status, 404);

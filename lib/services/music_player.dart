@@ -68,7 +68,9 @@ class MusicPlayer {
     try {
       await c.initialize();
       final len = c.value.duration.inMilliseconds / 1000;
-      if (len > 0 && _startAt >= len - 0.5) _startAt = 0; // past the end: from the start
+      if (len > 0 && _startAt >= len - 0.5) {
+        _startAt = 0; // past the end: from the start
+      }
       // From the start the player loops by itself; from a chosen point it is sent back there.
       await c.setLooping(loop && _startAt == 0);
       if (_startAt > 0) {

@@ -65,8 +65,18 @@ class ChatThread {
     return s == null || s.isBefore(at);
   }
 
-  factory ChatThread.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+  /// Pin / mute flag of [me]: a map uid -> true (each person their own), or an old plain bool.
+  static bool flagFor(Object? v, String me) =>
+      v is Map ? v[me] == true : v == true;
+
+  /// [me]: pin and mute are per person (a map uid -> true); an old plain true/false still
+  /// counts for both.
+  factory ChatThread.fromDoc(
+    DocumentSnapshot<Map<String, dynamic>> d, {
+    String me = '',
+  }) {
     final m = d.data() ?? const <String, dynamic>{};
+    bool mine(Object? v) => flagFor(v, me);
     final seenRaw = m['seen'];
     final lastAt = m['lastAt'];
     return ChatThread(
@@ -80,9 +90,9 @@ class ChatThread {
       lastText: m['lastText'] is String ? m['lastText'] as String : '',
       lastAt: lastAt is Timestamp ? lastAt.toDate() : null,
       lastSender: m['lastSender'] is String ? m['lastSender'] as String : '',
-      pinned: m['pinned'] == true,
-      muteCalls: m['muteCalls'] == true,
-      muteMessages: m['muteMessages'] == true,
+      pinned: mine(m['pinned']),
+      muteCalls: mine(m['muteCalls']),
+      muteMessages: mine(m['muteMessages']),
       vanish: Vanish.isValid('${m['vanish'] ?? ''}')
           ? '${m['vanish'] ?? ''}'
           : '',

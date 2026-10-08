@@ -7,6 +7,7 @@ import '../models/chat.dart';
 import '../models/vanish.dart';
 import 'media_server.dart';
 import 'user_service.dart';
+import 'push_service.dart';
 
 /// Direct messages between any two people.
 ///
@@ -45,7 +46,7 @@ class ChatService {
           (snap) {
             final list =
                 snap.docs
-                    .map(ChatThread.fromDoc)
+                    .map((d) => ChatThread.fromDoc(d, me: _me))
                     .where((t) => t.hasMessages)
                     .toList()
                   ..sort((a, b) {
@@ -79,13 +80,15 @@ class ChatService {
     bool? muteCalls,
     bool? muteMessages,
   }) async {
+    // per person: only my own entry changes (the other person keeps theirs)
+    final me = _me;
     final patch = <String, dynamic>{
-      'pinned': ?pinned,
-      'muteCalls': ?muteCalls,
-      'muteMessages': ?muteMessages,
+      if (pinned != null) 'pinned': {me: pinned},
+      if (muteCalls != null) 'muteCalls': {me: muteCalls},
+      if (muteMessages != null) 'muteMessages': {me: muteMessages},
     };
     if (patch.isEmpty) return;
-    await _chats.doc(chatId).update(patch);
+    await _chats.doc(chatId).set(patch, SetOptions(merge: true));
   }
 
   /// Removes the chat for you: the messages go first, then the conversation itself.
@@ -338,6 +341,9 @@ class ChatService {
       'seen.$me': FieldValue.serverTimestamp(),
     });
     await batch.commit();
+    if (fields['type'] != MsgType.call) {
+      PushService.instance.message(chatId, msg.id); // the other phone
+    }
     return msg.id;
   }
 

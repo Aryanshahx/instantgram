@@ -9,9 +9,12 @@ import '../../services/usage_tracker.dart';
 import '../../services/auth_service.dart';
 import '../../services/call_service.dart';
 import '../../services/chat_service.dart';
+import '../../services/push_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/app_nav_bar.dart';
+import '../activity/activity_screen.dart';
 import '../call/incoming_call_screen.dart';
+import '../chat/chat_screen.dart';
 import '../chat/inbox_screen.dart';
 import '../feed/feed_screen.dart';
 import '../post/create_post_screen.dart';
@@ -49,6 +52,28 @@ class _MainShellState extends State<MainShell> {
     PresenceService.instance.start();
     UsageTracker.instance.limitReached.addListener(_onLimit);
     _syncProfile();
+    PushService.instance.opened.addListener(_onPushTap);
+    PushService.instance.start().then((_) => _onPushTap());
+  }
+
+  /// A push notification was tapped: open that chat, or Notifications. (A call opens the
+  /// ringing screen by itself.)
+  void _onPushTap() {
+    final d = PushService.instance.opened.value;
+    if (d == null || !mounted) return;
+    PushService.instance.opened.value = null;
+    final from = d['from'] ?? '';
+    Widget? screen;
+    if (d['type'] == 'message' && from.isNotEmpty) {
+      screen = ChatScreen(otherUid: from);
+    } else if (d['type'] == 'activity') {
+      screen = const ActivityScreen();
+    }
+    if (screen == null) return;
+    final s = screen;
+    Navigator.of(
+      context,
+    ).push<void>(MaterialPageRoute<void>(builder: (_) => s));
   }
 
   /// Remembers this account on the phone and takes the language saved on the profile.
@@ -119,6 +144,7 @@ class _MainShellState extends State<MainShell> {
     AppEvents.searchRequest.removeListener(_onSearchRequest);
     CallService.instance.incoming.removeListener(_onIncomingCall);
     UsageTracker.instance.limitReached.removeListener(_onLimit);
+    PushService.instance.opened.removeListener(_onPushTap);
     CallService.instance.stop();
     ChatService.instance.stop();
     super.dispose();

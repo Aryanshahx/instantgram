@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/app_notification.dart';
 import '../models/app_user.dart';
 import 'user_service.dart';
+import 'push_service.dart';
 
 /// The activity of the signed-in account: likes, comments, replies and follows.
 ///
@@ -90,11 +91,12 @@ class NotificationService {
       return;
     }
     try {
-      await _db
+      final ref = await _db
           .collection('notifications')
           .doc(toUid)
           .collection('items')
           .add(item);
+      PushService.instance.activity(toUid, ref.id);
     } catch (_) {
       // A missing activity line is not worth failing the like or the comment.
     }

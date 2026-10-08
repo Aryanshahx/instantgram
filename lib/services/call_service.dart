@@ -8,6 +8,7 @@ import 'package:video_player/video_player.dart';
 import '../models/call.dart';
 import 'call_engine.dart';
 import 'user_service.dart';
+import 'push_service.dart';
 
 /// Where the ringing documents live. The real one is Firestore; tests use a fake.
 abstract class CallBackend {
@@ -32,6 +33,9 @@ class FirestoreCallBackend implements CallBackend {
       'status': CallStatus.ringing,
       'createdAt': FieldValue.serverTimestamp(),
     });
+    PushService.instance.call(
+      ref.id,
+    ); // rings the phone even when the app is closed
     return CallInfo(
       id: ref.id,
       callerId: callerId,

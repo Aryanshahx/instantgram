@@ -72,6 +72,12 @@ service cloud.firestore {
     // Activity: likes, comments, replies and follows.
     // Anybody signed in may write a line into somebody else's list (that is how a like
     // reaches its author); only the owner reads it and marks it as seen.
+    // Push addresses of a person's phones: only that person. The media signer reads them with
+    // the service account (rules do not apply to it).
+    match /pushTokens/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
     match /notifications/{uid} {
       match /items/{itemId} {
         allow read: if signedIn() && request.auth.uid == uid;

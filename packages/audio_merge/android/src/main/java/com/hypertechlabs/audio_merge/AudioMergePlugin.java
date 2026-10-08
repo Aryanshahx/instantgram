@@ -1,5 +1,9 @@
 package com.hypertechlabs.audio_merge;
 
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.content.Context;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -30,6 +34,27 @@ public class AudioMergePlugin implements FlutterPlugin, MethodCallHandler {
     public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
         channel = new MethodChannel(binding.getBinaryMessenger(), "com.hypertechlabs.audio_merge");
         channel.setMethodCallHandler(this);
+        createPushChannels(binding.getApplicationContext());
+    }
+
+    /** The notification channels the push messages use (Settings > Apps > InstantGram > Notifications). */
+    private static void createPushChannels(Context context) {
+        if (Build.VERSION.SDK_INT < 26) return;
+        try {
+            NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            NotificationChannel messages = new NotificationChannel("messages", "Messages", NotificationManager.IMPORTANCE_HIGH);
+            messages.setDescription("New chat messages");
+            NotificationChannel calls = new NotificationChannel("calls", "Calls", NotificationManager.IMPORTANCE_HIGH);
+            calls.setDescription("Incoming voice and video calls");
+            NotificationChannel activity = new NotificationChannel("activity", "Activity", NotificationManager.IMPORTANCE_DEFAULT);
+            activity.setDescription("Likes, comments, mentions and new followers");
+            nm.createNotificationChannel(messages);
+            nm.createNotificationChannel(calls);
+            nm.createNotificationChannel(activity);
+        } catch (Exception ignored) {
+            // notifications still arrive in the default channel
+        }
     }
 
     @Override

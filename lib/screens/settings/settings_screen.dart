@@ -14,6 +14,7 @@ import 'account_screens.dart';
 import 'activity_screens.dart';
 import 'app_screens.dart';
 import 'delete_account_screen.dart';
+import 'push_settings_screen.dart';
 import 'settings_widgets.dart';
 
 class _Item {
@@ -116,6 +117,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'App',
       [
         _Item(
+          'push',
+          Icons.notifications_none_rounded,
+          'Notifications',
+          'push alerts phone sound messages calls likes',
+          (c, _) => openScreen(c, const PushSettingsScreen()),
+        ),
+        _Item(
           'access',
           Icons.accessibility_new_rounded,
           'Accessibility',
@@ -164,11 +172,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Icons.gavel_rounded,
           'Terms of use',
           'rules terms conditions',
-          (c, _) => openLegal(
-            c,
-            kTermsUrl,
-            () => openScreen(c, const TermsScreen()),
-          ),
+          (c, _) =>
+              openLegal(c, kTermsUrl, () => openScreen(c, const TermsScreen())),
         ),
       ],
     ),

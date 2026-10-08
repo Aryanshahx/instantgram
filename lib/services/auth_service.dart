@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../core/errors.dart';
+import 'push_service.dart';
 
 class AuthService {
   AuthService._();
@@ -170,5 +171,9 @@ class AuthService {
     return '${e.substring(0, 1)}***${e.substring(at)}';
   }
 
-  Future<void> signOut() => _auth.signOut();
+  Future<void> signOut() async {
+    await PushService.instance
+        .stop(); // this phone stops getting this account's pushes
+    await _auth.signOut();
+  }
 }

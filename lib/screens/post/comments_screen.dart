@@ -373,7 +373,9 @@ class _CommentsPanelState extends State<CommentsPanel> {
     }
     try {
       await PostService.instance.setCommentPinned(widget.post.id, c.id, pinned);
-      if (mounted) showToast(context, pinned ? 'Comment pinned.' : 'Comment unpinned.');
+      if (mounted) {
+        showToast(context, pinned ? 'Comment pinned.' : 'Comment unpinned.');
+      }
     } catch (e) {
       if (mounted) showToast(context, friendlyError(e));
     }

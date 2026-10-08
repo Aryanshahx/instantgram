@@ -58,6 +58,7 @@ dependencies:
   video_compress: ^3.1.4
   share_plus: ^10.1.4
   image: ^4.10.1
+  firebase_messaging: ^16.7.0
 
 dev_dependencies:
   flutter_test:
