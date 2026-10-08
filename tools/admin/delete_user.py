@@ -13,6 +13,7 @@ import re
 import secrets
 import shutil
 import sys
+import time
 import urllib.error
 import urllib.request
 import warnings
@@ -31,6 +32,24 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 def die(msg):
     print("\n✗ " + msg)
     sys.exit(1)
+
+
+def again(job, what="Talking to Firebase"):
+    """Runs job(); a network blip (Wi-Fi drop, timeout) is retried instead of crashing.
+    Safe: checking changes nothing, and deleting twice is harmless."""
+    tries = 6
+    for n in range(1, tries + 1):
+        try:
+            return job()
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as e:
+            msg = (str(e).splitlines() or [type(e).__name__])[0][:120]
+            if n == tries:
+                die(f"{what} failed {tries} times ({msg}).\n  Check the internet and run the same command again - it carries on where it stopped.")
+            wait = 5 * n
+            print(f"   network problem ({msg}) - trying again in {wait}s…")
+            time.sleep(wait)
 
 
 def api_url():
@@ -166,7 +185,7 @@ def wipe_files(uid):
 
 def delete_one(db, auth, inc, uid, label, dry, ask=True):
     print(f"\n── {label}  (uid {uid})")
-    report = Wiper(db, inc, dry_run=True, log=print).wipe(uid)
+    report = again(lambda: Wiper(db, inc, dry_run=True, log=print).wipe(uid), "Checking")
     for line in report.lines():
         print("   " + line)
     if dry:
@@ -179,7 +198,7 @@ def delete_one(db, auth, inc, uid, label, dry, ask=True):
             return False
     signer({"op": "check"})  # stop before touching anything if the signer is not ready
     wipe_files(uid)
-    Wiper(db, inc, log=print).wipe(uid)
+    again(lambda: Wiper(db, inc, log=print).wipe(uid), "Deleting")
     try:
         auth.delete_user(uid)
         print("   sign-in removed")
@@ -201,8 +220,8 @@ def main(argv):
     db, auth, inc = firebase()
     if args[0] == "--leftovers":
         print("Looking for data of accounts that no longer exist…")
-        uids = {u.uid for u in auth.list_users().iterate_all()}
-        orphans = find_orphans(db, uids)
+        uids = again(lambda: {u.uid for u in auth.list_users().iterate_all()})
+        orphans = again(lambda: find_orphans(db, uids))
         if not orphans:
             print("✓ Nothing left over.")
             return
@@ -214,10 +233,10 @@ def main(argv):
         for uid, what in orphans.items():
             delete_one(db, auth, inc, uid, f"leftovers ({what})", dry, ask=False)
         return
-    uid = resolve(db, auth, args[0])
+    uid = again(lambda: resolve(db, auth, args[0]))
     if not uid:
         die(f"No account found for '{args[0]}'.")
-    prof = db.collection("users").document(uid).get().to_dict() or {}
+    prof = again(lambda: db.collection("users").document(uid).get().to_dict() or {})
     label = f"@{prof.get('username', '?')}  {prof.get('email', '')}".strip()
     delete_one(db, auth, inc, uid, label, dry)
 

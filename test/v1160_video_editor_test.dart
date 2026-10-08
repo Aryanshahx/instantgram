@@ -121,36 +121,69 @@ void main() {
       await t.pump(const Duration(milliseconds: 400));
       await _settle(
         t,
-        () => find.byKey(const ValueKey('trimTimeline')).evaluate().isNotEmpty,
+        () => find.byKey(const ValueKey('editTimeline')).evaluate().isNotEmpty,
       );
 
-      // the timeline is there from the start; there is no Trim tool any more
-      expect(find.byKey(const ValueKey('trimTimeline')), findsOneWidget);
+      // the timeline is there from the start, with the playhead in the middle
+      expect(find.byKey(const ValueKey('editTimeline')), findsOneWidget);
       expect(find.byKey(const ValueKey('tool_trim')), findsNothing);
       expect(find.byKey(const ValueKey('playhead')), findsOneWidget);
-      expect(find.byKey(const ValueKey('lane0')), findsNothing);
+      expect(find.byKey(const ValueKey('textLane0')), findsNothing);
+      expect(find.text('Add audio'), findsOneWidget);
+      expect(find.text('Add text'), findsOneWidget);
+      expect(
+        find.text('Tap on a track to trim. Pinch to zoom.'),
+        findsOneWidget,
+      );
+      expect(find.text('0:00 / 0:20'), findsOneWidget);
+      for (final k in [
+        'tool_audio',
+        'tool_text',
+        'tool_voice',
+        'tool_captions',
+        'tool_stickers',
+        'tool_filters',
+      ]) {
+        expect(find.byKey(ValueKey(k)), findsOneWidget, reason: k);
+      }
+      expect(find.text('New'), findsNWidgets(2)); // Voice and Captions
 
-      // a sticker brings its own lane
+      // a sticker brings its own track, selected
       await t.tap(find.byKey(const ValueKey('tool_stickers')));
       await t.pump(const Duration(seconds: 1));
       await t.pump(const Duration(seconds: 1));
       await t.ensureVisible(find.byKey(const ValueKey('emoji_🔥')));
       await t.tap(find.byKey(const ValueKey('emoji_🔥')));
       await t.pump(const Duration(seconds: 1));
-      expect(find.byKey(const ValueKey('laneBar0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('textLane0')), findsOneWidget);
       expect(find.byKey(const ValueKey('selectionBar')), findsOneWidget);
 
-      // drag the end of the bar to the left: the sticker now goes away before the clip ends
-      final box = t.getRect(find.byKey(const ValueKey('laneBar0')));
+      // move to near the end of the clip: drag the time marks to the left
+      final tl = t.getRect(find.byKey(const ValueKey('editTimeline')));
       await t.dragFrom(
-        Offset(box.right - 4, box.center.dy),
+        tl.topCenter + const Offset(0, 12),
+        const Offset(-800, 0),
+      );
+      await t.pump(const Duration(milliseconds: 300));
+
+      // the sticker's end is now in view: drag it to the left (it goes before the end)
+      expect(find.byKey(const ValueKey('laneEnd0')), findsOneWidget);
+      await t.drag(
+        find.byKey(const ValueKey('laneEnd0')),
         const Offset(-150, 0),
       );
       await t.pump(const Duration(milliseconds: 300));
 
-      // dragging a handle of the strip does not flood the player with seeks
-      final strip = t.getTopLeft(find.byKey(const ValueKey('trimTimeline')));
-      await t.dragFrom(strip + const Offset(466, 30), const Offset(-150, 0));
+      // select the clip and pull its end handle: a trim, without flooding the player
+      final v = t.getRect(find.byKey(const ValueKey('videoTrack')));
+      await t.tapAt(Offset(tl.left + 120, v.center.dy));
+      await t.pump();
+      expect(find.byKey(const ValueKey('trimEnd')), findsOneWidget);
+      fake.seeks.clear();
+      await t.drag(
+        find.byKey(const ValueKey('trimEnd')),
+        const Offset(-150, 0),
+      );
       await t.pump(const Duration(milliseconds: 300));
       expect(fake.seeks.length, lessThan(40));
 
@@ -167,4 +200,82 @@ void main() {
       expect(t.takeException(), isNull);
     },
   );
+
+  testWidgets('captions: a timed line low on the clip; undo and redo', (
+    t,
+  ) async {
+    EditorResult? result;
+    final file = File('${Directory.systemTemp.path}/v1200_clip.mp4')
+      ..writeAsBytesSync([0, 0, 0, 0]);
+    await t.binding.setSurfaceSize(const Size(500, 1000));
+    addTearDown(() => t.binding.setSurfaceSize(null));
+    await t.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark,
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: TextButton(
+                onPressed: () async {
+                  result = await Navigator.of(context).push<EditorResult>(
+                    MaterialPageRoute(
+                      builder: (_) => EditorScreen(file: file, video: true),
+                    ),
+                  );
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await t.tap(find.text('open'));
+    await t.pump(const Duration(milliseconds: 400));
+    await _settle(
+      t,
+      () => find.byKey(const ValueKey('editTimeline')).evaluate().isNotEmpty,
+    );
+
+    bool on(String key) =>
+        t
+            .widget<InkWell>(
+              find.descendant(
+                of: find.byKey(ValueKey(key)),
+                matching: find.byType(InkWell),
+              ),
+            )
+            .onTap !=
+        null;
+    expect(on('editorUndo'), isFalse);
+
+    await t.tap(find.byKey(const ValueKey('tool_captions')));
+    await t.pump(const Duration(seconds: 1));
+    await t.pump(const Duration(seconds: 1));
+    await t.enterText(find.byKey(const ValueKey('storyTextInput')), 'Hello there');
+    await t.tap(find.byKey(const ValueKey('storyTextDone')));
+    await t.pump(const Duration(seconds: 1));
+    expect(find.byKey(const ValueKey('textLane0')), findsOneWidget);
+    expect(on('editorUndo'), isTrue);
+
+    // undo removes the caption, redo brings it back
+    await t.tap(find.byKey(const ValueKey('editorUndo')));
+    await t.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const ValueKey('textLane0')), findsNothing);
+    expect(on('editorRedo'), isTrue);
+    await t.tap(find.byKey(const ValueKey('editorRedo')));
+    await t.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const ValueKey('textLane0')), findsOneWidget);
+
+    await t.tap(find.byKey(const ValueKey('editorDone')));
+    await t.pump(const Duration(milliseconds: 500));
+    await t.pump(const Duration(milliseconds: 500));
+    final o = result!.overlays.single;
+    expect(o.text, 'Hello there');
+    expect(o.pill, isTrue);
+    expect(o.dy, greaterThan(0.75));
+    expect(o.from, closeTo(0, 0.5));
+    expect(o.to, closeTo(o.from + 3, 0.01));
+    expect(t.takeException(), isNull);
+  });
 }

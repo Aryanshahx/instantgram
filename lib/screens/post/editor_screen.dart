@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:io';
 
@@ -21,7 +22,7 @@ import '../../services/photo_edit.dart';
 import '../../services/playhead.dart';
 import '../../widgets/music_widgets.dart';
 import '../../widgets/overlay_tools.dart';
-import '../../widgets/trim_timeline.dart';
+import '../../widgets/edit_timeline.dart';
 import 'photo_editor_screen.dart' show CropOverlay;
 import 'video_editor_screen.dart' show VideoEdits;
 
@@ -147,7 +148,23 @@ class _EditorScreenState extends State<EditorScreen>
   Ticker get _tk => _ticker ??= createTicker(_onFrame);
   late final SeekThrottle _seek = SeekThrottle((d) async => _c?.seekTo(d));
   bool _looping = false;
-  final List<Uint8List?> _frames = List<Uint8List?>.filled(10, null);
+  final List<Uint8List?> _frames = List<Uint8List?>.filled(12, null);
+
+  // timeline: the clip is selected (white frame with trim handles); playing before a scrub
+  bool _videoSel = false;
+  bool _playBeforeScrub = false;
+
+  // undo / redo: a fingerprint of every edit; quick changes in a row are one step
+  final List<_Snap> _undo = [];
+  final List<_Snap> _redo = [];
+  _Snap? _now;
+  DateTime _lastChange = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _restoring = false;
+
+  // every voiceover recorded here (undo can bring an older one back); unused ones are
+  // removed when the editor closes
+  final Set<String> _voiceFiles = {};
+  String? _keptVoice;
   final ValueNotifier<int> _framesTick = ValueNotifier(0);
 
   static const _presets = <(String, double?)>[
@@ -400,6 +417,11 @@ class _EditorScreenState extends State<EditorScreen>
     _voice?.dispose();
     _rec?.dispose();
     _proxy?.file.delete().ignore();
+    for (final f in _voiceFiles) {
+      if (f != _keptVoice && f != widget.audio.voicePath) {
+        File(f).delete().ignore();
+      }
+    }
     super.dispose();
   }
 
@@ -556,9 +578,8 @@ class _EditorScreenState extends State<EditorScreen>
     if (r == null) {
       showToast(context, 'Nothing was recorded. Try again.');
     } else {
-      final old = _a.voicePath;
+      _voiceFiles.add(r.file.path);
       setState(() => _a = _a.copyWith(voicePath: r.file.path));
-      if (old.isNotEmpty && old != r.file.path) File(old).delete().ignore();
     }
     await c?.setVolume(_videoVolume);
     await _startVoice();
@@ -570,12 +591,10 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
   Future<void> _deleteVoice() async {
-    final old = _a.voicePath;
     final v = _voice;
     _voice = null;
     setState(() => _a = _a.withoutVoice());
     await v?.dispose();
-    if (old.isNotEmpty) File(old).delete().ignore();
     await _c?.setVolume(_videoVolume);
   }
 
@@ -693,6 +712,7 @@ class _EditorScreenState extends State<EditorScreen>
     _start = s.clamp(0, _total - 1).toDouble();
     _end = e.clamp(_start + 1, _total.toDouble()).toDouble();
     _rangeN.value = (_start, _end);
+    _noteChange();
     // the picture follows the handle that is being moved
     _scrubTo(startMoved ? _start : _end - 1);
   }
@@ -731,26 +751,177 @@ class _EditorScreenState extends State<EditorScreen>
     });
   }
 
-  void _reset() {
+  // ------------------------------------------------------------ undo, redo
+
+  _Snap _snap() => _Snap(
+    start: _start,
+    end: _end,
+    mute: _mute,
+    speed: _speed,
+    turns: _turns,
+    edits: _e.copy(),
+    preset: _preset,
+    overlays: List.of(_overlays),
+    music: _music,
+    audio: _a,
+  );
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _noteChange();
+  }
+
+  /// Something may have changed: a new undo step, unless it is part of the change just
+  /// before (sliders and handles send many small changes).
+  void _noteChange() {
+    if (_restoring) return;
+    final next = _snap();
+    final cur = _now;
+    if (cur == null) {
+      _now = next;
+      return;
+    }
+    if (cur.sig == next.sig) return;
+    final t = DateTime.now();
+    if (t.difference(_lastChange).inMilliseconds > 700) {
+      _undo.add(cur);
+      if (_undo.length > 60) _undo.removeAt(0);
+    }
+    _lastChange = t;
+    _now = next;
+    if (_redo.isNotEmpty) _redo.clear();
+  }
+
+  bool get _canUndo => _undo.isNotEmpty && !_recording && !_busy;
+  bool get _canRedo => _redo.isNotEmpty && !_recording && !_busy;
+
+  Future<void> _undoStep() async {
+    if (!_canUndo) return;
+    _redo.add(_now ?? _snap());
+    await _restore(_undo.removeLast());
+  }
+
+  Future<void> _redoStep() async {
+    if (!_canRedo) return;
+    _undo.add(_now ?? _snap());
+    await _restore(_redo.removeLast());
+  }
+
+  Future<void> _restore(_Snap x) async {
+    final musicChanged = x.music?.id != _music?.id;
+    final voiceChanged = x.audio.voicePath != _a.voicePath;
+    final speedChanged = x.speed != _speed;
+    final songStartChanged = x.audio.songStart != _a.songStart;
+    _restoring = true;
     setState(() {
-      _e = PhotoEdits();
-      _preset = 0;
-      _overlays.clear();
+      _start = x.start;
+      _end = x.end;
+      _mute = x.mute;
+      _speed = x.speed;
+      _turns = x.turns;
+      _e = x.edits.copy();
+      _preset = x.preset;
+      _overlays
+        ..clear()
+        ..addAll(x.overlays);
       _sel = null;
-      if (_isVideo) {
-        _start = 0;
-        _end = widget.maxSeconds == null
-            ? _total.toDouble()
-            : _total.clamp(1, widget.maxSeconds!).toDouble();
-        _mute = false;
-        _speed = 1;
-        _turns = 0;
-        _smooth.rate = 1;
-        _c?.setPlaybackSpeed(1);
-        _rangeN.value = (_start, _end);
-      }
+      _music = x.music;
+      _a = x.audio;
+      _rangeN.value = (_start, _end);
     });
-    _c?.setVolume(_videoVolume);
+    _ovTick.value++;
+    _now = x;
+    _lastChange = DateTime.fromMillisecondsSinceEpoch(0);
+    _restoring = false;
+    if (musicChanged || songStartChanged) {
+      final m = _music;
+      if (m == null) {
+        final old = _player;
+        _player = null;
+        await old?.dispose();
+      } else {
+        await _startPlayer(m);
+      }
+    } else {
+      _player?.setVolume(_a.songVolume);
+    }
+    if (voiceChanged) {
+      await _startVoice();
+    } else {
+      _voice?.setVolume(_a.voiceVolume);
+    }
+    final c = _c;
+    if (c != null) {
+      if (speedChanged) {
+        _smooth.rate = _speed;
+        await c.setPlaybackSpeed(_speed);
+      }
+      await c.setVolume(_videoVolume);
+      final p = _pos.value;
+      if (p < _start || p > _end) _scrubTo(_start);
+      _syncSound(force: true);
+    }
+  }
+
+  // ------------------------------------------------------------- captions
+
+  /// A caption: a short line with a background, low on the picture, on screen for three
+  /// seconds from where the playhead is (drag its ends on the timeline to change that).
+  Future<void> _addCaption() async {
+    final at = _pos.value.clamp(_start, _end);
+    final r = await showOverlayTextSheet(
+      context,
+      const StoryOverlay(text: '', pill: true),
+    );
+    if (r == null || r.text.trim().isEmpty || !mounted) return;
+    final to = math.min(at + 3, _end);
+    setState(() {
+      _overlays.add(
+        r.copyWith(
+          dx: 0.5,
+          dy: 0.84,
+          pill: true,
+          scale: 0.85,
+          from: at,
+          to: to >= _total - 0.01 ? -1 : to,
+        ),
+      );
+      _sel = _overlays.length - 1;
+    });
+    _ovTick.value++;
+  }
+
+  static bool _isCaption(StoryOverlay o) =>
+      o.pill && o.dy > 0.75 && !o.emoji && !o.isImage;
+
+  // --------------------------------------------------------------- scrub
+
+  void _scrubStart() {
+    final c = _c;
+    if (c == null || _recording) return;
+    _playBeforeScrub = !_paused;
+    if (!_paused) {
+      _paused = true;
+      c.pause();
+      _player?.pause();
+      _voice?.pause();
+    }
+  }
+
+  void _scrubMove(double sec) {
+    if (_recording) return;
+    _scrubTo(sec.clamp(_start, math.max(_start, _end - 0.05)));
+  }
+
+  void _scrubEnd() {
+    if (_recording) return;
+    if (_playBeforeScrub) {
+      setState(() => _paused = true);
+      _togglePause();
+    } else {
+      setState(() {});
+    }
   }
 
   // ------------------------------------------------------------------- done
@@ -760,6 +931,7 @@ class _EditorScreenState extends State<EditorScreen>
     if (_isVideo) {
       if (_recording) await _stopRecording();
       if (!mounted) return;
+      _keptVoice = _a.voicePath;
       final ve = VideoEdits(
         start: _start.round(),
         end: _end.round(),
@@ -818,48 +990,99 @@ class _EditorScreenState extends State<EditorScreen>
           canPop: !_busy,
           child: Scaffold(
             backgroundColor: Colors.black,
-            appBar: AppBar(
-              backgroundColor: Colors.black,
-              leading: IconButton(
-                key: const ValueKey('editorClose'),
-                icon: const Icon(Icons.close_rounded),
-                onPressed: _busy ? null : () => Navigator.of(context).pop(),
+            body: SafeArea(
+              bottom: false,
+              child: Column(
+                children: [
+                  _topBar(context, ready),
+                  Expanded(child: _body(context)),
+                ],
               ),
-              actions: [
-                TextButton(
-                  key: const ValueKey('editorReset'),
-                  onPressed: _busy || !ready ? null : _reset,
-                  style: TextButton.styleFrom(foregroundColor: Colors.white70),
-                  child: const Text('Reset'),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(right: 8, left: 2),
-                  child: TextButton(
-                    key: const ValueKey('editorDone'),
-                    onPressed: _busy || !ready ? null : _done,
-                    child: _busy
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: AppTheme.volt,
-                            ),
-                          )
-                        : const Text(
-                            'Done',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                  ),
-                ),
-              ],
             ),
-            body: _body(context),
           ),
         ),
+      ),
+    );
+  }
+
+  /// Round close button, the title in a pill, and a white round arrow to finish.
+  Widget _topBar(BuildContext context, bool ready) {
+    Widget round({
+      required Key key,
+      required Widget child,
+      required VoidCallback? onTap,
+      Color color = const Color(0xFF1F1F23),
+      String? tip,
+    }) => Tooltip(
+      message: tip ?? '',
+      child: Material(
+        key: key,
+        color: color,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(width: 52, height: 52, child: Center(child: child)),
+        ),
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+      child: Row(
+        children: [
+          round(
+            key: const ValueKey('editorClose'),
+            tip: 'Close',
+            onTap: _busy ? null : () => Navigator.of(context).pop(),
+            child: const Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: Colors.white,
+              size: 32,
+            ),
+          ),
+          Expanded(
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 22,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1F1F23),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(
+                  _isVideo ? 'Edit clip' : 'Edit photo',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          round(
+            key: const ValueKey('editorDone'),
+            tip: 'Done',
+            color: Colors.white,
+            onTap: _busy || !ready ? null : _done,
+            child: _busy
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: Colors.black,
+                    ),
+                  )
+                : const Icon(
+                    Icons.arrow_forward_rounded,
+                    color: Colors.black,
+                    size: 28,
+                  ),
+          ),
+        ],
       ),
     );
   }
@@ -879,18 +1102,125 @@ class _EditorScreenState extends State<EditorScreen>
     if (_isVideo ? _c == null : _proxy == null) {
       return const Center(child: CircularProgressIndicator());
     }
+    final toolOpen = _tool != null;
     return Column(
       children: [
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+            padding: EdgeInsets.fromLTRB(
+              _isVideo ? 56 : 16,
+              4,
+              _isVideo ? 56 : 16,
+              6,
+            ),
             child: LayoutBuilder(builder: _preview),
           ),
         ),
+        _controls(),
+        if (_isVideo) ...[
+          const Divider(height: 1, color: Colors.white12),
+          _timeline(compact: toolOpen),
+        ],
         _selectionBar(),
-        if (_isVideo) _timeline(),
+        if (toolOpen)
+          SizedBox(
+            height: _tool == _Tool.audio ? 176 : (_isVideo ? 120 : 150),
+            child: switch (_tool!) {
+              _Tool.crop => _cropTools(),
+              _Tool.filters => _filterTools(),
+              _Tool.adjust => _adjustTools(),
+              _Tool.audio => _audioTools(),
+              _Tool.speed => _speedTools(),
+            },
+          )
+        else if (_isVideo && _sel == null)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 6),
+            child: Text(
+              'Tap on a track to trim. Pinch to zoom.',
+              key: ValueKey('timelineHint'),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white, fontSize: 14.5),
+            ),
+          ),
         _panel(context),
       ],
+    );
+  }
+
+  /// Play / pause, the time, undo and redo.
+  Widget _controls() {
+    Widget circle(
+      Key key,
+      IconData icon,
+      VoidCallback? onTap, {
+      double size = 26,
+    }) => Material(
+      key: key,
+      color: const Color(0xFF1F1F23),
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: Icon(
+            icon,
+            size: size,
+            color: onTap == null ? Colors.white30 : Colors.white,
+          ),
+        ),
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 2, 14, 8),
+      child: Row(
+        children: [
+          if (_isVideo)
+            circle(
+              const ValueKey('editorPlay'),
+              _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+              _recording ? null : _togglePause,
+              size: 30,
+            )
+          else
+            const SizedBox(width: 48),
+          Expanded(
+            child: _isVideo
+                ? ValueListenableBuilder<double>(
+                    valueListenable: _pos,
+                    builder: (_, p, _) {
+                      final sp = _speed <= 0 ? 1.0 : _speed;
+                      final at = ((p - _start) / sp).clamp(0.0, 36000.0);
+                      final len = (_end - _start) / sp;
+                      return Text(
+                        '${_clock2(at)} / ${_clock2(len)}',
+                        key: const ValueKey('editorTime'),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 17,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      );
+                    },
+                  )
+                : const SizedBox.shrink(),
+          ),
+          circle(
+            const ValueKey('editorUndo'),
+            Icons.undo_rounded,
+            _canUndo ? _undoStep : null,
+          ),
+          const SizedBox(width: 10),
+          circle(
+            const ValueKey('editorRedo'),
+            Icons.redo_rounded,
+            _canRedo ? _redoStep : null,
+          ),
+        ],
+      ),
     );
   }
 
@@ -1027,9 +1357,15 @@ class _EditorScreenState extends State<EditorScreen>
     }
     if (_turns != 0) video = RotatedBox(quarterTurns: _turns, child: video);
     return Center(
-      child: SizedBox(
+      child: Container(
         width: w,
         height: h,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: Colors.black,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white12),
+        ),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -1093,120 +1429,108 @@ class _EditorScreenState extends State<EditorScreen>
   // ---- bottom: tool panel and tool row ----
 
   Widget _panel(BuildContext context) {
+    final voice = _isVideo && widget.voiceover;
     return SafeArea(
       top: false,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_tool != null)
-            SizedBox(
-              height: _tool == _Tool.audio ? 190 : (_isVideo ? 130 : 150),
-              child: switch (_tool!) {
-                _Tool.crop => _cropTools(),
-                _Tool.filters => _filterTools(),
-                _Tool.adjust => _adjustTools(),
-                _Tool.audio => _audioTools(),
-                _Tool.speed => _speedTools(),
-              },
+      child: SizedBox(
+        height: 104,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+          children: [
+            _actionButton(
+              const ValueKey('tool_audio'),
+              Icons.library_music_rounded,
+              _music == null ? 'Audio' : _music!.title,
+              _audio,
+              on: _music != null,
             ),
-          Container(
-            decoration: const BoxDecoration(
-              border: Border(top: BorderSide(color: Colors.white12)),
+            if (_music != null || (voice && _a.hasVoice))
+              _toolButton(
+                const ValueKey('tool_audio_edit'),
+                Icons.graphic_eq_rounded,
+                'Edit audio',
+                _Tool.audio,
+              ),
+            if (_music != null)
+              _actionButton(
+                const ValueKey('tool_audio_off'),
+                Icons.music_off_rounded,
+                'No audio',
+                _removeAudio,
+              ),
+            _actionButton(
+              const ValueKey('tool_text'),
+              Icons.text_fields_rounded,
+              'Text',
+              _addText,
             ),
-            height: 74,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              children: [
-                _actionButton(
-                  const ValueKey('tool_audio'),
-                  Icons.music_note_rounded,
-                  _music == null ? 'Audio' : _music!.title,
-                  _audio,
-                  on: _music != null,
-                ),
-                if (_music != null || (_isVideo && widget.voiceover && _a.hasVoice))
-                  _toolButton(
-                    const ValueKey('tool_audio_edit'),
-                    Icons.graphic_eq_rounded,
-                    'Edit audio',
-                    _Tool.audio,
-                  ),
-                if (_music != null)
-                  _actionButton(
-                    const ValueKey('tool_audio_off'),
-                    Icons.music_off_rounded,
-                    'No audio',
-                    _removeAudio,
-                  ),
-                if (_isVideo && widget.voiceover)
-                  _actionButton(
-                    const ValueKey('tool_voice'),
-                    _recording ? Icons.stop_circle_rounded : Icons.mic_rounded,
-                    _recording
-                        ? 'Stop'
-                        : (_a.hasVoice ? 'Voice again' : 'Voiceover'),
-                    _recordVoice,
-                    on: _recording || _a.hasVoice,
-                  ),
-                _actionButton(
-                  const ValueKey('tool_text'),
-                  Icons.text_fields_rounded,
-                  'Text',
-                  _addText,
-                ),
-                _actionButton(
-                  const ValueKey('tool_stickers'),
-                  Icons.emoji_emotions_outlined,
-                  'Stickers',
-                  _addSticker,
-                ),
-                _toolButton(
-                  const ValueKey('tool_filters'),
-                  Icons.auto_awesome_rounded,
-                  'Filters',
-                  _Tool.filters,
-                ),
-                _toolButton(
-                  const ValueKey('tool_adjust'),
-                  Icons.tune_rounded,
-                  'Adjust',
-                  _Tool.adjust,
-                ),
-                if (!_isVideo)
-                  _toolButton(
-                    const ValueKey('tool_crop'),
-                    Icons.crop_rounded,
-                    'Crop',
-                    _Tool.crop,
-                  ),
-                if (_isVideo) ...[
-                  _toolButton(
-                    const ValueKey('tool_speed'),
-                    Icons.speed_rounded,
-                    _speed == 1 ? 'Speed' : speedLabel(_speed),
-                    _Tool.speed,
-                  ),
-                  _actionButton(
-                    const ValueKey('tool_rotate'),
-                    Icons.rotate_90_degrees_cw_rounded,
-                    _turns == 0 ? 'Rotate' : '${_turns * 90}\u00b0',
-                    _turnVideo,
-                    on: _turns != 0,
-                  ),
-                  _actionButton(
-                    const ValueKey('tool_mute'),
-                    _mute ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                    _mute ? 'Muted' : 'Mute',
-                    _toggleMute,
-                    on: _mute,
-                  ),
-                ],
-              ],
+            if (voice)
+              _actionButton(
+                const ValueKey('tool_voice'),
+                _recording ? Icons.stop_circle_rounded : Icons.mic_none_rounded,
+                _recording ? 'Stop' : 'Voice',
+                _recordVoice,
+                on: _recording || _a.hasVoice,
+                badge: _a.hasVoice || _recording ? null : 'New',
+              ),
+            if (_isVideo)
+              _actionButton(
+                const ValueKey('tool_captions'),
+                Icons.closed_caption_outlined,
+                'Captions',
+                _addCaption,
+                badge: 'New',
+              ),
+            _actionButton(
+              const ValueKey('tool_stickers'),
+              Icons.sticky_note_2_outlined,
+              'Stickers',
+              _addSticker,
             ),
-          ),
-          const SizedBox(height: 4),
-        ],
+            _toolButton(
+              const ValueKey('tool_filters'),
+              Icons.filter_vintage_outlined,
+              'Filters',
+              _Tool.filters,
+            ),
+            _toolButton(
+              const ValueKey('tool_adjust'),
+              Icons.tune_rounded,
+              'Adjust',
+              _Tool.adjust,
+            ),
+            if (!_isVideo)
+              _toolButton(
+                const ValueKey('tool_crop'),
+                Icons.crop_rounded,
+                'Crop',
+                _Tool.crop,
+              ),
+            if (_isVideo) ...[
+              _toolButton(
+                const ValueKey('tool_speed'),
+                Icons.speed_rounded,
+                _speed == 1 ? 'Speed' : speedLabel(_speed),
+                _Tool.speed,
+              ),
+              _actionButton(
+                const ValueKey('tool_rotate'),
+                Icons.rotate_90_degrees_cw_rounded,
+                _turns == 0 ? 'Rotate' : '${_turns * 90}\u00b0',
+                _turnVideo,
+                on: _turns != 0,
+              ),
+              _actionButton(
+                const ValueKey('tool_mute'),
+                _mute ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                _mute ? 'Muted' : 'Volume',
+                _toggleMute,
+                on: _mute,
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -1220,8 +1544,8 @@ class _EditorScreenState extends State<EditorScreen>
     key,
     icon,
     label,
-    // on a video a second tap closes the tool again, so the timeline keeps its room; on a
-    // photo the audio tool goes back to the filters
+    // on a video a second tap closes the tool again, so the timeline keeps its room;
+    // on a photo the audio tool goes back to the filters
     () => setState(() {
       if (_tool != t) {
         _tool = t;
@@ -1234,36 +1558,83 @@ class _EditorScreenState extends State<EditorScreen>
     on: _tool == t,
   );
 
+  /// A rounded square with the icon and the name under it (and a little "New" tag).
   Widget _actionButton(
     Key key,
     IconData icon,
     String label,
     VoidCallback onTap, {
     bool on = false,
+    String? badge,
   }) {
     final locked = _recording && key != const ValueKey('tool_voice');
-    return InkWell(
-      key: key,
-      borderRadius: BorderRadius.circular(14),
-      onTap: _busy || locked ? null : onTap,
-      child: SizedBox(
-        width: 78,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 26, color: on ? AppTheme.volt : Colors.white),
-            const SizedBox(height: 5),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w800,
-                color: on ? AppTheme.volt : Colors.white70,
+    final fg = on ? AppTheme.volt : Colors.white;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: InkWell(
+        key: key,
+        borderRadius: BorderRadius.circular(16),
+        onTap: _busy || locked ? null : onTap,
+        child: SizedBox(
+          width: 82,
+          child: Column(
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.topCenter,
+                children: [
+                  Container(
+                    width: 74,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: on
+                          ? AppTheme.volt.withValues(alpha: 0.16)
+                          : const Color(0xFF1F1F23),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Icon(
+                      icon,
+                      size: 28,
+                      color: locked ? Colors.white30 : fg,
+                    ),
+                  ),
+                  if (badge != null)
+                    Positioned(
+                      top: -9,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF5B6CFF),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          badge,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 6),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                  color: on ? AppTheme.volt : Colors.white,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1275,49 +1646,71 @@ class _EditorScreenState extends State<EditorScreen>
     return t.isEmpty ? (o.emoji ? 'Sticker' : 'Text') : t;
   }
 
-  /// Always in view for a video: the frames, the kept part, and one lane each for the audio,
-  /// every text and every sticker.
-  Widget _timeline() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
-      child: RepaintBoundary(
-        child: ListenableBuilder(
-          listenable: Listenable.merge([_rangeN, _ovTick, _framesTick]),
-          builder: (context, _) {
-            final r = _rangeN.value;
-            return TrimTimeline(
-              total: _total,
-              start: r.$1,
-              end: r.$2,
-              position: _pos,
-              frames: _frames,
-              maxSeconds: widget.maxSeconds,
-              audioLabel: _music?.title,
-              lanes: [
-                for (var i = 0; i < _overlays.length; i++)
-                  TimelineLane(
-                    kind: _overlays[i].emoji || _overlays[i].isImage
-                        ? LaneKind.sticker
-                        : LaneKind.text,
-                    label: _laneLabel(_overlays[i]),
-                    from: _overlays[i].from,
-                    to: _overlays[i].to,
-                    selected: _sel == i,
-                  ),
-              ],
-              onLaneTap: (i) {
-                if (_sel != i) setState(() => _sel = i);
-              },
-              onLaneRange: (i, from, to) {
-                if (i >= _overlays.length) return;
-                _overlays[i] = _overlays[i].copyWith(from: from, to: to);
-                _ovTick.value++;
-              },
-              onRange: (s, e, startMoved) => _applyRange(s, e, startMoved),
-              onSeek: _scrubTo,
-            );
-          },
-        ),
+  /// Always in view for a video, like video editors: the playhead in the middle, the clip
+  /// with its frames, the song, the voiceover and every text, sticker and caption.
+  Widget _timeline({bool compact = false}) {
+    return RepaintBoundary(
+      child: ListenableBuilder(
+        listenable: Listenable.merge([_rangeN, _ovTick, _framesTick]),
+        builder: (context, _) {
+          final r = _rangeN.value;
+          return EditTimeline(
+            height: compact ? 150 : 214,
+            total: _total,
+            start: r.$1,
+            end: r.$2,
+            position: _pos,
+            frames: _frames,
+            maxSeconds: widget.maxSeconds,
+            muted: _mute,
+            videoSelected: _videoSel,
+            audioLabel: _music?.title,
+            voice: widget.voiceover && _a.hasVoice,
+            lanes: [
+              for (var i = 0; i < _overlays.length; i++)
+                EditLane(
+                  icon: _isCaption(_overlays[i])
+                      ? Icons.closed_caption_rounded
+                      : (_overlays[i].emoji || _overlays[i].isImage
+                            ? Icons.emoji_emotions_rounded
+                            : Icons.text_fields_rounded),
+                  label: _laneLabel(_overlays[i]),
+                  from: _overlays[i].from,
+                  to: _overlays[i].to,
+                  selected: _sel == i,
+                ),
+            ],
+            onSeekStart: _scrubStart,
+            onSeek: _scrubMove,
+            onSeekEnd: _scrubEnd,
+            onRange: (s, e, startMoved) => _applyRange(s, e, startMoved),
+            onVideoTap: () => setState(() {
+              _videoSel = !_videoSel;
+              _sel = null;
+            }),
+            onMuteTap: _recording ? null : _toggleMute,
+            onAddAudio: _recording ? null : _audio,
+            onAudioTap: () => setState(() {
+              _videoSel = false;
+              _tool = _tool == _Tool.audio ? null : _Tool.audio;
+            }),
+            onVoiceTap: () => setState(() {
+              _videoSel = false;
+              _tool = _tool == _Tool.audio ? null : _Tool.audio;
+            }),
+            onLaneTap: (i) => setState(() {
+              _videoSel = false;
+              _sel = _sel == i ? null : i;
+            }),
+            onLaneRange: (i, from, to) {
+              if (i >= _overlays.length) return;
+              _overlays[i] = _overlays[i].copyWith(from: from, to: to);
+              _ovTick.value++;
+              _noteChange();
+            },
+            onAddText: _recording ? null : _addText,
+          );
+        },
       ),
     );
   }
@@ -1405,9 +1798,7 @@ class _EditorScreenState extends State<EditorScreen>
             'Original sound',
             _speed != 1 || _mute ? 0 : _a.originalVolume,
             1,
-            _speed != 1
-                ? 'off'
-                : (_mute ? 'muted' : pct(_a.originalVolume)),
+            _speed != 1 ? 'off' : (_mute ? 'muted' : pct(_a.originalVolume)),
             _speed != 1 || _mute ? (_) {} : _setOriginalVolume,
           ),
           if (_music != null) ...[
@@ -1657,4 +2048,52 @@ class _EditorScreenState extends State<EditorScreen>
       ],
     );
   }
+}
+
+/// Everything undo and redo bring back.
+class _Snap {
+  _Snap({
+    required this.start,
+    required this.end,
+    required this.mute,
+    required this.speed,
+    required this.turns,
+    required this.edits,
+    required this.preset,
+    required this.overlays,
+    required this.music,
+    required this.audio,
+  });
+
+  final double start;
+  final double end;
+  final bool mute;
+  final double speed;
+  final int turns;
+  final PhotoEdits edits;
+  final int preset;
+  final List<StoryOverlay> overlays;
+  final MusicTrack? music;
+  final AudioEdits audio;
+
+  /// Two snapshots with the same fingerprint are the same edit.
+  late final String sig = [
+    start,
+    end,
+    mute,
+    speed,
+    turns,
+    preset,
+    edits.turns,
+    edits.flip,
+    edits.crop,
+    edits.filter,
+    edits.brightness,
+    edits.contrast,
+    edits.saturation,
+    music?.id,
+    audio.hashCode,
+    for (final o in overlays)
+      '${o.text}|${o.dx}|${o.dy}|${o.scale}|${o.color}|${o.pill}|${o.emoji}|${o.image}|${o.from}|${o.to}',
+  ].join('~');
 }
