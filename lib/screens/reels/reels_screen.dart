@@ -28,7 +28,9 @@ import '../../widgets/reel_video.dart';
 import '../../widgets/repost_controller.dart';
 import '../../widgets/save_controller.dart';
 import '../../widgets/state_views.dart';
-import '../post/comments_screen.dart' show commentsSheetHeight, showCommentsSheet;
+import '../post/comments_screen.dart'
+  show commentsSheetHeight, showCommentsSheet;
+import '../profile/analytics_screen.dart';
 import '../profile/profile_screen.dart';
 
 /// Opens the Clips screen on top of everything, starting with [post] (used when someone taps a
@@ -739,8 +741,19 @@ class _Rail extends StatelessWidget {
               : 'Share',
           onTap: onShare,
         ),
-        // Report sits right under Share
-        if (!mine) ...[
+        // Report for someone else's clip, Analytics for your own
+        if (mine) ...[
+          const SizedBox(height: _gap),
+          ReelIconButton(
+            key: const ValueKey('clipAnalytics'),
+            icon: Icons.insights_rounded,
+            label: 'Insights',
+            onTap: () => openScreen(
+              context,
+              AnalyticsScreen(postId: post.id),
+            ),
+          ),
+        ] else ...[
           const SizedBox(height: _gap),
           ReelIconButton(
             key: const ValueKey('clipMore'),

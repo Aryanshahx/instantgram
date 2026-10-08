@@ -13,6 +13,7 @@ import '../profile/saved_posts_screen.dart';
 import 'account_screens.dart';
 import 'activity_screens.dart';
 import 'app_screens.dart';
+import 'delete_account_screen.dart';
 import 'settings_widgets.dart';
 
 class _Item {
@@ -101,6 +102,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'Blocked',
           'block unblock people',
           (c, _) => openScreen(c, const BlockedScreen()),
+        ),
+        _Item(
+          'delete',
+          Icons.delete_forever_rounded,
+          'Delete account',
+          'request removal erase content data',
+          (c, _) => openScreen(c, const DeleteAccountScreen()),
         ),
       ],
     ),

@@ -21,6 +21,9 @@ class ChatThread {
     this.lastAt,
     this.lastSender = '',
     this.seen = const {},
+    this.pinned = false,
+    this.muteCalls = false,
+    this.muteMessages = false,
   });
 
   final String id;
@@ -31,6 +34,15 @@ class ChatThread {
 
   /// When each member last opened the chat.
   final Map<String, DateTime> seen;
+
+  /// Kept at the top of the inbox.
+  final bool pinned;
+
+  /// No ring for calls from this chat.
+  final bool muteCalls;
+
+  /// No sound or badge for new messages of this chat.
+  final bool muteMessages;
 
   /// The other person.
   String other(String me) =>
@@ -63,6 +75,9 @@ class ChatThread {
       lastText: m['lastText'] is String ? m['lastText'] as String : '',
       lastAt: lastAt is Timestamp ? lastAt.toDate() : null,
       lastSender: m['lastSender'] is String ? m['lastSender'] as String : '',
+      pinned: m['pinned'] == true,
+      muteCalls: m['muteCalls'] == true,
+      muteMessages: m['muteMessages'] == true,
       seen: seenRaw is Map
           ? {
               for (final e in seenRaw.entries)

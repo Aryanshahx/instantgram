@@ -151,7 +151,7 @@ void main() {
       Insights? data,
       Object? error,
     }) async {
-      AnalyticsService.instance.backend = (days, uid) async {
+      AnalyticsService.instance.backend = (days, uid, postId) async {
         if (error != null) throw error;
         return data ?? _sample(days: days);
       };
@@ -198,7 +198,7 @@ void main() {
 
     testWidgets('the range can be changed to 30 or 90 days', (tester) async {
       final asked = <int>[];
-      AnalyticsService.instance.backend = (days, uid) async {
+      AnalyticsService.instance.backend = (days, uid, postId) async {
         asked.add(days);
         return _sample(days: days);
       };
@@ -223,7 +223,7 @@ void main() {
     });
 
     testWidgets('with nothing watched yet it says so', (tester) async {
-      AnalyticsService.instance.backend = (days, uid) async =>
+      AnalyticsService.instance.backend = (days, uid, postId) async =>
           Insights.build(
             days: days,
             posts: const [],
@@ -242,7 +242,7 @@ void main() {
 
     testWidgets('a failed read can be tried again', (tester) async {
       var calls = 0;
-      AnalyticsService.instance.backend = (days, uid) async {
+      AnalyticsService.instance.backend = (days, uid, postId) async {
         calls++;
         if (calls == 1) throw StateError('permission denied');
         return _sample(days: days);

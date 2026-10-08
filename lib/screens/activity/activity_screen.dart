@@ -61,7 +61,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Activity')),
+      appBar: AppBar(title: const Text('Notifications')),
       body: StreamBuilder<List<AppNotification>>(
         stream: NotificationService.instance.watch(),
         builder: (context, snap) {

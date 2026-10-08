@@ -42,18 +42,17 @@ void main() {
       expect(kPhoneNote, contains('mp3'));
       expect(kPhoneNote.toLowerCase(), contains('phone'));
       expect(kInstantNote, contains('My phone'));
-      expect(kAppleNote, contains('My phone'));
     });
 
     test('the old music brand is not named anywhere', () {
-      for (final note in [kPhoneNote, kInstantNote, kAppleNote]) {
+      for (final note in [kPhoneNote, kInstantNote]) {
         expect(note.toLowerCase(), isNot(contains('epidemic')));
       }
     });
 
-    test('the Apple previews are described as what they are', () {
-      expect(kAppleNote, contains('30 second previews'));
+    test('what is on offer is described as it is', () {
       expect(kInstantNote, contains('Apple'));
+      expect(kInstantNote, contains('previews'));
     });
   });
 }

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Writes docs/privacy.html, docs/terms.html and the .md sources from the text below.
+"""Writes docs/privacy.html, docs/terms.html, the .md sources and the in-app text.
 
 Run:   python3 tools/gen_legal_docs.py
-Push, and GitHub Pages (Settings > Pages > main / docs) shows the same pages the app opens.
+
+The app opens the two pages straight from the repository, so pushing the change is all it
+takes; the app shows the same words offline through lib/core/legal_text.dart.
 """
 import os
 
-UPDATED = "7 October 2026"
+UPDATED = "8 October 2026"
 APP = "InstantGram"
 MAIL = "techlabs.hyper@gmail.com"
 BASE = "https://github.com/Aryanshahx/instantgram/blob/main/docs"
@@ -15,8 +17,8 @@ PRIVACY = [
     (
         "The short version",
         "We keep what the app needs to work: your account, what you post, and who you talk "
-        "to. We do not sell your personal data. You can delete your account in the app at "
-        "any time, and that erases your content, your messages and your details.",
+        "to. We do not sell your personal data. You can ask for your account to be deleted "
+        "at any time, and that erases your content, your messages and your details.",
     ),
     (
         "What we keep",
@@ -42,8 +44,9 @@ PRIVACY = [
         "Where it is stored",
         "Your account and your messages live in Google Firebase (Firebase Authentication and "
         "Cloud Firestore). Photos, clips, voice files and sounds you add from your phone live "
-        "in our own media storage. Songs in Hit songs are 30 second previews from Apple "
-        "(iTunes). Free music comes from the Jamendo catalogue, found through Openverse.",
+        "in our own media storage. Songs offered inside the app are 30 second previews from "
+        "Apple (iTunes); free music comes from the Jamendo catalogue, found through "
+        "Openverse.",
     ),
     (
         "On your phone",
@@ -53,17 +56,18 @@ PRIVACY = [
     ),
     (
         "Deleting your account",
-        "Settings > Account > Delete account. We send a 6 digit code to the email address of "
-        "the account and ask for your password; enter both and the account is deleted. That "
-        "erases your profile and details, your posts, clips, moments and stories, your "
-        "comments and replies, your likes, saves and reposts, your chats and messages, your "
-        "followers and following lists, your blocks and your notifications. The photos, "
-        "clips and sound files you uploaded are removed from storage, and the sign-in itself "
-        "is removed from Firebase Authentication. It cannot be undone. A short record of "
-        "reports and blocks may be kept for up to 30 days to keep the service safe, and "
-        "nothing else is kept. You can also write to "
+        "Settings > Account > Delete account. The app opens an email to "
         + MAIL
-        + " and we will delete it for you.",
+        + " that is already filled in with your username and account id; send it and we "
+        "delete the account within 7 days and reply to say it is done. That erases your "
+        "profile and details, your posts, clips, moments and stories, your comments and "
+        "replies, your likes, saves and reposts, your chats and messages, your followers "
+        "and following lists, your blocks and your notifications. The photos, clips and "
+        "sound files you uploaded are removed from storage, and the sign-in itself is "
+        "removed from Firebase Authentication, so the email and password stop working. It "
+        "cannot be undone. A short record of reports and blocks may be kept for up to 30 "
+        "days to keep the service safe, and nothing else is kept. Nothing is deleted while "
+        "you wait, so you can keep using the app until we reply.",
     ),
     (
         "Children",
@@ -73,8 +77,8 @@ PRIVACY = [
     (
         "Your choices",
         "You can edit or delete any post at any time, clear your watch history and screen "
-        "time, make your account private, block people, and ask for a copy of what we hold by "
-        "writing to " + MAIL + ".",
+        "time, make your account private, block people, and ask for a copy of what we hold "
+        "by writing to " + MAIL + ".",
     ),
     (
         "Changes",
@@ -106,19 +110,22 @@ TERMS = [
     (
         "Audio",
         "You can import your own audio from your phone: add only audio you have the right to "
-        "use, and it is uploaded with your post and removed with it. Hit songs are 30 second "
-        "previews that Apple offers to promote its music; they belong to their owners, are "
-        "used only inside the app, and the artist's name is always shown. Free music is "
-        "shared by its artists under Creative Commons licences (the Jamendo catalogue, found "
-        "through Openverse) and is credited in the app. Do not copy, download or resell any "
-        "of it outside " + APP + ".",
+        "use, and it is uploaded with your post and removed with it. Songs offered inside "
+        "the app are 30 second previews that Apple publishes to promote its music; they "
+        "belong to their owners, are used only inside the app, and the artist's name is "
+        "always shown. Free music is shared by its artists under Creative Commons licences "
+        "(the Jamendo catalogue, found through Openverse) and is credited in the app. Do not "
+        "copy, download or resell any of it outside " + APP + ".",
     ),
     (
         "Deleting your account",
-        "You can delete your account in the app: Settings > Account > Delete account. It is "
-        "confirmed with a code sent to your email and your password. Everything that goes "
-        "with the account (content, messages and details) is erased, and it cannot be undone. "
-        "The details are in the Privacy Policy.",
+        "You can ask for your account to be deleted in the app: Settings > Account > Delete "
+        "account opens an email to "
+        + MAIL
+        + " that is already filled in with your username and account id. We remove the "
+        "account within 7 days and reply when it is done. Everything that goes with the "
+        "account (content, messages and details) is erased, and it cannot be undone. The "
+        "details are in the Privacy Policy.",
     ),
     (
         "Reports and removal",
@@ -151,6 +158,7 @@ def page(title: str, lead: str, sections) -> str:
         "<h2>%s</h2><p>%s</p>" % (h, p.replace("&", "&amp;").replace("<", "&lt;"))
         for h, p in sections
     )
+    slug = "privacy" if "Privacy" in title else "terms"
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title} - {APP}</title><style>
@@ -172,7 +180,7 @@ hr{{border:0;border-top:1px solid var(--line);margin:36px 0}}
 <p>{lead}</p>
 {body}
 <hr><p class="mut">This page is part of the {APP} app, and it is the page the app opens from
-Settings &gt; About and from the sign-up screen: <a href="{BASE}/{'privacy' if 'Privacy' in title else 'terms'}.md">{BASE}/{'privacy' if 'Privacy' in title else 'terms'}.md</a></p>
+Settings &gt; About and from the sign-up screen: <a href="{BASE}/{slug}.md">{BASE}/{slug}.md</a></p>
 </main></body></html>
 """
 
@@ -199,8 +207,8 @@ def dart_file() -> str:
 
     return (
         "// Generated by tools/gen_legal_docs.py - do not edit by hand.\n"
-        "// Edit the text in that script and run it again: the app and the pages on\n"
-        "// GitHub Pages then always show the same words.\n\n"
+        "// Edit the text in that script and run it again: the app and the pages in the\n"
+        "// repository then always show the same words.\n\n"
         "/// The date both pages were last changed.\n"
         "const String kLegalUpdated = '%s';\n\n%s\n%s"
         % (UPDATED, block("kPrivacySections", PRIVACY), block("kTermsSections", TERMS))

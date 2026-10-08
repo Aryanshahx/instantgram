@@ -34,7 +34,9 @@ void main() {
     final how = kPrivacySections
         .firstWhere((s) => s.$1 == 'Deleting your account')
         .$2;
-    expect(how, contains('6 digit code'));
+    expect(how, contains('Delete account'));
+    expect(how, contains('email'));
+    expect(how, contains('within 7 days'));
     expect(how, contains('Firebase Authentication'));
     expect(how, contains('up to 30 days'));
     expect(how, contains('techlabs.hyper@gmail.com'));

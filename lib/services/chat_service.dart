@@ -47,11 +47,14 @@ class ChatService {
                     .map(ChatThread.fromDoc)
                     .where((t) => t.hasMessages)
                     .toList()
-                  ..sort(
-                    (a, b) => (b.lastAt ?? DateTime.now()).compareTo(
+                  ..sort((a, b) {
+                    // pinned first, then the newest message
+                    final p = (b.pinned ? 1 : 0).compareTo(a.pinned ? 1 : 0);
+                    if (p != 0) return p;
+                    return (b.lastAt ?? DateTime.now()).compareTo(
                       a.lastAt ?? DateTime.now(),
-                    ),
-                  );
+                    );
+                  });
             error.value = null;
             threads.value = list;
           },
@@ -66,6 +69,44 @@ class ChatService {
     _sub = null;
     threads.value = const [];
     error.value = null;
+  }
+
+  /// Pin, or mute calls or messages of one chat (only the fields that are given).
+  Future<void> setChatFlags(
+    String chatId, {
+    bool? pinned,
+    bool? muteCalls,
+    bool? muteMessages,
+  }) async {
+    final patch = <String, dynamic>{
+      if (pinned != null) 'pinned': pinned,
+      if (muteCalls != null) 'muteCalls': muteCalls,
+      if (muteMessages != null) 'muteMessages': muteMessages,
+    };
+    if (patch.isEmpty) return;
+    await _chats.doc(chatId).update(patch);
+  }
+
+  /// Removes the chat for you: the messages go first, then the conversation itself.
+  Future<void> deleteChat(String chatId) async {
+    final messages = await _chats
+        .doc(chatId)
+        .collection('messages')
+        .limit(400)
+        .get();
+    var batch = _db.batch();
+    var n = 0;
+    for (final d in messages.docs) {
+      batch.delete(d.reference);
+      n++;
+      if (n == 400) {
+        await batch.commit();
+        batch = _db.batch();
+        n = 0;
+      }
+    }
+    if (n > 0) await batch.commit();
+    await _chats.doc(chatId).delete();
   }
 
   /// Makes sure the chat with [otherUid] exists and returns its id.

@@ -10,7 +10,7 @@ import '../core/ui.dart';
 import '../models/post.dart';
 import '../services/post_service.dart';
 import '../services/user_service.dart';
-import 'post_details_sheet.dart';
+import '../screens/profile/analytics_screen.dart';
 import 'reel_actions.dart';
 import 'share_sheet.dart';
 
@@ -179,7 +179,7 @@ class _ActionsSheetState extends State<_ActionsSheet> {
               tile(const ValueKey('actAnalytics'), Icons.insights_rounded, 'Analytics', () {
                 final host = widget.host;
                 _close();
-                showPostDetails(host, post);
+                openScreen(host, AnalyticsScreen(postId: post.id));
               }),
               tile(
                 const ValueKey('actPin'),

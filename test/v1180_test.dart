@@ -226,30 +226,7 @@ void main() {
   });
 
   group('hit songs tab', () {
-    testWidgets('shows the chart, the 30 second note and the genres', (
-      tester,
-    ) async {
-      final asked = <String>[];
-      ItunesService.instance.backend = (url) async {
-        asked.add(url);
-        if (url.contains('rss.applemarketingtools.com')) {
-          return {
-            'feed': {
-              'results': [
-                {'id': '1'},
-              ],
-            },
-          };
-        }
-        if (url.contains('lookup')) {
-          return {
-            'results': [_song(1, preview: 'https://p/1.m4a', name: 'Hit')],
-          };
-        }
-        return {
-          'results': [_song(2, preview: 'https://p/2.m4a', name: 'Found')],
-        };
-      };
+    testWidgets('the removed hit songs tab is not offered any more', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           theme: AppTheme.dark,
@@ -268,18 +245,11 @@ void main() {
       await tester.tap(find.text('open'));
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump(const Duration(milliseconds: 400));
-      await tester.tap(find.text('Hit songs'));
-      for (var i = 0; i < 3; i++) {
-        await tester.pump(const Duration(milliseconds: 100));
-      }
-      expect(find.byKey(const ValueKey('appleNote')), findsOneWidget);
-      expect(find.text('Hit 1'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('genre_Bollywood')));
-      for (var i = 0; i < 3; i++) {
-        await tester.pump(const Duration(milliseconds: 100));
-      }
-      expect(asked.last, contains('term=Bollywood'));
-      expect(find.text('Found 2'), findsOneWidget);
+      expect(find.text('Hit songs'), findsNothing);
+      expect(find.byKey(const ValueKey('appleNote')), findsNothing);
+      expect(find.byKey(const ValueKey('musicGenres')), findsNothing);
+      expect(find.byKey(const ValueKey('musicTab0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('musicTab1')), findsOneWidget);
     });
   });
 }

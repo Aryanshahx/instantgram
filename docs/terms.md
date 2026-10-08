@@ -1,6 +1,6 @@
 # Terms of Use
 
-*InstantGram - last updated 7 October 2026*
+*InstantGram - last updated 8 October 2026*
 
 The rules for using InstantGram and for what you post on it.
 
@@ -18,11 +18,11 @@ Hate, harassment, threats, nudity or sexual content involving minors, scams, spa
 
 ## Audio
 
-You can import your own audio from your phone: add only audio you have the right to use, and it is uploaded with your post and removed with it. Hit songs are 30 second previews that Apple offers to promote its music; they belong to their owners, are used only inside the app, and the artist's name is always shown. Free music is shared by its artists under Creative Commons licences (the Jamendo catalogue, found through Openverse) and is credited in the app. Do not copy, download or resell any of it outside InstantGram.
+You can import your own audio from your phone: add only audio you have the right to use, and it is uploaded with your post and removed with it. Songs offered inside the app are 30 second previews that Apple publishes to promote its music; they belong to their owners, are used only inside the app, and the artist's name is always shown. Free music is shared by its artists under Creative Commons licences (the Jamendo catalogue, found through Openverse) and is credited in the app. Do not copy, download or resell any of it outside InstantGram.
 
 ## Deleting your account
 
-You can delete your account in the app: Settings > Account > Delete account. It is confirmed with a code sent to your email and your password. Everything that goes with the account (content, messages and details) is erased, and it cannot be undone. The details are in the Privacy Policy.
+You can ask for your account to be deleted in the app: Settings > Account > Delete account opens an email to techlabs.hyper@gmail.com that is already filled in with your username and account id. We remove the account within 7 days and reply when it is done. Everything that goes with the account (content, messages and details) is erased, and it cannot be undone. The details are in the Privacy Policy.
 
 ## Reports and removal
 

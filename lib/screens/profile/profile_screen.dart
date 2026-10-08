@@ -21,7 +21,6 @@ import '../../widgets/follow_button.dart';
 import '../../widgets/glass.dart';
 import '../../widgets/post_grid.dart';
 import '../../widgets/state_views.dart';
-import 'analytics_screen.dart';
 import 'edit_profile_screen.dart';
 import '../settings/account_screens.dart' show toggleBlock;
 import '../settings/settings_screen.dart';
@@ -557,19 +556,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                   ],
-                ),
-              if (_isMe) const SizedBox(height: 8),
-              if (_isMe)
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    key: const ValueKey('analyticsButton'),
-                    style: _smallButton,
-                    icon: const Icon(Icons.insights_rounded, size: 18),
-                    label: const Text('Analytics'),
-                    onPressed: () =>
-                        openScreen(context, const AnalyticsScreen()),
-                  ),
                 )
               else
                 Row(

@@ -15,10 +15,13 @@ import '../reels/reels_screen.dart';
 /// Opened from the Me screen. Everything is counted from what the app already stores, so
 /// these numbers start with this version; older posts have what was counted since then.
 class AnalyticsScreen extends StatefulWidget {
-  const AnalyticsScreen({super.key, this.uid});
+  const AnalyticsScreen({super.key, this.uid, this.postId});
 
   /// Whose numbers (null = the signed-in account).
   final String? uid;
+
+  /// Set to see the numbers of that one post or clip only.
+  final String? postId;
 
   @override
   State<AnalyticsScreen> createState() => _AnalyticsScreenState();
@@ -38,7 +41,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   void _reload() {
     setState(() {
-      _future = AnalyticsService.instance.load(_days, uid: widget.uid);
+      _future = AnalyticsService.instance.load(
+        _days,
+        uid: widget.uid,
+        postId: widget.postId,
+      );
     });
   }
 
@@ -59,7 +66,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Analytics')),
+      appBar: AppBar(
+        title: Text(widget.postId == null ? 'Analytics' : 'Post analytics'),
+      ),
       body: FutureBuilder<Insights>(
         key: const ValueKey('analyticsBody'),
         future: _future,

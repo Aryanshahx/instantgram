@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
+import '../../core/errors.dart';
 import '../../core/responsive.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
@@ -12,6 +13,7 @@ import '../../services/chat_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/state_views.dart';
+import 'chat_options_sheet.dart';
 import 'chat_screen.dart';
 
 /// The Chats tab: your conversations, and a search box to start one with anyone.
@@ -155,6 +157,64 @@ class _InboxScreenState extends State<InboxScreen> {
     );
   }
 
+  Future<void> _options(ChatThread thread, String name) async {
+    final pick = await showChatOptions(context, thread: thread, name: name);
+    if (pick == null || !mounted) return;
+    final service = ChatService.instance;
+    switch (pick) {
+      case ChatOption.delete:
+        final ok = await confirmDeleteChat(
+          context,
+          name.isEmpty ? 'the other person' : name,
+        );
+        if (!ok || !mounted) return;
+        try {
+          await service.deleteChat(thread.id);
+          if (mounted) showToast(context, 'Chat deleted');
+        } catch (e) {
+          if (mounted) showToast(context, friendlyError(e));
+        }
+        return;
+      case ChatOption.pin:
+        await _flag(thread, pinned: !thread.pinned, done: thread.pinned ? 'Unpinned' : 'Pinned to the top');
+        return;
+      case ChatOption.muteCalls:
+        await _flag(
+          thread,
+          muteCalls: !thread.muteCalls,
+          done: thread.muteCalls ? 'Calls unmuted' : 'Calls muted',
+        );
+        return;
+      case ChatOption.muteMessages:
+        await _flag(
+          thread,
+          muteMessages: !thread.muteMessages,
+          done: thread.muteMessages ? 'Messages unmuted' : 'Messages muted',
+        );
+        return;
+    }
+  }
+
+  Future<void> _flag(
+    ChatThread thread, {
+    bool? pinned,
+    bool? muteCalls,
+    bool? muteMessages,
+    required String done,
+  }) async {
+    try {
+      await ChatService.instance.setChatFlags(
+        thread.id,
+        pinned: pinned,
+        muteCalls: muteCalls,
+        muteMessages: muteMessages,
+      );
+      if (mounted) showToast(context, done);
+    } catch (e) {
+      if (mounted) showToast(context, friendlyError(e));
+    }
+  }
+
   Widget _threads() {
     final service = ChatService.instance;
     return ValueListenableBuilder<Object?>(
@@ -205,6 +265,7 @@ class _InboxScreenState extends State<InboxScreen> {
                       context,
                       ChatScreen(otherUid: otherUid, user: u),
                     ),
+                    onLongPress: () => _options(t, u?.username ?? ''),
                   );
                 },
               );
@@ -225,6 +286,7 @@ class _Row extends StatelessWidget {
     required this.onTap,
     this.time = '',
     this.unread = false,
+    this.onLongPress,
   });
 
   final String avatarUrl;
@@ -234,6 +296,9 @@ class _Row extends StatelessWidget {
   final String time;
   final bool unread;
   final VoidCallback onTap;
+
+  /// Holding the row opens the chat options.
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -296,6 +361,7 @@ class _Row extends StatelessWidget {
           ],
         ),
         onTap: onTap,
+        onLongPress: onLongPress,
       ),
     );
   }

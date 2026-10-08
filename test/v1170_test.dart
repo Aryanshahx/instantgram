@@ -126,20 +126,12 @@ void main() {
       await tester.tap(find.text('open'));
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump(const Duration(milliseconds: 400));
-      await tester.tap(find.text('Free music'));
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump(const Duration(milliseconds: 100));
-      expect(terms, ['']);
-      expect(find.byKey(const ValueKey('musicGenres')), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('genre_Pop')));
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump(const Duration(milliseconds: 100));
-      expect(terms, ['', 'Pop']);
-      expect(find.text('Song for Pop'), findsOneWidget);
-      final field = tester.widget<TextField>(
-        find.byKey(const ValueKey('musicSearch')),
-      );
-      expect(field.controller!.text, 'Pop');
+      // the tab is gone: free music was not working, and it is not offered any more
+      expect(find.text('Free music'), findsNothing);
+      expect(find.byKey(const ValueKey('musicGenres')), findsNothing);
+      expect(find.byKey(const ValueKey('musicSearch')), findsNothing);
+      expect(find.byKey(const ValueKey('musicTab0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('musicTab1')), findsOneWidget);
     });
   });
 }

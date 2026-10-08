@@ -10,7 +10,6 @@ import '../models/music.dart';
 import '../models/post.dart';
 import '../services/device_audio.dart';
 import '../services/itunes_service.dart';
-import '../services/online_music_service.dart';
 import '../services/music_player.dart';
 import 'state_views.dart';
 
@@ -171,10 +170,6 @@ const String kPhoneNote =
 const String kInstantNote =
     'Picked rows, refreshed from Apple. Real songs, 30 second previews. You can also use your own audio: open "My phone" and choose a file.';
 
-/// What the "Hit songs" tab says above the search box.
-const String kAppleNote =
-    '30 second previews from Apple. A clip with a hit song is cut to 30 seconds and the song replaces its sound. Your own sound instead? Use "My phone".';
-
 Future<MusicTrack?> pickMusic(
   BuildContext context, {
   String? currentId,
@@ -205,20 +200,10 @@ class _MusicSheetState extends State<_MusicSheet> {
   String? _playingId;
   String? _loadingId;
 
-  // tabs: 0 = my phone, 1 = InstantGram audio (picked rows), 2 = hit songs (Apple),
-  // 3 = free music
+  // tabs: 0 = my phone (your own audio), 1 = InstantGram audio (picked rows)
   int _tab = 0;
   MusicTrack? _mine;
   bool _importing = false;
-  final TextEditingController _term = TextEditingController();
-  final ScrollController _scroll = ScrollController();
-  Timer? _debounce;
-  List<MusicTrack> _found = [];
-  bool _searching = false;
-  bool _more = false;
-  int _nextOffset = 0;
-  String? _searchError;
-  int _searchGen = 0;
   List<StationTracks> _stations = [];
   bool _curLoading = false;
   Object? _curError;
@@ -226,21 +211,10 @@ class _MusicSheetState extends State<_MusicSheet> {
   @override
   void initState() {
     super.initState();
-    final cur = widget.currentId ?? '';
     _mine = widget.mine;
-    _tab = cur.startsWith(kApplePrefix)
-        ? 2
-        : cur.startsWith(kOnlinePrefix)
-        ? 3
-        : 0;
-    _scroll.addListener(() {
-      if (_scroll.position.extentAfter < 300) _loadMore();
-    });
-    if (_tab == 1) {
-      _loadCurated();
-    } else if (_tab != 0) {
-      _search();
-    }
+    // An older post can carry a song from the tabs that are gone (it: or ov:). It keeps
+    // playing; it is just not offered for new posts any more.
+    _tab = 0;
   }
 
   /// Fills the InstantGram audio tab (kept for 30 minutes inside the service).
@@ -261,37 +235,6 @@ class _MusicSheetState extends State<_MusicSheet> {
       setState(() {
         _curLoading = false;
         _curError = e;
-      });
-    }
-  }
-
-  Future<void> _search({bool more = false}) async {
-    final gen = ++_searchGen;
-    setState(() {
-      _searching = true;
-      _searchError = null;
-      if (!more) _found = [];
-    });
-    try {
-      final offset = more ? _nextOffset : 0;
-      final page = _tab == 2
-          ? await ItunesService.instance.search(_term.text, offset: offset)
-          : await OnlineMusicService.instance.search(
-              _term.text,
-              offset: offset,
-            );
-      if (!mounted || gen != _searchGen) return;
-      setState(() {
-        _found = more ? [..._found, ...page.tracks] : page.tracks;
-        _more = page.hasMore;
-        _nextOffset = page.next;
-        _searching = false;
-      });
-    } catch (e) {
-      if (!mounted || gen != _searchGen) return;
-      setState(() {
-        _searching = false;
-        _searchError = friendlyError(e);
       });
     }
   }
@@ -319,13 +262,6 @@ class _MusicSheetState extends State<_MusicSheet> {
       setState(() => _importing = false);
       showToast(context, friendlyError(e));
     }
-  }
-
-  void _loadMore() {
-    if (_tab == 0 || _tab == 1 || _searching || !_more || _searchError != null) {
-      return;
-    }
-    _search(more: true);
   }
 
   Future<void> _preview(MusicTrack t) async {
@@ -370,9 +306,7 @@ class _MusicSheetState extends State<_MusicSheet> {
 
   @override
   void dispose() {
-    _debounce?.cancel();
-    _term.dispose();
-    _scroll.dispose();
+
     _player?.dispose();
     super.dispose();
   }
@@ -443,22 +377,8 @@ class _MusicSheetState extends State<_MusicSheet> {
         key: ValueKey('musicTab$i'),
         onTap: () {
           if (_tab == i) return;
-          _debounce?.cancel();
-          _searchGen++;
-          _term.clear();
-          setState(() {
-            _tab = i;
-            _found = [];
-            _more = false;
-            _nextOffset = 0;
-            _searching = false;
-            _searchError = null;
-          });
-          if (i == 1) {
-            _loadCurated();
-          } else if (i != 0) {
-            _search();
-          }
+          setState(() => _tab = i);
+          if (i == 1 && _stations.isEmpty && !_curLoading) _loadCurated();
         },
         child: Container(
           height: 38,
@@ -488,8 +408,6 @@ class _MusicSheetState extends State<_MusicSheet> {
         children: [
           chip(0, 'My phone'),
           chip(1, 'InstantGram audio'),
-          chip(2, 'Hit songs'),
-          chip(3, 'Free music'),
         ],
       ),
     );
@@ -616,124 +534,6 @@ class _MusicSheetState extends State<_MusicSheet> {
     );
   }
 
-  Widget _onlineList() {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-          child: TextField(
-            key: const ValueKey('musicSearch'),
-            controller: _term,
-            textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              hintText: 'Search songs, moods, artists',
-              prefixIcon: const Icon(Icons.search_rounded),
-              suffixIcon: _term.text.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.close_rounded),
-                      onPressed: () {
-                        _term.clear();
-                        _search();
-                      },
-                    ),
-            ),
-            onChanged: (_) {
-              _debounce?.cancel();
-              _debounce = Timer(const Duration(milliseconds: 450), _search);
-              setState(() {});
-            },
-            onSubmitted: (_) => _search(),
-          ),
-        ),
-        if (_tab == 2)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-            child: Text(
-              kAppleNote,
-              key: const ValueKey('appleNote'),
-              style: TextStyle(color: context.muted, fontSize: 12),
-            ),
-          ),
-        SizedBox(
-          height: 40,
-          child: ListView(
-            key: const ValueKey('musicGenres'),
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-            children: [
-              for (final g in kMusicGenres)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    key: ValueKey('genre_$g'),
-                    label: Text(g),
-                    selected:
-                        _term.text.trim().toLowerCase() == g.toLowerCase(),
-                    onSelected: (_) {
-                      _debounce?.cancel();
-                      _term.text = g;
-                      _term.selection = TextSelection.collapsed(
-                        offset: g.length,
-                      );
-                      setState(() {});
-                      _search();
-                    },
-                  ),
-                ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: _searchError != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(_searchError!, textAlign: TextAlign.center),
-                        const SizedBox(height: 12),
-                        OutlinedButton(
-                          onPressed: _search,
-                          child: const Text('Try again'),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              : _found.isEmpty
-              ? Center(
-                  child: _searching
-                      ? const CircularProgressIndicator()
-                      : Text(
-                          'No tracks found',
-                          style: TextStyle(color: context.muted),
-                        ),
-                )
-              : ListView.builder(
-                  controller: _scroll,
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
-                  itemCount: _found.length + (_searching ? 1 : 0),
-                  itemBuilder: (context, i) {
-                    if (i >= _found.length) {
-                      return const Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Center(child: CircularProgressIndicator()),
-                      );
-                    }
-                    final t = _found[i];
-                    final len = t.seconds > 0
-                        ? '  \u00b7  ${formatDuration(t.seconds)}'
-                        : '';
-                    return _row(t, '${t.artist}$len');
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final h = MediaQuery.sizeOf(context).height;
@@ -754,11 +554,7 @@ class _MusicSheetState extends State<_MusicSheet> {
             ),
             _tabs(),
             Expanded(
-              child: _tab == 0
-                  ? _phoneTab()
-                  : _tab == 1
-                  ? _instantTab()
-                  : _onlineList(),
+              child: _tab == 0 ? _phoneTab() : _instantTab(),
             ),
           ],
         ),
@@ -766,21 +562,3 @@ class _MusicSheetState extends State<_MusicSheet> {
     );
   }
 }
-
-/// Quick searches under the search box of the free music tab.
-const List<String> kMusicGenres = [
-  'Bollywood',
-  'Punjabi',
-  'Chill',
-  'Lo-fi',
-  'Pop',
-  'Hip hop',
-  'Electronic',
-  'Rock',
-  'Happy',
-  'Sad',
-  'Cinematic',
-  'Acoustic',
-  'Dance',
-  'Jazz',
-];

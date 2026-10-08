@@ -138,11 +138,13 @@ service cloud.firestore {
         && request.auth.uid in request.resource.data.members
         && request.resource.data.members[0] < request.resource.data.members[1]
         && chatId == request.resource.data.members[0] + '_' + request.resource.data.members[1];
-      // members update the preview and the "seen" times, never the member list
+      // members update the preview, the "seen" times and their own chat settings
+      // (pin, mute calls, mute messages), never the member list
       allow update: if signedIn()
         && request.auth.uid in resource.data.members
-        && onlyChanges(['lastText', 'lastAt', 'lastSender', 'seen', 'pinnedId', 'pinnedPreview', 'pinnedBy']);
-      allow delete: if false;
+        && onlyChanges(['lastText', 'lastAt', 'lastSender', 'seen', 'pinnedId', 'pinnedPreview', 'pinnedBy', 'pinned', 'muteCalls', 'muteMessages']);
+      // deleting a chat from the inbox (the app removes the messages first)
+      allow delete: if signedIn() && request.auth.uid in resource.data.members;
 
       match /messages/{messageId} {
         allow read: if signedIn()
@@ -177,7 +179,10 @@ service cloud.firestore {
               && request.resource.data.deleted == true
               && onlyChanges(['deleted', 'text', 'mediaUrl', 'postThumb', 'postTitle', 'lat', 'lng', 'replyTo', 'pinned']))
           );
-        allow delete: if false;
+        // the sender removes a message, and a member emptying the chat removes them all
+        allow delete: if signedIn()
+          && (resource.data.senderId == request.auth.uid
+              || request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.members);
       }
     }
 

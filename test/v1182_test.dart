@@ -137,18 +137,17 @@ void main() {
   });
 
   group('the audio sheet', () {
-    testWidgets('four tabs: phone, InstantGram audio, hit songs, free music', (
-      tester,
-    ) async {
+    testWidgets('two tabs: my phone and InstantGram audio', (tester) async {
       await _open(tester);
       expect(find.byKey(const ValueKey('musicTab0')), findsOneWidget);
       expect(find.byKey(const ValueKey('musicTab1')), findsOneWidget);
-      expect(find.byKey(const ValueKey('musicTab2')), findsOneWidget);
-      expect(find.byKey(const ValueKey('musicTab3')), findsOneWidget);
       expect(find.text('My phone'), findsOneWidget);
       expect(find.text('InstantGram audio'), findsOneWidget);
-      expect(find.text('Hit songs'), findsOneWidget);
-      expect(find.text('Free music'), findsOneWidget);
+      // the search tabs are gone: they were not working
+      expect(find.byKey(const ValueKey('musicTab2')), findsNothing);
+      expect(find.byKey(const ValueKey('musicTab3')), findsNothing);
+      expect(find.text('Hit songs'), findsNothing);
+      expect(find.text('Free music'), findsNothing);
     });
 
     testWidgets('the InstantGram tab shows the picked rows', (tester) async {
@@ -252,14 +251,18 @@ void main() {
       expect(find.byKey(const ValueKey('instantList')), findsOneWidget);
     });
 
-    testWidgets('an old hit song opens on the Hit songs tab', (tester) async {
+    testWidgets('a song from a tab that is gone still opens the sheet', (
+      tester,
+    ) async {
       ItunesService.instance.backend = (url) async => _answer('back', 3);
       await _open(
         tester,
         current: MusicTrack.apple(trackId: '4242', title: 'Old'),
       );
-      expect(find.byKey(const ValueKey('appleNote')), findsOneWidget);
+      // the sheet opens on your own audio; the old song keeps playing in the post
+      expect(find.byKey(const ValueKey('musicTab0')), findsOneWidget);
       expect(find.byKey(const ValueKey('instantList')), findsNothing);
+      expect(find.byKey(const ValueKey('appleNote')), findsNothing);
     });
   });
 }

@@ -214,16 +214,17 @@ class AnalyticsService {
   static const int maxPeople = 120;
 
   /// Tests replace this: it gets the number of days and returns the numbers.
-  Future<Insights> Function(int days, String uid)? backend;
+  Future<Insights> Function(int days, String uid, String? postId)? backend;
 
   FirebaseFirestore get _db => FirebaseFirestore.instance;
   String get _uid => FirebaseAuth.instance.currentUser!.uid;
 
-  Future<Insights> load(int days, {String? uid}) async {
+  /// [postId] gives the numbers of that one post or clip (no date filter on it).
+  Future<Insights> load(int days, {String? uid, String? postId}) async {
     final back = backend;
     // The tests answer before anything asks Firebase who is signed in.
-    if (back != null) return back(days, uid ?? _safeUid());
-    return _read(days, uid ?? _uid);
+    if (back != null) return back(days, uid ?? _safeUid(), postId);
+    return _read(days, uid ?? _uid, postId);
   }
 
   /// Who is signed in, or '' when there is nobody (tests, signed out).
@@ -235,20 +236,25 @@ class AnalyticsService {
     }
   }
 
-  Future<Insights> _read(int days, String me) async {
+  Future<Insights> _read(int days, String me, String? postId) async {
     final from = Insights.dayOf(
       DateTime.now().subtract(Duration(days: days - 1)),
     );
 
-    // 1. your posts of the period
-    final snap = await PostService.instance
-        .userPostsQuery(me)
-        .limit(maxPosts)
-        .get();
-    final mine = snap.docs
-        .map(Post.fromDoc)
-        .where((p) => !p.createdAt.isBefore(from))
-        .toList();
+    // 1. one post, or your posts of the period
+    final mine = <Post>[];
+    if (postId != null && postId.isNotEmpty) {
+      final doc = await _db.collection('posts').doc(postId).get();
+      if (doc.exists) mine.add(Post.fromDoc(doc));
+    } else {
+      final snap = await PostService.instance
+          .userPostsQuery(me)
+          .limit(maxPosts)
+          .get();
+      mine.addAll(
+        snap.docs.map(Post.fromDoc).where((p) => !p.createdAt.isBefore(from)),
+      );
+    }
 
     // 2. who watched each of them, and when
     final insights = <PostInsight>[];

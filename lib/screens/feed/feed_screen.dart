@@ -92,7 +92,7 @@ class _FeedHeader extends StatelessWidget {
                     final unread = snap.data ?? 0;
                     return IconButton(
                       key: const ValueKey('activityButton'),
-                      tooltip: 'Activity',
+                      tooltip: 'Notifications',
                       icon: Stack(
                         clipBehavior: Clip.none,
                         children: [
