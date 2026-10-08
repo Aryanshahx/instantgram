@@ -173,7 +173,7 @@ service cloud.firestore {
             'senderId', 'type', 'text', 'createdAt', 'mediaUrl', 'width', 'height',
             'duration', 'lat', 'lng', 'postId', 'postThumb', 'postTitle',
             'postAuthor', 'postIsClip', 'replyTo', 'forwarded', 'callVideo', 'callStatus',
-            'vanish', 'expireAt'])
+            'vanish', 'expireAt', 'font'])
           && request.resource.data.get('type', 'text') in ['text', 'image', 'gif', 'voice', 'location', 'post', 'call', 'system']
           && request.resource.data.get('vanish', '') in ['', 'seen', '24h', '7d']
           && (!('expireAt' in request.resource.data) || request.resource.data.expireAt is timestamp)

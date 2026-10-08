@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../core/fonts.dart';
 import '../core/theme.dart';
 import '../models/call.dart';
 import '../models/chat.dart';
@@ -245,7 +246,10 @@ class MessageBubble extends StatelessWidget {
         alignment: Alignment.centerLeft,
         child: Text(
           m?.text ?? text,
-          style: TextStyle(color: fg, fontSize: 15.5, height: 1.3),
+          style: maybeAppFont(
+            m?.font ?? '',
+            TextStyle(color: fg, fontSize: 15.5, height: 1.3),
+          ),
         ),
       );
     }

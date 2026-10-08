@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
+import '../core/fonts.dart';
 import '../models/chat.dart';
 import '../models/vanish.dart';
 import 'media_server.dart';
@@ -146,7 +147,13 @@ class ChatService {
       .map((s) => s.docs.map(ChatMessage.fromDoc).toList());
 
   /// Sends a plain text message.
-  Future<void> send(String otherUid, String text, {ReplyRef? replyTo}) async {
+  /// [font] is a kAppFonts id: the other person sees the same font ('' = normal).
+  Future<void> send(
+    String otherUid,
+    String text, {
+    ReplyRef? replyTo,
+    String font = '',
+  }) async {
     final body = text.trim();
     if (body.isEmpty) return;
     if (body.length > maxLength) {
@@ -154,7 +161,11 @@ class ChatService {
     }
     await _write(
       otherUid,
-      {'type': MsgType.text, 'text': body},
+      {
+        'type': MsgType.text,
+        'text': body,
+        if (cleanFontId(font).isNotEmpty) 'font': cleanFontId(font),
+      },
       body,
       replyTo: replyTo,
     );

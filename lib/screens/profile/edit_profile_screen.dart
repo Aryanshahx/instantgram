@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/errors.dart';
+import '../../core/fonts.dart';
 import '../../core/media_url.dart';
 import '../../core/responsive.dart';
 import '../../core/theme.dart';
@@ -13,6 +14,7 @@ import '../../models/app_user.dart';
 import '../../services/media_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/font_picker.dart';
 
 /// Turns what the user typed into a link that can be opened (adds https:// when missing).
 /// Returns null when it is not a usable web address.
@@ -38,6 +40,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late final _name = TextEditingController(text: widget.user.fullName);
   late final _username = TextEditingController(text: widget.user.username);
   late final _bio = TextEditingController(text: widget.user.bio);
+  late String _bioFont = widget.user.bioFont;
   late final List<TextEditingController> _links = [
     for (var i = 0; i < 3; i++)
       TextEditingController(
@@ -129,6 +132,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       await UserService.instance.updateProfile(
         fullName: _name.text,
         bio: _bio.text,
+        bioFont: _bioFont,
         newPhoto: _photo,
         removePhoto: _removePhoto && _photo == null,
         newBanner: _banner,
@@ -336,7 +340,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               maxLength: 150,
               maxLines: 4,
               minLines: 3,
+              style: maybeAppFont(_bioFont, const TextStyle(fontSize: 16)),
               decoration: const InputDecoration(labelText: 'Bio'),
+            ),
+            Text(
+              'Bio font (everyone sees it)',
+              style: TextStyle(color: context.muted, fontSize: 12),
+            ),
+            FontChipRow(
+              keyPrefix: 'bioFont',
+              selected: _bioFont,
+              enabled: !_saving,
+              onChanged: (f) => setState(() => _bioFont = f),
             ),
             _section(context, 'Links'),
             for (var i = 0; i < _links.length; i++) ...[

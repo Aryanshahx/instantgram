@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/fonts.dart';
+
 int _int(Object? v) => v is num ? v.toInt() : 0;
 String _str(Object? v) => v is String ? v : '';
 
@@ -9,6 +11,7 @@ class AppUser {
     required this.username,
     this.fullName = '',
     this.bio = '',
+    this.bioFont = '',
     this.photoUrl = '',
     this.bannerUrl = '',
     this.links = const [],
@@ -27,6 +30,9 @@ class AppUser {
   final String username;
   final String fullName;
   final String bio;
+
+  /// Font of the bio (an id from kAppFonts; '' = normal). Everyone sees it.
+  final String bioFont;
   final String photoUrl;
 
   /// Cover picture of the profile page (a stored reference like photoUrl; '' = none).
@@ -67,6 +73,7 @@ class AppUser {
       username: _str(m['username']),
       fullName: _str(m['fullName']),
       bio: _str(m['bio']),
+      bioFont: cleanFontId(m['bioFont']),
       photoUrl: _str(m['photoUrl']),
       bannerUrl: _str(m['bannerUrl']),
       links: m['links'] is List

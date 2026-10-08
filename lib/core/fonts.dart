@@ -47,3 +47,7 @@ TextStyle withAppFont(String id, TextStyle base) {
     fontWeight: f.weight ?? FontWeight.w400,
   );
 }
+
+/// For bios and messages: '' (or an unknown id) keeps [base] as it is.
+TextStyle maybeAppFont(String id, TextStyle base) =>
+    cleanFontId(id).isEmpty ? base : withAppFont(id, base);

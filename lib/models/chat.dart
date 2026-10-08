@@ -4,6 +4,8 @@ import '../core/media_url.dart';
 import 'call.dart';
 import 'vanish.dart';
 
+import '../core/fonts.dart';
+
 /// The id of the chat between two people: both uids, in alphabetical order. The same two
 /// people always get the same chat, whoever writes first.
 String chatIdFor(String a, String b) =>
@@ -231,11 +233,15 @@ class ChatMessage {
     this.callStatus = '',
     this.vanish = '',
     this.expireAt,
+    this.font = '',
   });
 
   final String id;
   final String senderId;
   final String text;
+
+  /// Font of a text message (kAppFonts id; '' = normal). Both people see it.
+  final String font;
   final DateTime createdAt;
 
   /// Not confirmed by the server yet.
@@ -363,6 +369,7 @@ class ChatMessage {
       callVideo: m['callVideo'] == true,
       callStatus: s(m['callStatus']),
       vanish: Vanish.isValid(s(m['vanish'])) ? s(m['vanish']) : '',
+      font: cleanFontId(m['font']),
       expireAt: m['expireAt'] is Timestamp
           ? (m['expireAt'] as Timestamp).toDate()
           : null,

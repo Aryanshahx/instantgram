@@ -109,6 +109,7 @@ flutter:
     - assets/sounds/
     - assets/music/
     - assets/logo/
+    - assets/app_icons/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

@@ -27,6 +27,7 @@ import io.flutter.plugin.common.MethodChannel.Result;
  */
 public class AudioMergePlugin implements FlutterPlugin, MethodCallHandler {
     private MethodChannel channel;
+    private MethodChannel icons;
     private final ExecutorService pool = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
 
@@ -34,6 +35,8 @@ public class AudioMergePlugin implements FlutterPlugin, MethodCallHandler {
     public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
         channel = new MethodChannel(binding.getBinaryMessenger(), "com.hypertechlabs.audio_merge");
         channel.setMethodCallHandler(this);
+        icons = new MethodChannel(binding.getBinaryMessenger(), "instantgram/app_icon");
+        icons.setMethodCallHandler(new AppIcon(binding.getApplicationContext()));
         createPushChannels(binding.getApplicationContext());
     }
 
@@ -169,5 +172,7 @@ public class AudioMergePlugin implements FlutterPlugin, MethodCallHandler {
     public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
         if (channel != null) channel.setMethodCallHandler(null);
         channel = null;
+        if (icons != null) icons.setMethodCallHandler(null);
+        icons = null;
     }
 }

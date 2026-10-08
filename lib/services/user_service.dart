@@ -8,6 +8,7 @@ import '../models/app_user.dart';
 import 'safety_service.dart';
 import 'notification_service.dart';
 import '../core/errors.dart';
+import '../core/fonts.dart';
 import 'media_server.dart';
 
 class UserService {
@@ -142,6 +143,7 @@ class UserService {
   Future<void> updateProfile({
     required String fullName,
     required String bio,
+    String? bioFont,
     File? newPhoto,
     bool removePhoto = false,
     File? newBanner,
@@ -155,6 +157,7 @@ class UserService {
     final data = <String, dynamic>{
       'fullName': fullName.trim(),
       'bio': bio.trim(),
+      if (bioFont != null) 'bioFont': cleanFontId(bioFont),
     };
     if (links != null) {
       data['links'] = links.take(3).toList();

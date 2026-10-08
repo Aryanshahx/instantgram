@@ -65,6 +65,10 @@ class AppPrefs {
   set language(String v) => _p?.setString('lang', v);
 
   // ---- accessibility
+  /// The font last picked for chat messages ('' = normal).
+  String get chatFont => _p?.getString('chatFont') ?? '';
+  set chatFont(String v) => _p?.setString('chatFont', v);
+
   double get textScale => (_p?.getDouble('textScale') ?? 1.0).clamp(0.8, 1.6);
   set textScale(double v) => _p?.setDouble('textScale', v);
   bool get boldText => _p?.getBool('boldText') ?? false;

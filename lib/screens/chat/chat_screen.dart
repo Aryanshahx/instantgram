@@ -21,7 +21,10 @@ import '../../services/photo_edit.dart';
 import '../../services/presence_service.dart';
 import '../../services/user_service.dart';
 import '../../services/voice_recorder.dart';
+import '../../core/fonts.dart';
+import '../../services/app_prefs.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/font_picker.dart';
 import '../../widgets/location_card.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/pull_hold.dart';
@@ -183,11 +186,13 @@ class _ChatScreenState extends State<ChatScreen> {
     final reply = _replyRef();
     setState(() => _replying = null);
     _text.clear();
-    _service.send(widget.otherUid, body, replyTo: reply).catchError((Object e) {
-      if (!mounted) return;
-      if (_text.text.isEmpty) _text.text = body; // give the words back
-      showToast(context, friendlyError(e));
-    });
+    _service
+        .send(widget.otherUid, body, replyTo: reply, font: _font)
+        .catchError((Object e) {
+          if (!mounted) return;
+          if (_text.text.isEmpty) _text.text = body; // give the words back
+          showToast(context, friendlyError(e));
+        });
   }
 
   Future<void> _sendPhoto(ImageSource source) => _guard(() async {
@@ -1011,6 +1016,15 @@ class _ChatScreenState extends State<ChatScreen> {
     ),
   );
 
+  /// Font for my text messages (kept for next time).
+  String _font = cleanFontId(AppPrefs.instance.chatFont);
+  bool _fontRow = false;
+
+  void _setFont(String f) {
+    setState(() => _font = f);
+    AppPrefs.instance.chatFont = f;
+  }
+
   Widget _composer(BuildContext context) {
     if (_recording) return _recordingBar(context);
     final hasText = _text.text.trim().isNotEmpty;
@@ -1019,57 +1033,83 @@ class _ChatScreenState extends State<ChatScreen> {
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(10, 6, 12, 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(
-              width: 46,
-              height: 50,
-              child: IconButton(
-                key: const ValueKey('attachButton'),
-                onPressed: ready && _busy.isEmpty ? _attach : null,
-                icon: const Icon(Icons.add_circle_rounded, size: 30),
+            if (_fontRow)
+              FontChipRow(
+                key: const ValueKey('chatFontRow'),
+                keyPrefix: 'chatFont',
+                selected: _font,
+                onChanged: _setFont,
               ),
-            ),
-            Expanded(
-              child: TextField(
-                key: const ValueKey('chatInput'),
-                controller: _text,
-                focusNode: _focus,
-                minLines: 1,
-                maxLines: 5,
-                maxLength: ChatService.maxLength,
-                buildCounter:
-                    (
-                      _, {
-                      required currentLength,
-                      required isFocused,
-                      maxLength,
-                    }) => null,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(hintText: 'Message...'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            GestureDetector(
-              key: ValueKey(hasText ? 'sendButton' : 'micButton'),
-              onTap: hasText
-                  ? (ready ? _send : null)
-                  : (ready && _busy.isEmpty ? _startRecording : null),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  color: ready ? AppTheme.volt : context.cardHigh,
-                  shape: BoxShape.circle,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                SizedBox(
+                  width: 46,
+                  height: 50,
+                  child: IconButton(
+                    key: const ValueKey('attachButton'),
+                    onPressed: ready && _busy.isEmpty ? _attach : null,
+                    icon: const Icon(Icons.add_circle_rounded, size: 30),
+                  ),
                 ),
-                child: Icon(
-                  hasText ? Icons.send_rounded : Icons.mic_rounded,
-                  size: 23,
-                  color: ready ? AppTheme.ink : context.muted,
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('chatInput'),
+                    controller: _text,
+                    focusNode: _focus,
+                    minLines: 1,
+                    maxLines: 5,
+                    maxLength: ChatService.maxLength,
+                    buildCounter:
+                        (
+                          _, {
+                          required currentLength,
+                          required isFocused,
+                          maxLength,
+                        }) => null,
+                    textCapitalization: TextCapitalization.sentences,
+                    style: maybeAppFont(_font, const TextStyle(fontSize: 16)),
+                    decoration: InputDecoration(
+                      hintText: 'Message...',
+                      suffixIcon: IconButton(
+                        key: const ValueKey('chatFontButton'),
+                        tooltip: 'Font',
+                        onPressed: () => setState(() => _fontRow = !_fontRow),
+                        icon: Icon(
+                          Icons.text_fields_rounded,
+                          color: _font.isNotEmpty || _fontRow
+                              ? context.accentInk
+                              : null,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  key: ValueKey(hasText ? 'sendButton' : 'micButton'),
+                  onTap: hasText
+                      ? (ready ? _send : null)
+                      : (ready && _busy.isEmpty ? _startRecording : null),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: ready ? AppTheme.volt : context.cardHigh,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      hasText ? Icons.send_rounded : Icons.mic_rounded,
+                      size: 23,
+                      color: ready ? AppTheme.ink : context.muted,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),

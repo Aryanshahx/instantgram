@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../chat/chat_screen.dart';
 import '../story/story_composer.dart';
 import '../../core/app_events.dart';
+import '../../core/fonts.dart';
 import '../../core/l10n.dart';
 import '../../core/media_url.dart';
 import '../../core/theme.dart';
@@ -509,7 +510,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 10),
                 Text(
                   user.bio,
-                  style: const TextStyle(fontSize: 15, height: 1.35),
+                  key: const ValueKey('profileBio'),
+                  style: maybeAppFont(
+                    user.bioFont,
+                    const TextStyle(fontSize: 15, height: 1.35),
+                  ),
                 ),
               ],
               if (user.links.isNotEmpty) ...[

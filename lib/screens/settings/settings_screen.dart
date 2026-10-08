@@ -12,6 +12,7 @@ import '../profile/edit_profile_screen.dart';
 import '../profile/saved_posts_screen.dart';
 import 'account_screens.dart';
 import 'activity_screens.dart';
+import 'app_icon_screen.dart';
 import 'app_screens.dart';
 import 'delete_account_screen.dart';
 import 'push_settings_screen.dart';
@@ -145,6 +146,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'Accessibility',
           'text size bold motion dark light theme',
           (c, _) => openScreen(c, const AccessibilityScreen()),
+        ),
+        _Item(
+          'appIcon',
+          Icons.apps_rounded,
+          'App icon',
+          'logo launcher home screen colour theme',
+          (c, _) => openScreen(c, const AppIconScreen()),
         ),
         _Item(
           'language',
