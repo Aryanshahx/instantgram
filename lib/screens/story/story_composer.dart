@@ -9,6 +9,7 @@ import '../../core/config.dart';
 import '../../core/errors.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import '../../models/audience.dart';
 import '../../models/music.dart';
 import '../../models/story.dart';
 import '../../services/device_audio.dart';
@@ -16,6 +17,7 @@ import '../../services/media_service.dart';
 import '../../services/music_player.dart';
 import '../../services/story_service.dart';
 import '../post/video_editor_screen.dart';
+import '../../widgets/audience_sheet.dart';
 import '../../widgets/music_widgets.dart';
 import '../../widgets/overlay_tools.dart';
 import '../../widgets/story_overlays.dart';
@@ -230,6 +232,8 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
   bool _keepSound = true;
   bool _posting = false;
   bool _longer = false; // stays 48 hours instead of 24
+  StoryAudience _audience = const StoryAudience.everyone();
+  bool _spotlight = false; // first in followers' bar, glowing ring
   double _progress = 0;
   Size _canvas = const Size(360, 640);
   double _baseScale = 1;
@@ -389,6 +393,8 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
         musicArtist: sent?.artist ?? '',
         keepSound: _keepSound,
         longer: _longer,
+        audience: _audience,
+        spotlight: _spotlight,
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);
         },
@@ -425,7 +431,57 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
     );
   }
 
-  Widget _tool(IconData icon, String tip, VoidCallback onTap, {Key? key}) {
+  Future<void> _pickAudience() async {
+    final a = await pickStoryAudience(context, _audience);
+    if (a != null && mounted) setState(() => _audience = a);
+  }
+
+  void _toggleSpotlight() {
+    setState(() => _spotlight = !_spotlight);
+    showToast(
+      context,
+      _spotlight
+          ? 'Spotlight: shown first to your followers, with a glowing ring.'
+          : 'Spotlight off.',
+    );
+  }
+
+  Widget _badge(IconData icon, String text, Key key) => Container(
+    key: key,
+    margin: const EdgeInsets.only(bottom: 6),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    decoration: BoxDecoration(
+      color: AppTheme.volt,
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 15, color: AppTheme.ink),
+        const SizedBox(width: 5),
+        Flexible(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppTheme.ink,
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _tool(
+    IconData icon,
+    String tip,
+    VoidCallback onTap, {
+    Key? key,
+    bool active = false,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Tooltip(
@@ -436,11 +492,15 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
           child: Container(
             width: 46,
             height: 46,
-            decoration: const BoxDecoration(
-              color: Colors.black54,
+            decoration: BoxDecoration(
+              color: active ? AppTheme.volt : Colors.black54,
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, color: Colors.white, size: 24),
+            child: Icon(
+              icon,
+              color: active ? AppTheme.ink : Colors.white,
+              size: 24,
+            ),
           ),
         ),
       ),
@@ -529,7 +589,28 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
                     () => Navigator.of(context).pop(false),
                     key: const ValueKey('storyClose'),
                   ),
-                  const Spacer(),
+                  // who it is for / spotlight, so it is clear before sharing
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 10, 8, 0),
+                      child: Column(
+                        children: [
+                          if (!_audience.isEveryone)
+                            _badge(
+                              Icons.group_rounded,
+                              'Only ${_audience.label}',
+                              const ValueKey('storyAudienceBadge'),
+                            ),
+                          if (_spotlight)
+                            _badge(
+                              Icons.auto_awesome_rounded,
+                              'Spotlight',
+                              const ValueKey('storySpotlightBadge'),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
                   Column(
                     children: [
                       _tool(
@@ -559,6 +640,22 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
                           _toggleSound,
                           key: const ValueKey('storySound'),
                         ),
+                      _tool(
+                        _audience.isEveryone
+                            ? Icons.public_rounded
+                            : Icons.group_rounded,
+                        'Who can see it: ${_audience.label}',
+                        _pickAudience,
+                        key: const ValueKey('storyAudience'),
+                        active: !_audience.isEveryone,
+                      ),
+                      _tool(
+                        Icons.auto_awesome_rounded,
+                        'Spotlight',
+                        _toggleSpotlight,
+                        key: const ValueKey('storySpotlight'),
+                        active: _spotlight,
+                      ),
                     ],
                   ),
                 ],

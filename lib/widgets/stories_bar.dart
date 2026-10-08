@@ -111,6 +111,7 @@ class _StoriesBarState extends State<StoriesBar> {
             label: 'You',
             url: _me?.photoUrl ?? '',
             ring: mine != null,
+            glow: mine?.spotlight ?? false,
             plus: true,
             loading: _uploading,
             onTap: mine != null ? () => _open(0) : _addStory,
@@ -122,6 +123,7 @@ class _StoriesBarState extends State<StoriesBar> {
               label: g.username,
               url: g.photoUrl,
               ring: true,
+              glow: g.spotlight,
               onTap: () => _open(_groups.indexOf(g)),
               onLongPress: () => showStoryPeek(
                 context,
@@ -144,6 +146,7 @@ class _StoriesBarState extends State<StoriesBar> {
     bool loading = false,
     VoidCallback? onPlus,
     VoidCallback? onLongPress,
+    bool glow = false,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -157,7 +160,49 @@ class _StoriesBarState extends State<StoriesBar> {
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  UserAvatar(url: url, name: label, radius: 29, ring: ring),
+                  // spotlight: a glowing ring and a small star
+                  DecoratedBox(
+                    key: glow ? ValueKey('spotlight_$label') : null,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: glow
+                          ? [
+                              BoxShadow(
+                                color: AppTheme.volt.withValues(alpha: 0.75),
+                                blurRadius: 14,
+                                spreadRadius: 2,
+                              ),
+                            ]
+                          : null,
+                    ),
+                    child: UserAvatar(
+                      url: url,
+                      name: label,
+                      radius: 29,
+                      ring: ring,
+                    ),
+                  ),
+                  if (glow)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          color: AppTheme.volt,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Theme.of(context).scaffoldBackgroundColor,
+                            width: 2,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.auto_awesome_rounded,
+                          size: 12,
+                          color: AppTheme.ink,
+                        ),
+                      ),
+                    ),
                   if (loading)
                     const Positioned.fill(
                       child: Padding(

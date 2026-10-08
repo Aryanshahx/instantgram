@@ -200,3 +200,25 @@ test("story view: only the first view of a picked person, once", async () => {
   docs["stories/s1/views/a"].first = new Date(NOW - 3600_000);
   assert.equal((await notify({ kind: "storyView", storyId: "s1" }, ENV, "a", { fetch, now: NOW })).status, 403);
 });
+
+test("story view of a list-only moment reads privateStories", async () => {
+  forgetToken();
+  const docs = {
+    ...base(),
+    "privateStories/s9": { authorId: "b", audience: ["a", "b"] },
+    "privateStories/s9/views/a": { count: 1, first: recent, last: recent },
+    "storyAlerts/b": { uids: ["a"] },
+  };
+  const g = fakeGoogle(docs);
+  const fetch = async (url, init = {}) => {
+    if (init.method === "POST" || init.method === "PATCH") {
+      if (String(url).includes("/views/a")) assert.match(String(url), /privateStories\/s9\/views\/a/);
+      return new Response("{}");
+    }
+    return g.fetch(url, init);
+  };
+  const r = await notify({ kind: "storyView", storyId: "s9", col: "p" }, ENV, "a", { fetch, now: NOW });
+  assert.equal(r.body.sent, 2);
+  // without col it looks in stories (not there)
+  assert.equal((await notify({ kind: "storyView", storyId: "s9" }, ENV, "a", { fetch, now: NOW })).status, 403);
+});

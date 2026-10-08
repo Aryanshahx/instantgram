@@ -141,6 +141,11 @@ def world():
     db.put("pushTokens/dead", {"tokens": ["t"]})
     db.put("storyAlerts/dead", {"uids": ["amy"]})
     db.put("pushTokens/amy", {"tokens": ["t2"]})
+    db.put("privateStories/p1", {"authorId": "dead", "audience": ["dead", "amy"]})
+    db.put("privateStories/p1/views/amy", {"count": 1})
+    db.put("privateStories/p2", {"authorId": "amy", "audience": ["amy", "dead"]})
+    db.put("privateStories/p2/views/dead", {"count": 1})
+    db.put("users/dead/audiences/l1", {"name": "Close", "members": ["amy"]})
     # chats: with amy (both wrote; dead wrote last), with bob (only dead wrote)
     db.put("chats/amy_dead", {"members": ["amy", "dead"], "lastText": "bye", "lastSender": "dead"})
     db.put("chats/amy_dead/messages/m1", {"senderId": "amy", "text": "hi", "createdAt": t(1)})
@@ -184,6 +189,11 @@ class WipeTest(unittest.TestCase):
         self.assertFalse(db.has("pushTokens/dead"))
         self.assertFalse(db.has("storyAlerts/dead"))
         self.assertTrue(db.has("pushTokens/amy"))
+        self.assertFalse(db.has("privateStories/p1"))
+        self.assertFalse(db.has("privateStories/p1/views/amy"))
+        self.assertTrue(db.has("privateStories/p2"))
+        self.assertFalse(db.has("privateStories/p2/views/dead"))
+        self.assertFalse(db.has("users/dead/audiences/l1"))
         # chats: amy keeps hers (her message stays, preview updated), bob's is gone
         self.assertTrue(db.has("chats/amy_dead"))
         self.assertTrue(db.has("chats/amy_dead/messages/m1"))
@@ -213,7 +223,7 @@ class WipeTest(unittest.TestCase):
 
         self.assertEqual(r.posts, 1)
         self.assertEqual(r.comments, 1 + 2)
-        self.assertEqual(r.stories, 1)
+        self.assertEqual(r.stories, 2)  # one public, one for a list
         self.assertEqual(r.messages, 2)
         self.assertEqual(r.chats_removed, 1)
         self.assertEqual(r.chats_kept, 1)

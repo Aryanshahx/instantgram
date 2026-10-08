@@ -16,6 +16,7 @@ import 'app_screens.dart';
 import 'delete_account_screen.dart';
 import 'push_settings_screen.dart';
 import 'story_alerts_screen.dart';
+import 'audience_lists_screen.dart';
 import 'settings_widgets.dart';
 
 class _Item {
@@ -123,6 +124,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'Notifications',
           'push alerts phone sound messages calls likes',
           (c, _) => openScreen(c, const PushSettingsScreen()),
+        ),
+        _Item(
+          'audiences',
+          Icons.group_outlined,
+          'Audience lists',
+          'close friends list share moment story people',
+          (c, _) => openScreen(c, const AudienceListsScreen()),
         ),
         _Item(
           'storyAlerts',

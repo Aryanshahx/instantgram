@@ -83,6 +83,24 @@ flutter:
   uses-material-design: true
 
   fonts:
+    - family: Bebas
+      fonts:
+        - asset: assets/fonts/BebasNeue-Regular.ttf
+    - family: Marker
+      fonts:
+        - asset: assets/fonts/PermanentMarker-Regular.ttf
+    - family: Lobster
+      fonts:
+        - asset: assets/fonts/Lobster-Regular.ttf
+    - family: Caveat
+      fonts:
+        - asset: assets/fonts/Caveat-Variable.ttf
+    - family: Playfair
+      fonts:
+        - asset: assets/fonts/PlayfairDisplay-Variable.ttf
+    - family: SpaceMono
+      fonts:
+        - asset: assets/fonts/SpaceMono-Bold.ttf
     - family: Wordmark
       fonts:
         - asset: assets/fonts/Pacifico-Regular.ttf

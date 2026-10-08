@@ -7,27 +7,36 @@ import '../services/story_views.dart';
 import 'avatar.dart';
 
 /// Opens the list of people who watched my moment [storyId].
-Future<void> showStoryViewers(BuildContext context, String storyId) =>
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      builder: (_) => FractionallySizedBox(
-        heightFactor: 0.75,
-        child: StoryViewersSheet(storyId: storyId),
-      ),
-    );
+Future<void> showStoryViewers(
+  BuildContext context,
+  String storyId, {
+  String collection = 'stories',
+}) => showModalBottomSheet<void>(
+  context: context,
+  isScrollControlled: true,
+  useSafeArea: true,
+  backgroundColor: Theme.of(context).colorScheme.surface,
+  shape: const RoundedRectangleBorder(
+    borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+  ),
+  builder: (_) => FractionallySizedBox(
+    heightFactor: 0.75,
+    child: StoryViewersSheet(storyId: storyId, collection: collection),
+  ),
+);
 
 /// Who watched, when (first and last time), how often (rewatches), a search box, and a bell
 /// per person: "tell me when they watch my moments".
 class StoryViewersSheet extends StatefulWidget {
-  const StoryViewersSheet({super.key, required this.storyId, this.now});
+  const StoryViewersSheet({
+    super.key,
+    required this.storyId,
+    this.collection = 'stories',
+    this.now,
+  });
 
   final String storyId;
+  final String collection;
 
   /// Tests: a fixed "now" for the time labels.
   final DateTime? now;
@@ -58,7 +67,10 @@ class _StoryViewersSheetState extends State<StoryViewersSheet> {
   Future<void> _load() async {
     try {
       final r = await Future.wait<Object>([
-        StoryViews.instance.viewers(widget.storyId),
+        StoryViews.instance.viewers(
+          widget.storyId,
+          collection: widget.collection,
+        ),
         StoryViews.instance.alerts(),
       ]);
       if (!mounted) return;

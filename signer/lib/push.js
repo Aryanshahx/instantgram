@@ -8,7 +8,7 @@
 //   POST /api/notify {kind:"message", chatId, messageId}
 //   POST /api/notify {kind:"call", callId}
 //   POST /api/notify {kind:"activity", to, itemId}
-//   POST /api/notify {kind:"storyView", storyId}   (first view; only people the author picked)
+//   POST /api/notify {kind:"storyView", storyId, col?:"p"}   (first view; only people the author picked)
 //
 // Phones: pushTokens/{uid} = {tokens:[...], off:false}
 // Setting (Vercel): FIREBASE_SERVICE_ACCOUNT = the service-account JSON (plain or base64)
@@ -232,9 +232,10 @@ export async function notify(body, env, uid, deps = {}) {
   } else if (kind === "storyView") {
     const { storyId } = body;
     if (!SAFE_ID.test(storyId || "")) return bad("storyId is needed.");
-    const story = await db.get(`stories/${storyId}`);
+    const col = body.col === "p" ? "privateStories" : "stories"; // p = for one audience list
+    const story = await db.get(`${col}/${storyId}`);
     if (!story || !story.authorId) return bad("No such moment.", 403);
-    const viewPath = `stories/${storyId}/views/${uid}`;
+    const viewPath = `${col}/${storyId}/views/${uid}`;
     const view = await db.get(viewPath);
     if (!view || !fresh(view.first, nowMs)) return bad("No such view.", 403);
     if (view.alerted === true) return ok("already");

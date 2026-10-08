@@ -46,7 +46,7 @@ class StoryViews {
       final me = _me;
       if (me.isEmpty || story.authorId == me) return;
       final ref = _db
-          .collection('stories')
+          .collection(story.collection)
           .doc(story.id)
           .collection('views')
           .doc(me);
@@ -66,7 +66,7 @@ class StoryViews {
           'count': 1,
         });
         // first view: the author hears about it if they asked for alerts about me
-        PushService.instance.storyView(story.id);
+        PushService.instance.storyView(story.id, limited: story.limited);
       }
     } catch (_) {
       // a missing view is not worth an error on screen
@@ -74,11 +74,14 @@ class StoryViews {
   }
 
   /// Everyone who watched my moment, newest first.
-  Future<List<StoryView>> viewers(String storyId) async {
+  Future<List<StoryView>> viewers(
+    String storyId, {
+    String collection = 'stories',
+  }) async {
     final b = listBackend;
     if (b != null) return StoryView.sorted(await b(storyId));
     final snap = await _db
-        .collection('stories')
+        .collection(collection)
         .doc(storyId)
         .collection('views')
         .limit(1000)

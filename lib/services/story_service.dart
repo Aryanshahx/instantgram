@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../core/media_url.dart';
+import '../models/audience.dart';
 import '../models/music.dart';
 import '../models/story.dart';
 import '../models/story_view.dart';
@@ -31,14 +32,15 @@ class StoryService {
           .orderBy('expiresAt')
           .limit(100)
           .get(),
+      _forMe(),
     ]);
     final following = results[0] as List<String>;
     final snap = results[1] as QuerySnapshot<Map<String, dynamic>>;
+    final listOnly = results[2] as List<Story>;
     final allowed = {...following, _uid};
 
     final byAuthor = <String, List<Story>>{};
-    for (final d in snap.docs) {
-      final s = Story.fromDoc(d);
+    for (final s in [...snap.docs.map(Story.fromDoc), ...listOnly]) {
       if (!allowed.contains(s.authorId)) continue;
       if (isRemovedStorageRef(s.imageRef)) continue;
       if (!s.isVideo && s.imageRef.isEmpty) continue;
@@ -57,13 +59,51 @@ class StoryService {
     }).toList();
 
     StoryRing.instance.setAll(byAuthor.keys);
-    groups.sort((a, b) {
-      if (a.authorId == _uid) return -1;
-      if (b.authorId == _uid) return 1;
-      return b.stories.last.createdAt.compareTo(a.stories.last.createdAt);
-    });
+    final me = _uid;
+    groups.sort((a, b) => compareStoryGroups(a, b, me));
     return groups;
   }
+
+  CollectionReference<Map<String, dynamic>> get _private =>
+      _db.collection(kPrivateStories);
+
+  /// Moments shared to an audience list I am on (and my own list moments). My own expired
+  /// ones are tidied away here.
+  Future<List<Story>> _forMe() async {
+    try {
+      final snap = await _private
+          .where('audience', arrayContains: _uid)
+          .limit(300)
+          .get();
+      final now = DateTime.now();
+      final out = <Story>[];
+      for (final d in snap.docs) {
+        final exp = d.data()['expiresAt'];
+        final s = Story.fromDoc(d, limited: true);
+        if (exp is Timestamp && exp.toDate().isAfter(now)) {
+          out.add(s);
+        } else if (s.authorId == _uid) {
+          deleteStory(s).ignore();
+        }
+      }
+      return out;
+    } catch (_) {
+      return const []; // the public moments still show
+    }
+  }
+
+  /// The fields that say who a moment is for, and whether it is in the spotlight.
+  Map<String, dynamic> _audienceFields(StoryAudience audience, bool spotlight) {
+    final list = audience.list;
+    return {
+      if (spotlight) 'spotlight': true,
+      if (list != null) 'audience': list.audienceWith(_uid),
+      if (list != null) 'listName': list.name,
+    };
+  }
+
+  CollectionReference<Map<String, dynamic>> _colFor(StoryAudience a) =>
+      a.isEveryone ? _stories : _private;
 
   /// Shares a moment: a photo ([image]) or a video ([video] with its cover [thumb]), with
   /// the texts and stickers placed on it and optional music.
@@ -79,6 +119,8 @@ class StoryService {
     double musicVolume = 0.8,
     bool keepSound = true,
     bool longer = false,
+    StoryAudience audience = const StoryAudience.everyone(),
+    bool spotlight = false,
     void Function(double progress)? onProgress,
   }) async {
     if ((image == null) == (video == null)) {
@@ -86,8 +128,9 @@ class StoryService {
     }
     final me = await UserService.instance.getUser(_uid);
     if (me == null) throw StateError('Profile not found');
-    final ref = _stories.doc();
+    final ref = _colFor(audience).doc();
     final data = <String, dynamic>{
+      ..._audienceFields(audience, spotlight),
       'authorId': _uid,
       'authorUsername': me.username,
       'authorPhotoUrl': me.photoUrl,
@@ -144,10 +187,13 @@ class StoryService {
     double musicVolume = 0.8,
     bool keepSound = true,
     bool longer = false,
+    StoryAudience audience = const StoryAudience.everyone(),
+    bool spotlight = false,
   }) async {
     final me = await UserService.instance.getUser(_uid);
     if (me == null) throw StateError('Profile not found');
-    await _stories.doc().set({
+    await _colFor(audience).doc().set({
+      ..._audienceFields(audience, spotlight),
       'authorId': _uid,
       'authorUsername': me.username,
       'authorPhotoUrl': me.photoUrl,
@@ -174,14 +220,18 @@ class StoryService {
   Future<void> deleteStory(Story s) async {
     // the viewer list goes first (nobody could remove it afterwards)
     try {
-      final views = await _stories.doc(s.id).collection('views').get();
+      final views = await _db
+          .collection(s.collection)
+          .doc(s.id)
+          .collection('views')
+          .get();
       for (final d in views.docs) {
         d.reference.delete().ignore();
       }
     } catch (_) {
       // best effort
     }
-    await _stories.doc(s.id).delete();
+    await _db.collection(s.collection).doc(s.id).delete();
     if (s.shared) return; // the post still uses these files
     await MediaServer.instance.deleteRefs([
       s.isVideo ? s.videoRef : s.imageRef,

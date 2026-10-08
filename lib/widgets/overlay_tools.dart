@@ -10,6 +10,7 @@ import '../core/l10n.dart';
 import '../core/theme.dart';
 import '../services/giphy.dart';
 import '../models/finish.dart';
+import '../core/fonts.dart';
 import '../models/story.dart';
 import 'story_overlays.dart';
 
@@ -754,6 +755,7 @@ class _OverlayTextSheetState extends State<_OverlayTextSheet> {
   );
   late int _color = widget.start.color;
   late bool _pill = widget.start.pill;
+  late String _font = widget.start.font;
 
   @override
   void dispose() {
@@ -761,8 +763,12 @@ class _OverlayTextSheetState extends State<_OverlayTextSheet> {
     super.dispose();
   }
 
-  StoryOverlay get _result =>
-      widget.start.copyWith(text: _c.text.trim(), color: _color, pill: _pill);
+  StoryOverlay get _result => widget.start.copyWith(
+    text: _c.text.trim(),
+    color: _color,
+    pill: _pill,
+    font: _font,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -783,7 +789,39 @@ class _OverlayTextSheetState extends State<_OverlayTextSheet> {
             maxLines: 3,
             minLines: 1,
             textCapitalization: TextCapitalization.sentences,
+            style: withAppFont(_font, const TextStyle(fontSize: 18)),
             decoration: const InputDecoration(hintText: 'Type something...'),
+          ),
+          // text styles: each chip is written in its own font
+          SizedBox(
+            height: 44,
+            child: ListView(
+              key: const ValueKey('fontRow'),
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final f in kAppFonts)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      key: ValueKey('font_${f.id.isEmpty ? 'classic' : f.id}'),
+                      label: Text(
+                        f.label,
+                        style: withAppFont(
+                          f.id,
+                          TextStyle(
+                            fontSize: 15,
+                            color: f.id == _font ? AppTheme.ink : null,
+                          ),
+                        ),
+                      ),
+                      selected: f.id == _font,
+                      showCheckmark: false,
+                      selectedColor: AppTheme.volt,
+                      onSelected: (_) => setState(() => _font = f.id),
+                    ),
+                  ),
+              ],
+            ),
           ),
           const SizedBox(height: 8),
           Row(

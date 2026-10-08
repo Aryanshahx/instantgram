@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/story.dart';
+import '../core/fonts.dart';
 
 /// The 9:16 picture of a moment: the media, with the texts and stickers on top.
 /// The composer and the viewer both use it, so what you place is what people see.
@@ -120,14 +121,16 @@ class StoryOverlayChip extends StatelessWidget {
       child: Text(
         overlay.text,
         textAlign: TextAlign.center,
-        style: TextStyle(
-          color: onPill ? pillText : color,
-          fontSize: size,
-          fontWeight: FontWeight.w800,
-          height: 1.15,
-          shadows: onPill
-              ? null
-              : const [Shadow(blurRadius: 10, color: Colors.black54)],
+        style: withAppFont(
+          overlay.font,
+          TextStyle(
+            color: onPill ? pillText : color,
+            fontSize: size,
+            height: 1.15,
+            shadows: onPill
+                ? null
+                : const [Shadow(blurRadius: 10, color: Colors.black54)],
+          ),
         ),
       ),
     );

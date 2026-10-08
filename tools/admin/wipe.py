@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 USER_SUBCOLLECTIONS = [
     "followers", "following", "saved", "reposts", "blocked",
-    "requests", "approved", "sent_requests",
+    "requests", "approved", "sent_requests", "audiences", "highlights",
 ]
 
 
@@ -148,11 +148,15 @@ class Wiper:
                 r.comments += removed
 
     def _stories(self, uid, r):
-        for s in self.db.collection("stories").where("authorId", "==", uid).stream():
+        for s in self._all_stories(uid):
             for sub in ("views", "likes", "replies"):
                 self._delete_all(s.reference.collection(sub))
             self._delete(s.reference)
             r.stories += 1
+
+    def _all_stories(self, uid):
+        for col in ("stories", "privateStories"):
+            yield from self.db.collection(col).where("authorId", "==", uid).stream()
 
     def _chats(self, uid, r):
         for c in self.db.collection("chats").where("members", "array_contains", uid).stream():
@@ -201,11 +205,12 @@ class Wiper:
                 self._delete(ref)
                 r.other += 1
         # their "viewed" line on other people's moments
-        for s in self.db.collection("stories").stream():
-            v = s.reference.collection("views").document(uid)
-            if v.get().exists:
-                self._delete(v)
-                r.other += 1
+        for col in ("stories", "privateStories"):
+            for s in self.db.collection(col).stream():
+                v = s.reference.collection("views").document(uid)
+                if v.get().exists:
+                    self._delete(v)
+                    r.other += 1
 
     def _follow_links(self, uid, r):
         users = self.db.collection("users")
@@ -271,8 +276,9 @@ def find_orphans(db, auth_uids: set) -> dict:
         note(u.id, "profile")
     for p in db.collection("posts").stream():
         note((p.to_dict() or {}).get("authorId", ""), "posts")
-    for s in db.collection("stories").stream():
-        note((s.to_dict() or {}).get("authorId", ""), "moments")
+    for col in ("stories", "privateStories"):
+        for s in db.collection(col).stream():
+            note((s.to_dict() or {}).get("authorId", ""), "moments")
     for c in db.collection("chats").stream():
         for m in (c.to_dict() or {}).get("members", []) or []:
             note(m, "chats")

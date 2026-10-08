@@ -60,8 +60,8 @@ class PushService {
 
   /// I watched a moment for the first time (the signer tells the author only if they asked
   /// to hear about me).
-  void storyView(String storyId) =>
-      _send({'kind': 'storyView', 'storyId': storyId});
+  void storyView(String storyId, {bool limited = false}) =>
+      _send({'kind': 'storyView', 'storyId': storyId, if (limited) 'col': 'p'});
 
   /// A like / comment / follow line was written into [to]'s Notifications.
   void activity(String to, String itemId) =>

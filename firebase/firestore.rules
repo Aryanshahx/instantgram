@@ -35,6 +35,10 @@ service cloud.firestore {
         allow write: if signedIn() && request.auth.uid == followerId;
       }
       // posts {uid} bookmarked: private to the owner
+      // my audience lists ("Close friends"...): only me
+      match /audiences/{listId} {
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
       match /saved/{postId} {
         allow read, write: if signedIn() && request.auth.uid == uid;
       }
@@ -237,6 +241,33 @@ service cloud.firestore {
           && onlyChanges(['last', 'count'])
           && request.resource.data.count == resource.data.count + 1;
         allow delete: if signedIn() && story().authorId == request.auth.uid;
+      }
+    }
+
+    // moments for one audience list: only the people on it (the author is on it too)
+    match /privateStories/{storyId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.audience;
+      allow create: if signedIn() && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.audience is list
+        && request.auth.uid in request.resource.data.audience
+        && request.resource.data.audience.size() <= 501;
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+
+      match /views/{viewerId} {
+        function pstory() {
+          return get(/databases/$(database)/documents/privateStories/$(storyId)).data;
+        }
+        allow read: if signedIn()
+          && (request.auth.uid == viewerId || pstory().authorId == request.auth.uid);
+        allow create: if signedIn() && request.auth.uid == viewerId
+          && pstory().authorId != request.auth.uid
+          && request.auth.uid in pstory().audience
+          && request.resource.data.keys().hasOnly(['username', 'photoUrl', 'first', 'last', 'count'])
+          && request.resource.data.count == 1;
+        allow update: if signedIn() && request.auth.uid == viewerId
+          && onlyChanges(['last', 'count'])
+          && request.resource.data.count == resource.data.count + 1;
+        allow delete: if signedIn() && pstory().authorId == request.auth.uid;
       }
     }
 

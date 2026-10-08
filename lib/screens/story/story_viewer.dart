@@ -5,6 +5,7 @@ import 'package:video_player/video_player.dart';
 import '../../core/app_events.dart';
 import '../../core/errors.dart';
 import '../../core/story_images.dart';
+import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/music.dart';
 import '../../models/story.dart';
@@ -325,7 +326,7 @@ class _GroupPlayerState extends State<_GroupPlayer>
     _anim.stop();
     _vc?.pause();
     _music?.pause();
-    await showStoryViewers(context, _story.id);
+    await showStoryViewers(context, _story.id, collection: _story.collection);
     if (mounted && _loaded && !_holding) {
       _anim.forward();
       _vc?.play();
@@ -480,6 +481,45 @@ class _GroupPlayerState extends State<_GroupPlayer>
                                 ),
                               ],
                             ),
+                            if (story.limited || story.spotlight)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (story.spotlight)
+                                      const Padding(
+                                        padding: EdgeInsets.only(right: 6),
+                                        child: Icon(
+                                          Icons.auto_awesome_rounded,
+                                          key: ValueKey('viewerSpotlight'),
+                                          size: 14,
+                                          color: AppTheme.volt,
+                                        ),
+                                      ),
+                                    if (story.limited) ...[
+                                      const Icon(
+                                        Icons.group_rounded,
+                                        key: ValueKey('viewerLimited'),
+                                        size: 14,
+                                        color: AppTheme.volt,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        // the list name is only for the author
+                                        _mine && story.listName.isNotEmpty
+                                            ? story.listName
+                                            : 'List',
+                                        style: const TextStyle(
+                                          color: AppTheme.volt,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
                             if (story.musicId.isNotEmpty)
                               MusicLabel(musicId: story.musicId),
                           ],
