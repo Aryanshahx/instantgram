@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
 import '../models/audience.dart';
+import '../models/highlight.dart';
 import '../screens/settings/audience_lists_screen.dart';
 import '../services/audience_service.dart';
+import '../services/highlight_service.dart';
+import 'highlights.dart';
 
 /// Who a new moment is for. Returns the choice, or null when dismissed.
 Future<StoryAudience?> pickStoryAudience(
@@ -26,11 +29,31 @@ class _AudienceSheet extends StatefulWidget {
 
 class _AudienceSheetState extends State<_AudienceSheet> {
   List<AudienceList>? _lists;
+  List<Highlight>? _highlights;
 
   @override
   void initState() {
     super.initState();
     _load();
+    HighlightService.instance.mine().then(
+      (l) {
+        if (mounted) setState(() => _highlights = l);
+      },
+      onError: (_) {
+        if (mounted) setState(() => _highlights = const []);
+      },
+    );
+  }
+
+  Future<void> _newHighlight() async {
+    final t = await askHighlightTitle(context);
+    if (t == null || !mounted) return;
+    try {
+      final h = await HighlightService.instance.create(t);
+      if (mounted) Navigator.of(context).pop(StoryAudience.highlightOnly(h));
+    } catch (_) {
+      // e.g. too many highlights: the sheet stays
+    }
   }
 
   Future<void> _load({bool fresh = false}) async {
@@ -57,6 +80,8 @@ class _AudienceSheetState extends State<_AudienceSheet> {
   Widget build(BuildContext context) {
     final lists = _lists;
     final cur = widget.current.list?.id;
+    final curHl = widget.current.highlight?.id;
+    final hls = _highlights;
     Widget tile({
       required Key key,
       required IconData icon,
@@ -91,46 +116,94 @@ class _AudienceSheetState extends State<_AudienceSheet> {
               style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
             ),
           ),
-          tile(
-            key: const ValueKey('aud_everyone'),
-            icon: Icons.public_rounded,
-            title: 'Everyone',
-            subtitle: 'Your followers',
-            selected: cur == null,
-            onTap: () =>
-                Navigator.of(context).pop(const StoryAudience.everyone()),
-          ),
-          if (lists == null)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          else
-            for (final l in lists)
-              tile(
-                key: ValueKey('aud_${l.id}'),
-                icon: Icons.group_rounded,
-                title: l.name,
-                subtitle:
-                    '${l.members.length} ${l.members.length == 1 ? 'person' : 'people'}',
-                selected: cur == l.id,
-                onTap: () => Navigator.of(context).pop(StoryAudience.only(l)),
-                trailing: IconButton(
-                  key: ValueKey('audEdit_${l.id}'),
-                  tooltip: 'Edit',
-                  icon: Icon(
-                    cur == l.id ? Icons.edit_rounded : Icons.edit_outlined,
-                  ),
-                  onPressed: () => _edit(l),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                tile(
+                  key: const ValueKey('aud_everyone'),
+                  icon: Icons.public_rounded,
+                  title: 'Everyone',
+                  subtitle: 'Your followers',
+                  selected: widget.current.isEveryone,
+                  onTap: () =>
+                      Navigator.of(context).pop(const StoryAudience.everyone()),
                 ),
-              ),
-          if (lists != null && lists.length < AudienceList.maxLists)
-            ListTile(
-              key: const ValueKey('aud_new'),
-              leading: const CircleAvatar(child: Icon(Icons.add_rounded)),
-              title: const Text('New list'),
-              onTap: _new,
+                if (lists == null)
+                  const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  for (final l in lists)
+                    tile(
+                      key: ValueKey('aud_${l.id}'),
+                      icon: Icons.group_rounded,
+                      title: l.name,
+                      subtitle:
+                          '${l.members.length} ${l.members.length == 1 ? 'person' : 'people'}',
+                      selected: cur == l.id,
+                      onTap: () =>
+                          Navigator.of(context).pop(StoryAudience.only(l)),
+                      trailing: IconButton(
+                        key: ValueKey('audEdit_${l.id}'),
+                        tooltip: 'Edit',
+                        icon: Icon(
+                          cur == l.id
+                              ? Icons.edit_rounded
+                              : Icons.edit_outlined,
+                        ),
+                        onPressed: () => _edit(l),
+                      ),
+                    ),
+                if (lists != null && lists.length < AudienceList.maxLists)
+                  ListTile(
+                    key: const ValueKey('aud_new'),
+                    leading: const CircleAvatar(child: Icon(Icons.add_rounded)),
+                    title: const Text('New list'),
+                    onTap: _new,
+                  ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 14, 20, 2),
+                  child: Text(
+                    'ONLY A HIGHLIGHT',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Text(
+                    'Not in the moments bar: it goes straight into a highlight on your profile.',
+                    style: TextStyle(color: context.muted, fontSize: 12),
+                  ),
+                ),
+                if (hls != null)
+                  for (final h in hls)
+                    tile(
+                      key: ValueKey('audHl_${h.id}'),
+                      icon: Icons.auto_stories_rounded,
+                      title: h.title,
+                      subtitle:
+                          '${h.items.length} ${h.items.length == 1 ? 'moment' : 'moments'}',
+                      selected: curHl == h.id,
+                      onTap: () => Navigator.of(
+                        context,
+                      ).pop(StoryAudience.highlightOnly(h)),
+                    ),
+                if (hls != null && hls.length < Highlight.maxHighlights)
+                  ListTile(
+                    key: const ValueKey('audHl_new'),
+                    leading: const CircleAvatar(child: Icon(Icons.add_rounded)),
+                    title: const Text('New highlight'),
+                    onTap: _newHighlight,
+                  ),
+              ],
             ),
+          ),
           const SizedBox(height: 8),
         ],
       ),

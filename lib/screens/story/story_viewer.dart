@@ -7,13 +7,16 @@ import '../../core/errors.dart';
 import '../../core/story_images.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import '../../models/highlight.dart';
 import '../../models/music.dart';
 import '../../models/story.dart';
+import '../../services/highlight_service.dart';
 import '../../services/music_player.dart';
 import '../../services/story_service.dart';
 import '../../services/story_views.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/highlights.dart';
 import '../../widgets/music_widgets.dart';
 import '../../widgets/story_overlays.dart';
 import '../../widgets/story_viewers_sheet.dart';
@@ -23,10 +26,14 @@ class StoryViewer extends StatefulWidget {
     super.key,
     required this.groups,
     required this.initialIndex,
+    this.highlight,
   });
 
   final List<StoryGroup> groups;
   final int initialIndex;
+
+  /// Playing a highlight: no views are counted, and delete takes the moment out of it.
+  final Highlight? highlight;
 
   @override
   State<StoryViewer> createState() => _StoryViewerState();
@@ -87,6 +94,7 @@ class _StoryViewerState extends State<StoryViewer> {
           onFinished: _nextGroup,
           onBackFromFirst: _previousGroup,
           onClose: () => Navigator.of(context).pop(),
+          highlight: widget.highlight,
         ),
       ),
     );
@@ -101,9 +109,11 @@ class _GroupPlayer extends StatefulWidget {
     required this.onFinished,
     required this.onBackFromFirst,
     required this.onClose,
+    this.highlight,
   });
 
   final StoryGroup group;
+  final Highlight? highlight;
 
   /// First picture of the next person's moments (loaded in advance).
   final String? nextFirstUrl;
@@ -131,6 +141,7 @@ class _GroupPlayerState extends State<_GroupPlayer>
   int _gen = 0;
 
   bool get _mine => widget.group.authorId == UserService.instance.myUid;
+  late Highlight? _hl = widget.highlight;
   Story get _story => widget.group.stories[_i];
 
   @override
@@ -218,7 +229,7 @@ class _GroupPlayerState extends State<_GroupPlayer>
       _loaded = true;
       _failed = failed;
     });
-    if (!failed && !_mine) StoryViews.instance.record(story);
+    if (!failed && !_mine && _hl == null) StoryViews.instance.record(story);
     if (!_holding) {
       _anim.forward(from: 0);
       _vc?.play();
@@ -283,14 +294,42 @@ class _GroupPlayerState extends State<_GroupPlayer>
     }
   }
 
-  Future<void> _delete() async {
+  void _pause() {
     _anim.stop();
     _vc?.pause();
     _music?.pause();
+  }
+
+  void _resume() {
+    if (mounted && _loaded && !_holding) {
+      _anim.forward();
+      _vc?.play();
+      _music?.play();
+    }
+  }
+
+  /// My live moment: put it in a highlight too (it stays there after 48 h).
+  Future<void> _toHighlight() async {
+    _pause();
+    final h = await pickHighlight(context);
+    if (h != null && mounted) {
+      try {
+        await HighlightService.instance.addStory(h, _story);
+        if (mounted) showToast(context, 'Added to "${h.title}"');
+      } catch (e) {
+        if (mounted) showToast(context, friendlyError(e));
+      }
+    }
+    _resume();
+  }
+
+  Future<void> _delete() async {
+    _pause();
+    final hl = _hl;
     final ok = await confirm(
       context,
-      title: 'Delete moment?',
-      confirmLabel: 'Delete',
+      title: hl != null ? 'Remove from "${hl.title}"?' : 'Delete moment?',
+      confirmLabel: hl != null ? 'Remove' : 'Delete',
       destructive: true,
     );
     if (!ok) {
@@ -302,7 +341,11 @@ class _GroupPlayerState extends State<_GroupPlayer>
       return;
     }
     try {
-      await StoryService.instance.deleteStory(_story);
+      if (hl != null) {
+        _hl = await HighlightService.instance.remove(hl, _story.id);
+      } else {
+        await StoryService.instance.deleteStory(_story);
+      }
       widget.group.stories.removeAt(_i);
       AppEvents.refreshFeed();
       if (widget.group.stories.isEmpty) {
@@ -379,7 +422,28 @@ class _GroupPlayerState extends State<_GroupPlayer>
             )
           else
             StoryCanvas(media: _media(story), overlays: story.overlays),
-          if (_mine)
+          if (_mine && _hl == null)
+            Positioned(
+              right: 12,
+              bottom: 12,
+              child: SafeArea(
+                child: TextButton.icon(
+                  key: const ValueKey('storyToHighlight'),
+                  style: TextButton.styleFrom(
+                    backgroundColor: Colors.black45,
+                    foregroundColor: Colors.white,
+                    shape: const StadiumBorder(),
+                  ),
+                  onPressed: _toHighlight,
+                  icon: const Icon(Icons.favorite_border_rounded, size: 20),
+                  label: const Text(
+                    'Highlight',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ),
+          if (_mine && _hl == null)
             Positioned(
               left: 12,
               bottom: 12,
@@ -528,6 +592,10 @@ class _GroupPlayerState extends State<_GroupPlayer>
                       const Spacer(),
                       if (_mine)
                         IconButton(
+                          key: const ValueKey('storyDelete'),
+                          tooltip: _hl != null
+                              ? 'Remove from highlight'
+                              : 'Delete',
                           onPressed: _delete,
                           icon: const Icon(
                             Icons.delete_outline,

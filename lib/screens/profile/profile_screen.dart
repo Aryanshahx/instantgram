@@ -26,6 +26,7 @@ import 'edit_profile_screen.dart';
 import '../settings/account_screens.dart' show toggleBlock;
 import '../settings/settings_screen.dart';
 import 'follow_list_screen.dart';
+import '../../widgets/highlights.dart';
 import 'share_profile_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -229,6 +230,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
               SliverToBoxAdapter(child: _header(context, user)),
+              if (!_locked(user))
+                SliverToBoxAdapter(
+                  child: HighlightsRow(
+                    key: ValueKey('hlRow_${user.uid}'),
+                    uid: user.uid,
+                    username: user.username,
+                    photoUrl: user.photoUrl,
+                    isMe: _isMe,
+                  ),
+                ),
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
@@ -538,41 +549,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
               if (_isMe)
                 Column(
                   children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton(
-                        key: const ValueKey('editProfileButton'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton(
+                            key: const ValueKey('editProfileButton'),
+                            style: _smallButton,
+                            onPressed: () => openScreen(
+                              context,
+                              EditProfileScreen(user: user),
+                            ),
+                            child: Text(context.tr('Edit profile')),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton(
+                            key: const ValueKey('shareProfileButton'),
+                            style: _smallButton,
+                            onPressed: () => _shareProfile(user),
+                            child: Text(context.tr('Share profile')),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    // Your numbers for the whole account. One post's numbers open by holding it.
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        key: const ValueKey('dashboardButton'),
                         style: _smallButton,
                         onPressed: () =>
-                            openScreen(context, EditProfileScreen(user: user)),
-                        child: Text(context.tr('Edit profile')),
+                            openScreen(context, const AnalyticsScreen()),
+                        icon: const Icon(Icons.insights_rounded, size: 18),
+                        label: Text(context.tr('Dashboard')),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton(
-                        key: const ValueKey('shareProfileButton'),
-                        style: _smallButton,
-                        onPressed: () => _shareProfile(user),
-                        child: Text(context.tr('Share profile')),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                // Your numbers for the whole account. One post's numbers open by holding it.
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    key: const ValueKey('dashboardButton'),
-                    style: _smallButton,
-                    onPressed: () =>
-                        openScreen(context, const AnalyticsScreen()),
-                    icon: const Icon(Icons.insights_rounded, size: 18),
-                    label: Text(context.tr('Dashboard')),
-                  ),
-                ),
                   ],
                 )
               else

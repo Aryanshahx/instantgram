@@ -5,10 +5,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../core/media_url.dart';
 import '../models/audience.dart';
+import '../models/highlight.dart';
 import '../models/music.dart';
 import '../models/story.dart';
 import '../models/story_view.dart';
 import 'mp4_faststart.dart';
+import 'highlight_service.dart';
 import 'media_server.dart';
 import 'story_ring.dart';
 import 'user_service.dart';
@@ -67,8 +69,8 @@ class StoryService {
   CollectionReference<Map<String, dynamic>> get _private =>
       _db.collection(kPrivateStories);
 
-  /// Moments shared to an audience list I am on (and my own list moments). My own expired
-  /// ones are tidied away here.
+  /// Moments shared to an audience list I am on (and my own list moments). Expired ones
+  /// stay stored (like public ones) so they can still be added to a highlight.
   Future<List<Story>> _forMe() async {
     try {
       final snap = await _private
@@ -80,11 +82,7 @@ class StoryService {
       for (final d in snap.docs) {
         final exp = d.data()['expiresAt'];
         final s = Story.fromDoc(d, limited: true);
-        if (exp is Timestamp && exp.toDate().isAfter(now)) {
-          out.add(s);
-        } else if (s.authorId == _uid) {
-          deleteStory(s).ignore();
-        }
+        if (exp is Timestamp && exp.toDate().isAfter(now)) out.add(s);
       }
       return out;
     } catch (_) {
@@ -171,8 +169,45 @@ class StoryService {
       );
       data['imageUrl'] = up.ref;
     }
+    final h = audience.highlight;
+    if (h != null) {
+      // only into the highlight: no moment in the bar
+      await HighlightService.instance.add(
+        h,
+        HighlightItem(
+          id: ref.id,
+          imageRef: data['imageUrl'] as String? ?? '',
+          videoRef: data['videoUrl'] as String? ?? '',
+          thumbRef: data['thumbnailUrl'] as String? ?? '',
+          duration: duration,
+          overlays: overlays.take(20).toList(),
+          musicId: musicId,
+          musicVolume: musicVolume,
+          keepSound: keepSound,
+          createdAt: DateTime.now(),
+          own: true,
+        ),
+      );
+      return;
+    }
     await ref.set(data);
     StoryRing.instance.add(_uid);
+  }
+
+  /// All my moments, also expired ones (newest first): to pick from for a highlight.
+  Future<List<Story>> archive() async {
+    final me = _uid;
+    final r = await Future.wait([
+      _stories.where('authorId', isEqualTo: me).limit(150).get(),
+      _private.where('audience', arrayContains: me).limit(300).get(),
+    ]);
+    final all = <Story>[
+      ...r[0].docs.map(Story.fromDoc),
+      for (final d in r[1].docs)
+        if (d.data()['authorId'] == me) Story.fromDoc(d, limited: true),
+    ]..removeWhere((s) => !s.isVideo && s.imageRef.isEmpty);
+    all.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return all;
   }
 
   /// Puts an already uploaded post photo or clip in my moments (nothing is uploaded again).
@@ -233,10 +268,20 @@ class StoryService {
     }
     await _db.collection(s.collection).doc(s.id).delete();
     if (s.shared) return; // the post still uses these files
+    // files a highlight still shows stay
+    Set<String> keep;
+    try {
+      keep = await HighlightService.instance.refsInUse();
+    } catch (_) {
+      return; // unsure: keep the files
+    }
     await MediaServer.instance.deleteRefs([
-      s.isVideo ? s.videoRef : s.imageRef,
-      if (s.isVideo) s.thumbRef,
-      deviceMusicRef(s.musicId),
+      for (final r in [
+        s.isVideo ? s.videoRef : s.imageRef,
+        if (s.isVideo) s.thumbRef,
+      ])
+        if (!keep.contains(r)) r,
+      if (!keep.contains(deviceMusicRef(s.musicId))) deviceMusicRef(s.musicId),
     ]);
   }
 }

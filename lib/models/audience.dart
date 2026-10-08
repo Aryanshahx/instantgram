@@ -1,3 +1,5 @@
+import 'highlight.dart';
+
 /// One of my audience lists ("Close friends", "Family"...): moments can be shared to just
 /// these people. Stored in `users/{me}/audiences/{id}`; only I can read it.
 class AudienceList {
@@ -47,13 +49,20 @@ class AudienceList {
   List<String> audienceWith(String me) => {me, ...members}.toList();
 }
 
-/// Who a new moment is for: everyone, or one list.
+/// Who a new moment is for: everyone, one list, or only a highlight on my profile (it then
+/// never shows in the moments bar).
 class StoryAudience {
-  const StoryAudience.everyone() : list = null;
-  const StoryAudience.only(AudienceList this.list);
+  const StoryAudience.everyone() : list = null, highlight = null;
+  const StoryAudience.only(AudienceList this.list) : highlight = null;
+  const StoryAudience.highlightOnly(Highlight this.highlight) : list = null;
 
   final AudienceList? list;
+  final Highlight? highlight;
 
-  bool get isEveryone => list == null;
-  String get label => list?.name ?? 'Everyone';
+  bool get isEveryone => list == null && highlight == null;
+  String get label {
+    final h = highlight;
+    if (h != null) return 'highlight "${h.title}"';
+    return list?.name ?? 'Everyone';
+  }
 }
