@@ -229,6 +229,7 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
   MusicTrack? _track;
   bool _keepSound = true;
   bool _posting = false;
+  bool _longer = false; // stays 48 hours instead of 24
   double _progress = 0;
   Size _canvas = const Size(360, 640);
   double _baseScale = 1;
@@ -387,6 +388,7 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
         musicTitle: (sent?.remote ?? false) ? sent!.title : '',
         musicArtist: sent?.artist ?? '',
         keepSound: _keepSound,
+        longer: _longer,
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);
         },
@@ -616,10 +618,43 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
                       ),
                     ),
                   const Spacer(),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Tooltip(
+                      message: 'How long the moment stays up',
+                      child: ChoiceChip(
+                        key: const ValueKey('story48h'),
+                        label: Text(
+                          _longer ? '48h' : '24h',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: _longer ? AppTheme.ink : Colors.white,
+                          ),
+                        ),
+                        avatar: Icon(
+                          Icons.schedule_rounded,
+                          size: 18,
+                          color: _longer ? AppTheme.ink : Colors.white,
+                        ),
+                        selected: _longer,
+                        showCheckmark: false,
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        labelPadding: const EdgeInsets.only(right: 4),
+                        selectedColor: AppTheme.volt,
+                        backgroundColor: Colors.black54,
+                        side: const BorderSide(color: Colors.white38),
+                        onSelected: _posting
+                            ? null
+                            : (v) => setState(() => _longer = v),
+                      ),
+                    ),
+                  ),
                   FilledButton(
                     key: const ValueKey('storyShare'),
                     style: FilledButton.styleFrom(
-                      minimumSize: const Size(150, 52),
+                      minimumSize: const Size(128, 52),
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
                       backgroundColor: AppTheme.volt,
                       foregroundColor: AppTheme.ink,
                     ),

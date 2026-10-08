@@ -58,6 +58,11 @@ class PushService {
   /// I am calling someone (the call document is stored and ringing).
   void call(String callId) => _send({'kind': 'call', 'callId': callId});
 
+  /// I watched a moment for the first time (the signer tells the author only if they asked
+  /// to hear about me).
+  void storyView(String storyId) =>
+      _send({'kind': 'storyView', 'storyId': storyId});
+
   /// A like / comment / follow line was written into [to]'s Notifications.
   void activity(String to, String itemId) =>
       _send({'kind': 'activity', 'to': to, 'itemId': itemId});

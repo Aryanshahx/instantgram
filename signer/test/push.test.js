@@ -159,3 +159,44 @@ test("phones that are gone are removed from the list", async () => {
   assert.equal(g.patched[0].path, "pushTokens/b");
   assert.deepEqual(g.patched[0].body.fields.tokens.arrayValue.values, [{ stringValue: "t2" }]);
 });
+
+test("story view: only the first view of a picked person, once", async () => {
+  forgetToken();
+  const docs = {
+    ...base(),
+    "stories/s1": { authorId: "b" },
+    "stories/s1/views/a": { count: 1, first: recent, last: recent },
+    "storyAlerts/b": { uids: ["a"] },
+  };
+  const g = fakeGoogle(docs);
+  const created = [];
+  const fetch = async (url, init = {}) => {
+    if (init.method === "POST" && String(url).includes("/documents/notifications/b/items")) {
+      created.push(JSON.parse(init.body).fields);
+      return new Response("{}");
+    }
+    if (init.method === "PATCH" && String(url).includes("/views/a")) {
+      assert.match(String(url), /updateMask.fieldPaths=alerted/);
+      docs["stories/s1/views/a"].alerted = true;
+      return new Response("{}");
+    }
+    return g.fetch(url, init);
+  };
+  const r = await notify({ kind: "storyView", storyId: "s1" }, ENV, "a", { fetch, now: NOW });
+  assert.equal(r.body.sent, 2);
+  assert.equal(g.sent[0].notification.body, "aryan viewed your moment");
+  assert.equal(created.length, 1);
+  assert.equal(created[0].type.stringValue, "story_view");
+  assert.equal(created[0].actorId.stringValue, "a");
+  // second call: already told
+  const again = await notify({ kind: "storyView", storyId: "s1" }, ENV, "a", { fetch, now: NOW });
+  assert.equal(again.body.skipped, "already");
+  // not on the list
+  docs["storyAlerts/b"].uids = ["zed"];
+  delete docs["stories/s1/views/a"].alerted;
+  assert.equal((await notify({ kind: "storyView", storyId: "s1" }, ENV, "a", { fetch, now: NOW })).body.skipped, "not picked");
+  // no view line / old view
+  assert.equal((await notify({ kind: "storyView", storyId: "s1" }, ENV, "c", { fetch, now: NOW })).status, 403);
+  docs["stories/s1/views/a"].first = new Date(NOW - 3600_000);
+  assert.equal((await notify({ kind: "storyView", storyId: "s1" }, ENV, "a", { fetch, now: NOW })).status, 403);
+});

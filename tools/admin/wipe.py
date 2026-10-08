@@ -98,6 +98,7 @@ class Wiper:
         self._chats(uid, r)
         self._calls(uid, r)
         self._notifications(uid, r)
+        self._push_and_story_views(uid, r)
         self._follow_links(uid, r)
         self._profile(uid, r)
         return r
@@ -191,6 +192,20 @@ class Wiper:
         r.notifications += self._delete_all(
             self.db.collection("notifications").document(uid).collection("items"))
         self._delete(self.db.collection("notifications").document(uid))
+
+    def _push_and_story_views(self, uid, r):
+        # their phones' push addresses, their story-view alert list
+        for col in ("pushTokens", "storyAlerts"):
+            ref = self.db.collection(col).document(uid)
+            if ref.get().exists:
+                self._delete(ref)
+                r.other += 1
+        # their "viewed" line on other people's moments
+        for s in self.db.collection("stories").stream():
+            v = s.reference.collection("views").document(uid)
+            if v.get().exists:
+                self._delete(v)
+                r.other += 1
 
     def _follow_links(self, uid, r):
         users = self.db.collection("users")

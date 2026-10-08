@@ -10,6 +10,7 @@ import '../screens/story/story_viewer.dart';
 import '../services/story_service.dart';
 import '../services/user_service.dart';
 import 'avatar.dart';
+import 'story_peek.dart';
 
 class StoriesBar extends StatefulWidget {
   const StoriesBar({super.key});
@@ -122,6 +123,11 @@ class _StoriesBarState extends State<StoriesBar> {
               url: g.photoUrl,
               ring: true,
               onTap: () => _open(_groups.indexOf(g)),
+              onLongPress: () => showStoryPeek(
+                context,
+                g,
+                onOpen: () => _open(_groups.indexOf(g)),
+              ),
             ),
         ],
       ),
@@ -137,6 +143,7 @@ class _StoriesBarState extends State<StoriesBar> {
     bool plus = false,
     bool loading = false,
     VoidCallback? onPlus,
+    VoidCallback? onLongPress,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -146,6 +153,7 @@ class _StoriesBarState extends State<StoriesBar> {
           children: [
             GestureDetector(
               onTap: onTap,
+              onLongPress: onLongPress,
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [

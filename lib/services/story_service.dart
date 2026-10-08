@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../core/media_url.dart';
 import '../models/music.dart';
 import '../models/story.dart';
+import '../models/story_view.dart';
 import 'mp4_faststart.dart';
 import 'media_server.dart';
 import 'story_ring.dart';
@@ -20,7 +21,7 @@ class StoryService {
       _db.collection('stories');
   String get _uid => FirebaseAuth.instance.currentUser!.uid;
 
-  /// Stories from me + the people I follow that are still within 24 hours.
+  /// Stories from me + the people I follow that have not expired (24 or 48 hours).
   Future<List<StoryGroup>> load() async {
     // both lookups run at the same time (they do not depend on each other)
     final results = await Future.wait<Object>([
@@ -77,6 +78,7 @@ class StoryService {
     String musicArtist = '',
     double musicVolume = 0.8,
     bool keepSound = true,
+    bool longer = false,
     void Function(double progress)? onProgress,
   }) async {
     if ((image == null) == (video == null)) {
@@ -90,9 +92,7 @@ class StoryService {
       'authorUsername': me.username,
       'authorPhotoUrl': me.photoUrl,
       'createdAt': FieldValue.serverTimestamp(),
-      'expiresAt': Timestamp.fromDate(
-        DateTime.now().add(const Duration(hours: 24)),
-      ),
+      'expiresAt': Timestamp.fromDate(storyExpiry(DateTime.now(), longer)),
       if (overlays.isNotEmpty)
         'overlays': [for (final o in overlays.take(20)) o.toMap()],
       if (musicId.isNotEmpty) ...{
@@ -143,6 +143,7 @@ class StoryService {
     String musicArtist = '',
     double musicVolume = 0.8,
     bool keepSound = true,
+    bool longer = false,
   }) async {
     final me = await UserService.instance.getUser(_uid);
     if (me == null) throw StateError('Profile not found');
@@ -151,9 +152,7 @@ class StoryService {
       'authorUsername': me.username,
       'authorPhotoUrl': me.photoUrl,
       'createdAt': FieldValue.serverTimestamp(),
-      'expiresAt': Timestamp.fromDate(
-        DateTime.now().add(const Duration(hours: 24)),
-      ),
+      'expiresAt': Timestamp.fromDate(storyExpiry(DateTime.now(), longer)),
       'sharedFromPost': true,
       'imageUrl': videoRef.isEmpty ? imageRef : '',
       if (videoRef.isNotEmpty) ...{
@@ -173,6 +172,15 @@ class StoryService {
   }
 
   Future<void> deleteStory(Story s) async {
+    // the viewer list goes first (nobody could remove it afterwards)
+    try {
+      final views = await _stories.doc(s.id).collection('views').get();
+      for (final d in views.docs) {
+        d.reference.delete().ignore();
+      }
+    } catch (_) {
+      // best effort
+    }
     await _stories.doc(s.id).delete();
     if (s.shared) return; // the post still uses these files
     await MediaServer.instance.deleteRefs([

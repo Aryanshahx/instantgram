@@ -8,6 +8,7 @@
 //   POST /api/notify {kind:"message", chatId, messageId}
 //   POST /api/notify {kind:"call", callId}
 //   POST /api/notify {kind:"activity", to, itemId}
+//   POST /api/notify {kind:"storyView", storyId}   (first view; only people the author picked)
 //
 // Phones: pushTokens/{uid} = {tokens:[...], off:false}
 // Setting (Vercel): FIREBASE_SERVICE_ACCOUNT = the service-account JSON (plain or base64)
@@ -81,6 +82,17 @@ export function decodeValue(v) {
   if ("mapValue" in v) return decodeFields(v.mapValue.fields || {});
   return null;
 }
+/** Plain JS -> a Firestore REST value. */
+export function encodeValue(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (v instanceof Date) return { timestampValue: v.toISOString() };
+  if (typeof v === "boolean") return { booleanValue: v };
+  if (typeof v === "number") return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (typeof v === "string") return { stringValue: v };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(encodeValue) } };
+  return { mapValue: { fields: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, encodeValue(x)])) } };
+}
+
 export function decodeFields(f) {
   const out = {};
   for (const [k, v] of Object.entries(f || {})) out[k] = decodeValue(v);
@@ -96,6 +108,21 @@ function firestore(sa, project, fetchFn) {
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`firestore get ${res.status}`);
       return decodeFields((await res.json()).fields);
+    },
+    async create(collectionPath, data) {
+      const fields = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, encodeValue(v)]));
+      const res = await fetchFn(`${base}/${collectionPath}`, {
+        method: "POST", headers: { ...(await auth()), "content-type": "application/json" }, body: JSON.stringify({ fields }),
+      });
+      if (!res.ok) throw new Error(`firestore create ${res.status}`);
+    },
+    async patch(path, data) {
+      const fields = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, encodeValue(v)]));
+      const mask = Object.keys(data).map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join("&");
+      const res = await fetchFn(`${base}/${path}?${mask}&currentDocument.exists=true`, {
+        method: "PATCH", headers: { ...(await auth()), "content-type": "application/json" }, body: JSON.stringify({ fields }),
+      });
+      if (!res.ok) throw new Error(`firestore patch ${res.status}`);
     },
     async setTokens(uid, tokens) {
       const body = { fields: { tokens: { arrayValue: { values: tokens.map((t) => ({ stringValue: t })) } } } };
@@ -137,6 +164,7 @@ export function activityBody(item) {
     case "reply": return text ? `${who} replied: ${text}` : `${who} replied to your comment`;
     case "mention": return `${who} mentioned you`;
     case "follow": return `${who} started following you`;
+    case "story_view": return `${who} viewed your moment`;
     default: return `${who} interacted with your post`;
   }
 }
@@ -201,6 +229,31 @@ export async function notify(body, env, uid, deps = {}) {
     text = activityBody(item);
     data = { type: "activity", from: uid, postId: String(item.postId || "") };
     android = { channel: "activity", tag: `act_${item.type}_${item.postId || uid}` };
+  } else if (kind === "storyView") {
+    const { storyId } = body;
+    if (!SAFE_ID.test(storyId || "")) return bad("storyId is needed.");
+    const story = await db.get(`stories/${storyId}`);
+    if (!story || !story.authorId) return bad("No such moment.", 403);
+    const viewPath = `stories/${storyId}/views/${uid}`;
+    const view = await db.get(viewPath);
+    if (!view || !fresh(view.first, nowMs)) return bad("No such view.", 403);
+    if (view.alerted === true) return ok("already");
+    to = story.authorId;
+    if (to === uid) return ok("nobody");
+    const wanted = await db.get(`storyAlerts/${to}`);
+    if (!wanted || !Array.isArray(wanted.uids) || !wanted.uids.includes(uid)) return ok("not picked");
+    await db.patch(viewPath, { alerted: true }); // once per person and moment
+    const me = await db.get(`users/${uid}`);
+    const item = {
+      type: "story_view", actorId: uid, actorName: (me && me.username) || "",
+      actorPhoto: (me && me.photoUrl) || "", postId: "", thumb: "", text: "",
+      at: new Date(nowMs), read: false,
+    };
+    try { await db.create(`notifications/${to}/items`, item); } catch { /* the push still goes */ }
+    title = "InstantGram";
+    text = activityBody(item);
+    data = { type: "activity", from: uid, postId: "" };
+    android = { channel: "activity", tag: `sv_${storyId}_${uid}` };
   } else {
     return bad("Unknown kind.");
   }

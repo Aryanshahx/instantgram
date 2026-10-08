@@ -15,6 +15,7 @@ import 'activity_screens.dart';
 import 'app_screens.dart';
 import 'delete_account_screen.dart';
 import 'push_settings_screen.dart';
+import 'story_alerts_screen.dart';
 import 'settings_widgets.dart';
 
 class _Item {
@@ -122,6 +123,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'Notifications',
           'push alerts phone sound messages calls likes',
           (c, _) => openScreen(c, const PushSettingsScreen()),
+        ),
+        _Item(
+          'storyAlerts',
+          Icons.notifications_active_outlined,
+          'Moment view alerts',
+          'story viewers watch notify alert seen',
+          (c, _) => openScreen(c, const StoryAlertsScreen()),
         ),
         _Item(
           'access',

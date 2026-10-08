@@ -10,10 +10,12 @@ import '../../models/music.dart';
 import '../../models/story.dart';
 import '../../services/music_player.dart';
 import '../../services/story_service.dart';
+import '../../services/story_views.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/music_widgets.dart';
 import '../../widgets/story_overlays.dart';
+import '../../widgets/story_viewers_sheet.dart';
 
 class StoryViewer extends StatefulWidget {
   const StoryViewer({
@@ -33,6 +35,12 @@ class _StoryViewerState extends State<StoryViewer> {
   late final PageController _pc = PageController(
     initialPage: widget.initialIndex,
   );
+
+  @override
+  void initState() {
+    super.initState();
+    StoryViews.instance.newVisit(); // watching again later counts as a rewatch
+  }
 
   @override
   void dispose() {
@@ -209,6 +217,7 @@ class _GroupPlayerState extends State<_GroupPlayer>
       _loaded = true;
       _failed = failed;
     });
+    if (!failed && !_mine) StoryViews.instance.record(story);
     if (!_holding) {
       _anim.forward(from: 0);
       _vc?.play();
@@ -311,6 +320,19 @@ class _GroupPlayerState extends State<_GroupPlayer>
     }
   }
 
+  /// My own moment: who watched it (the moment waits meanwhile).
+  Future<void> _viewers() async {
+    _anim.stop();
+    _vc?.pause();
+    _music?.pause();
+    await showStoryViewers(context, _story.id);
+    if (mounted && _loaded && !_holding) {
+      _anim.forward();
+      _vc?.play();
+      _music?.play();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final story = _story;
@@ -356,6 +378,27 @@ class _GroupPlayerState extends State<_GroupPlayer>
             )
           else
             StoryCanvas(media: _media(story), overlays: story.overlays),
+          if (_mine)
+            Positioned(
+              left: 12,
+              bottom: 12,
+              child: SafeArea(
+                child: TextButton.icon(
+                  key: const ValueKey('storyViewers'),
+                  style: TextButton.styleFrom(
+                    backgroundColor: Colors.black45,
+                    foregroundColor: Colors.white,
+                    shape: const StadiumBorder(),
+                  ),
+                  onPressed: _viewers,
+                  icon: const Icon(Icons.visibility_outlined, size: 20),
+                  label: const Text(
+                    'Viewers',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ),
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),

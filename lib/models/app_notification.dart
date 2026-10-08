@@ -82,12 +82,16 @@ class AppNotification {
         return 'mentioned you';
       case 'follow':
         return 'started following you';
+      case 'story_view':
+        return 'viewed your moment';
       default:
         return 'interacted with your post';
     }
   }
 
   bool get isFollow => type == 'follow';
+
+  bool get isStoryView => type == 'story_view';
 }
 
 /// Empty list helper (keeps the stream contract simple in tests).

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../core/errors.dart';
 import 'push_service.dart';
+import 'story_views.dart';
 
 class AuthService {
   AuthService._();
@@ -174,6 +175,7 @@ class AuthService {
   Future<void> signOut() async {
     await PushService.instance
         .stop(); // this phone stops getting this account's pushes
+    StoryViews.instance.forget();
     await _auth.signOut();
   }
 }

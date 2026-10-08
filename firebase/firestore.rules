@@ -220,6 +220,29 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+
+      // who watched it: the viewer writes their own line (first time count 1, then +1 per
+      // rewatch); only the author reads the list (and each viewer their own line)
+      match /views/{viewerId} {
+        function story() {
+          return get(/databases/$(database)/documents/stories/$(storyId)).data;
+        }
+        allow read: if signedIn()
+          && (request.auth.uid == viewerId || story().authorId == request.auth.uid);
+        allow create: if signedIn() && request.auth.uid == viewerId
+          && story().authorId != request.auth.uid
+          && request.resource.data.keys().hasOnly(['username', 'photoUrl', 'first', 'last', 'count'])
+          && request.resource.data.count == 1;
+        allow update: if signedIn() && request.auth.uid == viewerId
+          && onlyChanges(['last', 'count'])
+          && request.resource.data.count == resource.data.count + 1;
+        allow delete: if signedIn() && story().authorId == request.auth.uid;
+      }
+    }
+
+    // people whose story views I want to hear about (the media signer reads it to send alerts)
+    match /storyAlerts/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
     }
   }
 }
