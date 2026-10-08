@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/chat.dart';
+import '../models/vanish.dart';
 import 'media_server.dart';
 import 'user_service.dart';
 
@@ -79,9 +80,9 @@ class ChatService {
     bool? muteMessages,
   }) async {
     final patch = <String, dynamic>{
-      if (pinned != null) 'pinned': pinned,
-      if (muteCalls != null) 'muteCalls': muteCalls,
-      if (muteMessages != null) 'muteMessages': muteMessages,
+      'pinned': ?pinned,
+      'muteCalls': ?muteCalls,
+      'muteMessages': ?muteMessages,
     };
     if (patch.isEmpty) return;
     await _chats.doc(chatId).update(patch);
@@ -314,23 +315,111 @@ class ChatService {
   }) async {
     final me = _me;
     if (ensureChat) await open(otherUid);
-    final ref = _chats.doc(chatIdFor(me, otherUid));
+    final chatId = chatIdFor(me, otherUid);
+    final ref = _chats.doc(chatId);
+    // disappearing messages (never for call lines)
+    final mode = fields['type'] == MsgType.call ? '' : (_vanish[chatId] ?? '');
+    final expire = Vanish.expireAt(mode, DateTime.now());
+    final line = mode.isNotEmpty ? Vanish.preview : preview;
     final batch = _db.batch();
     final msg = ref.collection('messages').doc();
     batch.set(msg, {
       ...fields,
+      if (mode.isNotEmpty) 'vanish': mode,
+      if (expire != null) 'expireAt': Timestamp.fromDate(expire),
       'senderId': me,
       'createdAt': FieldValue.serverTimestamp(),
       if (replyTo != null) 'replyTo': replyTo.toMap(),
     });
     batch.update(ref, {
-      'lastText': preview.length > 140 ? preview.substring(0, 140) : preview,
+      'lastText': line.length > 140 ? line.substring(0, 140) : line,
       'lastAt': FieldValue.serverTimestamp(),
       'lastSender': me,
       'seen.$me': FieldValue.serverTimestamp(),
     });
     await batch.commit();
     return msg.id;
+  }
+
+  // ------------------------------------------------------ disappearing messages
+
+  /// The mode of every chat that is open (or was), so new messages follow it.
+  final Map<String, String> _vanish = {};
+
+  /// The disappearing-messages mode of a chat, live ('' = off).
+  Stream<String> watchVanish(String chatId) =>
+      _chats.doc(chatId).snapshots().map((d) {
+        final v = '${d.data()?['vanish'] ?? ''}';
+        final mode = Vanish.isValid(v) ? v : Vanish.off;
+        _vanish[chatId] = mode;
+        return mode;
+      });
+
+  /// Turns disappearing messages on or off and writes a note into the chat.
+  Future<void> setVanish(
+    String otherUid,
+    String mode, {
+    required String myName,
+  }) async {
+    if (!Vanish.isValid(mode)) throw ArgumentError(mode);
+    final me = _me;
+    final chatId = chatIdFor(me, otherUid);
+    final ref = _chats.doc(chatId);
+    final batch = _db.batch();
+    batch.update(ref, {
+      'vanish': mode,
+      'vanishBy': me,
+      'vanishAt': FieldValue.serverTimestamp(),
+    });
+    batch.set(ref.collection('messages').doc(), {
+      'type': MsgType.system,
+      'text': Vanish.systemText(myName, mode),
+      'senderId': me,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+    _vanish[chatId] = mode;
+  }
+
+  /// Removes messages whose time is up (anyone in the chat may do it).
+  Future<int> sweepExpired(String chatId) async {
+    try {
+      final snap = await _chats
+          .doc(chatId)
+          .collection('messages')
+          .where('expireAt', isLessThanOrEqualTo: Timestamp.now())
+          .limit(400)
+          .get();
+      if (snap.docs.isEmpty) return 0;
+      final batch = _db.batch();
+      for (final d in snap.docs) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+      return snap.docs.length;
+    } catch (_) {
+      return 0; // offline: next time
+    }
+  }
+
+  /// "After seen" messages I received and had on screen: gone once I leave the chat.
+  Future<int> removeSeen(String chatId, Iterable<ChatMessage> shown) async {
+    final me = _me;
+    final mine = [
+      for (final m in shown)
+        if (m.vanish == Vanish.seen && m.senderId != me && !m.pending) m,
+    ];
+    if (mine.isEmpty) return 0;
+    try {
+      final batch = _db.batch();
+      for (final m in mine) {
+        batch.delete(_msg(chatId, m.id));
+      }
+      await batch.commit();
+    } catch (_) {
+      return 0;
+    }
+    return mine.length;
   }
 
   /// Wipes a message of mine that should not exist (its photo was rejected).

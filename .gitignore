@@ -48,3 +48,4 @@ __pycache__/
 signer/node_modules/
 signer/.vercel/
 signer/.env*
+*firebase-adminsdk*.json

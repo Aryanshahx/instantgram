@@ -95,7 +95,10 @@ class _MusicToggleChipState extends State<MusicToggleChip> {
     var p = _player;
     if (p == null) {
       p = MusicPlayer(track);
-      await p.init(volume: widget.post.musicVolume);
+      await p.init(
+        volume: widget.post.musicVolume,
+        startAt: widget.post.musicStart,
+      );
       if (!mounted) {
         await p.dispose();
         return;

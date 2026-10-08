@@ -20,6 +20,10 @@ class UserService {
 
   String get myUid => FirebaseAuth.instance.currentUser!.uid;
 
+  /// Shows the others that I have the app open (see PresenceService).
+  Future<void> markActive() =>
+      _users.doc(myUid).update({'lastActive': FieldValue.serverTimestamp()});
+
   Stream<AppUser?> watchUser(String uid) => _users
       .doc(uid)
       .snapshots()

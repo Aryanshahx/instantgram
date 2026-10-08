@@ -264,7 +264,7 @@ class _InlineVideoLayerState extends State<InlineVideoLayer>
     final track = post.playableMusic;
     if (track != null) {
       music = MusicPlayer(track);
-      await music.init();
+      await music.init(startAt: post.musicStart);
     }
     if (!mounted || gen != _gen || _hub.active.value != post.id) {
       await c?.dispose();

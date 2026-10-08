@@ -21,6 +21,7 @@ import '../../widgets/follow_button.dart';
 import '../../widgets/glass.dart';
 import '../../widgets/post_grid.dart';
 import '../../widgets/state_views.dart';
+import 'analytics_screen.dart';
 import 'edit_profile_screen.dart';
 import '../settings/account_screens.dart' show toggleBlock;
 import '../settings/settings_screen.dart';
@@ -535,6 +536,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 12),
               if (_isMe)
+                Column(
+                  children: [
                 Row(
                   children: [
                     Expanded(
@@ -555,6 +558,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         child: Text(context.tr('Share profile')),
                       ),
                     ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                // Your numbers for the whole account. One post's numbers open by holding it.
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    key: const ValueKey('dashboardButton'),
+                    style: _smallButton,
+                    onPressed: () =>
+                        openScreen(context, const AnalyticsScreen()),
+                    icon: const Icon(Icons.insights_rounded, size: 18),
+                    label: Text(context.tr('Dashboard')),
+                  ),
+                ),
                   ],
                 )
               else

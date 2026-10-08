@@ -18,7 +18,8 @@ import io.flutter.plugin.common.MethodChannel.Result;
 
 /**
  * `merge(video, audio, output, maxSeconds)` and `toAac(input, output, maxSeconds)` -> {seconds}.
- * Both run on a background thread.
+ * `mix(...)` builds a clip's sound from song, original sound and voiceover (see AudioMixer).
+ * All run on a background thread.
  */
 public class AudioMergePlugin implements FlutterPlugin, MethodCallHandler {
     private MethodChannel channel;
@@ -33,6 +34,10 @@ public class AudioMergePlugin implements FlutterPlugin, MethodCallHandler {
 
     @Override
     public void onMethodCall(@NonNull MethodCall call, @NonNull final Result result) {
+        if ("mix".equals(call.method)) {
+            mix(call, result);
+            return;
+        }
         final boolean merge = "merge".equals(call.method);
         final boolean convert = "toAac".equals(call.method);
         if (!merge && !convert) {
@@ -74,6 +79,65 @@ public class AudioMergePlugin implements FlutterPlugin, MethodCallHandler {
                 }
             }
         });
+    }
+
+    /**
+     * `mix(video, output, song?, songStart, songGain, origGain, voice?, voiceGain, fadeIn,
+     * fadeOut, speed, maxSeconds, cutToSong)` -> {seconds}. Seconds are doubles.
+     */
+    private void mix(@NonNull MethodCall call, @NonNull final Result result) {
+        final AudioMixer.Params p = new AudioMixer.Params();
+        p.video = call.argument("video");
+        final String output = call.argument("output");
+        if (p.video == null || output == null) {
+            result.error("bad_args", "the file names are missing", null);
+            return;
+        }
+        p.song = call.argument("song");
+        p.voice = call.argument("voice");
+        p.songStartUs = us(call.argument("songStart"), 0);
+        p.songGain = num(call.argument("songGain"), 1);
+        p.origGain = num(call.argument("origGain"), 0);
+        p.voiceGain = num(call.argument("voiceGain"), 1);
+        p.fadeInUs = us(call.argument("fadeIn"), 0);
+        p.fadeOutUs = us(call.argument("fadeOut"), 0);
+        p.speed = num(call.argument("speed"), 1);
+        p.maxUs = us(call.argument("maxSeconds"), 60);
+        Object turns = call.argument("turns");
+        p.turns = turns instanceof Number ? ((Number) turns).intValue() : 0;
+        Boolean cut = call.argument("cutToSong");
+        p.cutToSong = cut == null || cut;
+        pool.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final long written = AudioMixer.mix(p, output);
+                    final Map<String, Object> out = new HashMap<>();
+                    out.put("seconds", written / 1000000.0);
+                    main.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            result.success(out);
+                        }
+                    });
+                } catch (final Exception e) {
+                    main.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            result.error("mix_failed", String.valueOf(e.getMessage()), null);
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    private static double num(Object v, double fallback) {
+        return v instanceof Number ? ((Number) v).doubleValue() : fallback;
+    }
+
+    private static long us(Object seconds, double fallback) {
+        return (long) (num(seconds, fallback) * 1000000.0);
     }
 
     @Override

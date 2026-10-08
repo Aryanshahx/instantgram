@@ -96,6 +96,7 @@ class PostService {
     String? musicTitle,
     String? musicArtist,
     double musicVolume = 0.8,
+    double musicStart = 0,
     bool clip = false,
     int clipSeconds = kPhotoClipSeconds,
     PostOptions options = const PostOptions(),
@@ -124,6 +125,8 @@ class PostService {
       'musicTitle': ?musicTitle,
       'musicArtist': ?musicArtist,
       if (musicId != null) 'musicVolume': musicVolume,
+      if (musicId != null && musicStart > 0)
+        'musicStart': double.parse(musicStart.toStringAsFixed(2)),
       if (width > 0 && height > 0) 'imageWidth': width,
       if (width > 0 && height > 0) 'imageHeight': height,
       'likeCount': 0,
@@ -149,6 +152,7 @@ class PostService {
     String? musicTitle,
     String? musicArtist,
     double musicVolume = 0.8,
+    double musicStart = 0,
     bool keepSound = true,
     PostOptions options = const PostOptions(),
   }) async {
@@ -176,6 +180,8 @@ class PostService {
       'musicTitle': ?musicTitle,
       'musicArtist': ?musicArtist,
       if (musicId != null) 'musicVolume': musicVolume,
+      if (musicId != null && musicStart > 0)
+        'musicStart': double.parse(musicStart.toStringAsFixed(2)),
       if (musicId != null) 'keepSound': keepSound,
       'likeCount': 0,
       'commentCount': 0,
@@ -200,6 +206,7 @@ class PostService {
     String? musicTitle,
     String? musicArtist,
     double musicVolume = 0.8,
+    double musicStart = 0,
     bool keepSound = true,
     bool musicBaked = false,
     MediaFinish? finish,
@@ -224,6 +231,8 @@ class PostService {
       'musicTitle': ?musicTitle,
       'musicArtist': ?musicArtist,
       if (musicId != null) 'musicVolume': musicVolume,
+      if (musicId != null && musicStart > 0)
+        'musicStart': double.parse(musicStart.toStringAsFixed(2)),
       if (musicId != null) 'keepSound': keepSound,
       if (musicId != null && musicBaked) 'musicBaked': true,
       'likeCount': 0,

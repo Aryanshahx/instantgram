@@ -10,6 +10,7 @@ import '../../core/ui.dart';
 import '../../models/app_user.dart';
 import '../../models/chat.dart';
 import '../../services/chat_service.dart';
+import '../../services/presence_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/state_views.dart';
@@ -25,9 +26,18 @@ class InboxScreen extends StatefulWidget {
 }
 
 class _InboxScreenState extends State<InboxScreen> {
-  static final Map<String, Future<AppUser?>> _users = {};
-  static Future<AppUser?> _user(String uid) =>
-      _users.putIfAbsent(uid, () => UserService.instance.getUser(uid));
+  // Profiles are fetched again after a while, so the "active" dots stay fresh.
+  static final Map<String, (DateTime, Future<AppUser?>)> _users = {};
+  static Future<AppUser?> _user(String uid) {
+    final now = DateTime.now();
+    final hit = _users[uid];
+    if (hit != null && now.difference(hit.$1) < const Duration(minutes: 2)) {
+      return hit.$2;
+    }
+    final f = UserService.instance.getUser(uid);
+    _users[uid] = (now, f);
+    return f;
+  }
 
   final _controller = TextEditingController();
   Timer? _debounce;
@@ -176,7 +186,11 @@ class _InboxScreenState extends State<InboxScreen> {
         }
         return;
       case ChatOption.pin:
-        await _flag(thread, pinned: !thread.pinned, done: thread.pinned ? 'Unpinned' : 'Pinned to the top');
+        await _flag(
+          thread,
+          pinned: !thread.pinned,
+          done: thread.pinned ? 'Unpinned' : 'Pinned to the top',
+        );
         return;
       case ChatOption.muteCalls:
         await _flag(
@@ -250,17 +264,22 @@ class _InboxScreenState extends State<InboxScreen> {
                 future: _user(otherUid),
                 builder: (context, snap) {
                   final u = snap.data;
+                  final gone =
+                      snap.connectionState == ConnectionState.done &&
+                      !snap.hasError &&
+                      u == null;
                   final unread = t.isUnread(me);
                   final mine = t.lastSender == me;
                   return _Row(
-                    uid: otherUid,
+                    uid: gone ? null : otherUid,
                     avatarUrl: u?.photoUrl ?? '',
-                    name: u?.username ?? '...',
+                    name: gone ? kUserNotAvailable : (u?.username ?? '...'),
                     subtitle: '${mine ? 'You: ' : ''}${t.lastText}',
                     time: t.lastAt == null
                         ? ''
                         : timeago.format(t.lastAt!, locale: 'en_short'),
                     unread: unread,
+                    online: isActiveNow(u?.lastActive, DateTime.now()),
                     onTap: () => openScreen(
                       context,
                       ChatScreen(otherUid: otherUid, user: u),
@@ -286,6 +305,7 @@ class _Row extends StatelessWidget {
     required this.onTap,
     this.time = '',
     this.unread = false,
+    this.online = false,
     this.onLongPress,
   });
 
@@ -295,6 +315,9 @@ class _Row extends StatelessWidget {
   final String subtitle;
   final String time;
   final bool unread;
+
+  /// Shows a green dot: they have the app open right now.
+  final bool online;
   final VoidCallback onTap;
 
   /// Holding the row opens the chat options.
@@ -312,11 +335,26 @@ class _Row extends StatelessWidget {
       child: ListTile(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         contentPadding: const EdgeInsets.fromLTRB(10, 6, 14, 6),
-        leading: UserAvatar(
-          url: avatarUrl,
-          name: name,
-          radius: 25,
-          uid: uid,
+        leading: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            UserAvatar(url: avatarUrl, name: name, radius: 25, uid: uid),
+            if (online)
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  key: const ValueKey('activeDot'),
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2ECC71),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: context.card, width: 2.5),
+                  ),
+                ),
+              ),
+          ],
         ),
         title: Text(
           name,

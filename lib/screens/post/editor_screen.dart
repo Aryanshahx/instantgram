@@ -7,12 +7,15 @@ import 'package:flutter/scheduler.dart';
 import 'package:video_compress/video_compress.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../core/errors.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/finish.dart';
+import '../../models/audio_edits.dart';
 import '../../models/music.dart';
 import '../../models/story.dart';
 import '../../services/music_player.dart';
+import '../../services/voice_recorder.dart';
 import '../../services/overlay_painter.dart';
 import '../../services/photo_edit.dart';
 import '../../services/playhead.dart';
@@ -31,6 +34,7 @@ class EditorResult {
     this.look,
     this.overlays = const [],
     this.music,
+    this.audio = AudioEdits.none,
   });
 
   /// Photos: the picture to upload (texts and stickers are burned in). Null for videos.
@@ -50,6 +54,9 @@ class EditorResult {
 
   /// The audio track at the end of editing (null = none).
   final MusicTrack? music;
+
+  /// Which part of the song, the volumes, fades and the voiceover.
+  final AudioEdits audio;
 }
 
 /// One editing screen for photos and videos: audio, text, stickers, filters, adjust, and
@@ -66,6 +73,8 @@ class EditorScreen extends StatefulWidget {
     this.look,
     this.overlays = const [],
     this.music,
+    this.audio = AudioEdits.none,
+    this.voiceover = true,
     this.maxSeconds,
   });
 
@@ -80,6 +89,10 @@ class EditorScreen extends StatefulWidget {
   final VideoLook? look;
   final List<StoryOverlay> overlays;
   final MusicTrack? music;
+  final AudioEdits audio;
+
+  /// The Voiceover tool is offered (a single clip; not inside a post with several items).
+  final bool voiceover;
 
   /// Longest part of a video that may be kept (null = no limit).
   final int? maxSeconds;
@@ -88,7 +101,7 @@ class EditorScreen extends StatefulWidget {
   State<EditorScreen> createState() => _EditorScreenState();
 }
 
-enum _Tool { filters, adjust, crop }
+enum _Tool { filters, adjust, crop, audio, speed }
 
 class _EditorScreenState extends State<EditorScreen>
     with SingleTickerProviderStateMixin {
@@ -107,6 +120,17 @@ class _EditorScreenState extends State<EditorScreen>
   final List<StoryOverlay> _overlays = [];
   MusicTrack? _music;
   MusicPlayer? _player;
+
+  // sound: which part of the song, volumes, fades, voiceover
+  late AudioEdits _a = widget.audio;
+  MusicPlayer? _voice; // plays the recorded voiceover in step with the video
+  VoiceRecorder? _rec;
+  bool _recording = false;
+  DateTime _lastSync = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // video: speed and quarter turns
+  double _speed = 1;
+  int _turns = 0;
   // photos always have a tool open; videos keep the timeline in view and open a tool on demand
   _Tool? _tool = _Tool.filters;
   int _preset = 0; // index into _presets (0 = free)
@@ -162,8 +186,9 @@ class _EditorScreenState extends State<EditorScreen>
     } else {
       _loadPhoto();
     }
+    // A video's song starts once the picture is ready, so both begin at the same moment.
     final m = _music;
-    if (m != null) unawaited(_startPlayer(m));
+    if (m != null && !_isVideo) unawaited(_startPlayer(m));
   }
 
   Future<void> _loadPhoto() async {
@@ -206,16 +231,23 @@ class _EditorScreenState extends State<EditorScreen>
         final cap = widget.maxSeconds;
         if (cap != null && _end - _start > cap) _end = _start + cap;
         _mute = init?.mute ?? false;
+        _speed = init?.speed ?? 1;
+        _turns = init?.turns ?? 0;
         _rangeN.value = (_start, _end);
       });
+      _smooth.rate = _speed;
       await c.setLooping(false);
-      await c.setVolume(_mute ? 0 : 1);
+      await c.setVolume(_videoVolume);
+      if (_speed != 1) await c.setPlaybackSpeed(_speed);
       c.addListener(_tick);
       unawaited(_loadFrames());
       await c.seekTo(Duration(seconds: _start.round()));
       _smooth.seek(_start, _clock.elapsed);
       _pos.value = _start;
       await c.play();
+      final m = _music;
+      if (m != null) unawaited(_startPlayer(m));
+      if (_a.hasVoice) unawaited(_startVoice());
     } catch (e) {
       await c.dispose();
       if (mounted) setState(() => _loadError = e);
@@ -261,6 +293,12 @@ class _EditorScreenState extends State<EditorScreen>
         (v.position >= end ||
             (v.position >= v.duration && v.duration > Duration.zero))) {
       _loopBack();
+      return;
+    }
+    // a few times a second: the song and the voiceover must not drift away from the picture
+    if (v.isPlaying &&
+        DateTime.now().difference(_lastSync).inMilliseconds > 400) {
+      _syncSound();
     }
   }
 
@@ -277,13 +315,75 @@ class _EditorScreenState extends State<EditorScreen>
   void _loopBack() {
     final c = _c;
     if (c == null || _looping) return;
+    if (_recording) {
+      // the voiceover covers the clip once: at its end the recording stops
+      unawaited(_stopRecording());
+      return;
+    }
     _looping = true;
     _smooth.seek(_start, _clock.elapsed);
     _pos.value = _start;
     c
         .seekTo(Duration(milliseconds: (_start * 1000).round()))
         .then((_) => c.play())
-        .whenComplete(() => _looping = false);
+        .whenComplete(() {
+          _looping = false;
+          _syncSound(force: true, at: _start);
+        });
+  }
+
+  // ------------------------------------------------------- sound in step
+
+  /// The video's own sound in the preview: off when muted; under a song or a voiceover it
+  /// is at the chosen "original sound" level; at another speed it is left out (it would
+  /// not match the picture any more).
+  double get _videoVolume {
+    if (_mute || _speed != 1) return 0;
+    if (_music != null || _a.hasVoice) return _a.originalVolume;
+    return 1;
+  }
+
+  /// Puts the song and the voiceover where they belong for the picture. [at] = the video
+  /// position (seconds) when it is known better than the player's report (right after a
+  /// seek). [force] moves them even when they are only a little off.
+  void _syncSound({bool force = false, double? at}) {
+    _lastSync = DateTime.now();
+    final c = _c;
+    if (!_isVideo || c == null) return;
+    final videoSec = at ?? c.value.position.inMilliseconds / 1000;
+    final p = _player;
+    if (p != null && p.ready) {
+      final len = p.duration.inMilliseconds / 1000;
+      final want = songPositionFor(
+        videoSec: videoSec,
+        trimStart: _start,
+        songStart: _a.songStart,
+        speed: _speed,
+        songLength: len,
+      );
+      final now = p.position.inMilliseconds / 1000;
+      if (force || songIsOff(now, want)) {
+        p.seekTo(Duration(milliseconds: (want * 1000).round()));
+      }
+    }
+    final v = _voice;
+    if (v != null && v.ready && !_recording) {
+      final want = songPositionFor(
+        videoSec: videoSec,
+        trimStart: _start,
+        speed: _speed,
+      );
+      final len = v.duration.inMilliseconds / 1000;
+      if (len > 0 && want >= len) {
+        v.pause(); // the voiceover is over for this round
+      } else {
+        final now = v.position.inMilliseconds / 1000;
+        if (force || songIsOff(now, want)) {
+          v.seekTo(Duration(milliseconds: (want * 1000).round()));
+        }
+        if (!_paused && c.value.isPlaying && !v.playing) v.play();
+      }
+    }
   }
 
   @override
@@ -297,6 +397,8 @@ class _EditorScreenState extends State<EditorScreen>
     _framesTick.dispose();
     _c?.dispose();
     _player?.dispose();
+    _voice?.dispose();
+    _rec?.dispose();
     _proxy?.file.delete().ignore();
     super.dispose();
   }
@@ -308,33 +410,188 @@ class _EditorScreenState extends State<EditorScreen>
     _player = null;
     await old?.dispose();
     final p = MusicPlayer(t);
-    await p.init(volume: 0.8);
+    await p.init(volume: _a.songVolume, startAt: _a.songStart);
     if (!mounted || _music?.id != t.id) {
       await p.dispose();
       return;
     }
     _player = p;
-    if (!_paused) await p.play();
+    await _c?.setVolume(_videoVolume);
+    _syncSound(force: true);
+    if (!_paused && !_recording) await p.play();
+  }
+
+  /// The recorded voiceover, played in step with the picture.
+  Future<void> _startVoice() async {
+    final old = _voice;
+    _voice = null;
+    await old?.dispose();
+    if (!_a.hasVoice) return;
+    final path = _a.voicePath;
+    final v = MusicPlayer(MusicTrack.device(path: path, title: 'Voiceover'));
+    await v.init(volume: _a.voiceVolume, loop: false);
+    if (!mounted || _a.voicePath != path) {
+      await v.dispose();
+      return;
+    }
+    _voice = v; // plays once per round of the clip (it does not loop by itself)
+    _syncSound(force: true);
+    if (!_paused) await v.play();
   }
 
   Future<void> _audio() async {
+    // everything stops while the audio sheet is open (its previews play on their own)
+    final wasPaused = _paused;
+    _c?.pause();
     _player?.pause();
+    _voice?.pause();
     final t = await pickMusic(context, current: _music);
     if (!mounted) return;
-    if (t == null) {
-      if (!_paused) _player?.play();
-      return;
+    if (t != null) {
+      setState(() {
+        if (t.id != _music?.id) _a = _a.copyWith(songStart: 0);
+        _music = t;
+      });
+      await _startPlayer(t);
     }
-    setState(() => _music = t);
-    await _startPlayer(t);
+    if (!wasPaused && !_recording) {
+      await _c?.play();
+      if (!_isVideo) _player?.play();
+      _syncSound(force: true);
+    }
   }
 
   Future<void> _removeAudio() async {
     final old = _player;
     _player = null;
-    setState(() => _music = null);
+    setState(() {
+      _music = null;
+      _a = _a.copyWith(songStart: 0, fadeIn: 0, fadeOut: 0, songVolume: 1);
+      if (_tool == _Tool.audio && !_isVideo) _tool = _Tool.filters;
+    });
     await old?.dispose();
+    await _c?.setVolume(_videoVolume);
   }
+
+  // --------------------------------------------------------- audio tools
+
+  /// The song starts at [sec] (seconds into the song).
+  void _setSongStart(double sec) {
+    setState(() => _a = _a.copyWith(songStart: sec));
+    if (_isVideo) {
+      _syncSound(force: true);
+    } else {
+      _player?.seekTo(Duration(milliseconds: (sec * 1000).round()));
+    }
+  }
+
+  /// A new start point: the player is made again so it also starts there after its end.
+  Future<void> _songStartDone() async {
+    final m = _music;
+    if (m != null) await _startPlayer(m);
+  }
+
+  void _setSongVolume(double v) {
+    setState(() => _a = _a.copyWith(songVolume: v));
+    _player?.setVolume(v);
+  }
+
+  void _setOriginalVolume(double v) {
+    setState(() => _a = _a.copyWith(originalVolume: v));
+    _c?.setVolume(_videoVolume);
+  }
+
+  void _setVoiceVolume(double v) {
+    setState(() => _a = _a.copyWith(voiceVolume: v));
+    _voice?.setVolume(v);
+  }
+
+  // ------------------------------------------------------------ voiceover
+
+  /// Records over the clip from its first second: the video plays silently so the phone's
+  /// microphone only hears you, and the recording stops at the end of the clip.
+  Future<void> _recordVoice() async {
+    if (_recording) {
+      await _stopRecording();
+      return;
+    }
+    final c = _c;
+    if (c == null) return;
+    final rec = _rec ??= VoiceRecorder();
+    _player?.pause();
+    _voice?.pause();
+    await c.pause();
+    await c.setVolume(0);
+    await c.seekTo(Duration(milliseconds: (_start * 1000).round()));
+    _smooth.seek(_start, _clock.elapsed);
+    _pos.value = _start;
+    try {
+      await rec.start();
+    } catch (e) {
+      if (mounted) showToast(context, friendlyError(e));
+      await c.setVolume(_videoVolume);
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _recording = true;
+      _paused = false;
+    });
+    await c.play();
+  }
+
+  Future<void> _stopRecording() async {
+    final rec = _rec;
+    if (!_recording || rec == null) return;
+    setState(() => _recording = false);
+    final r = await rec.stop();
+    final c = _c;
+    if (c != null) {
+      await c.pause();
+      await c.seekTo(Duration(milliseconds: (_start * 1000).round()));
+      _smooth.seek(_start, _clock.elapsed);
+      _pos.value = _start;
+    }
+    if (!mounted) return;
+    if (r == null) {
+      showToast(context, 'Nothing was recorded. Try again.');
+    } else {
+      final old = _a.voicePath;
+      setState(() => _a = _a.copyWith(voicePath: r.file.path));
+      if (old.isNotEmpty && old != r.file.path) File(old).delete().ignore();
+    }
+    await c?.setVolume(_videoVolume);
+    await _startVoice();
+    if (!_paused) {
+      await c?.play();
+      _player?.play();
+      _syncSound(force: true, at: _start);
+    }
+  }
+
+  Future<void> _deleteVoice() async {
+    final old = _a.voicePath;
+    final v = _voice;
+    _voice = null;
+    setState(() => _a = _a.withoutVoice());
+    await v?.dispose();
+    if (old.isNotEmpty) File(old).delete().ignore();
+    await _c?.setVolume(_videoVolume);
+  }
+
+  // ---------------------------------------------------------- speed, turn
+
+  Future<void> _setSpeed(double s) async {
+    setState(() => _speed = s);
+    _smooth.rate = s;
+    final c = _c;
+    if (c == null) return;
+    await c.setPlaybackSpeed(s);
+    await c.setVolume(_videoVolume);
+    _syncSound(force: true);
+  }
+
+  void _turnVideo() => setState(() => _turns = (_turns + 1) % 4);
 
   // ------------------------------------------------------------ text, stickers
 
@@ -419,15 +676,17 @@ class _EditorScreenState extends State<EditorScreen>
     if (_paused) {
       c.pause();
       _player?.pause();
+      _voice?.pause();
     } else {
       c.play();
       _player?.play();
+      _syncSound(force: true);
     }
   }
 
   Future<void> _toggleMute() async {
     setState(() => _mute = !_mute);
-    await _c?.setVolume(_mute ? 0 : 1);
+    await _c?.setVolume(_videoVolume);
   }
 
   void _applyRange(double s, double e, bool startMoved) {
@@ -443,6 +702,7 @@ class _EditorScreenState extends State<EditorScreen>
     _smooth.seek(sec, _clock.elapsed);
     _pos.value = sec;
     _seek.request(Duration(milliseconds: (sec * 1000).round()));
+    _syncSound(force: true, at: sec);
   }
 
   void _rotate(int dir) {
@@ -483,10 +743,14 @@ class _EditorScreenState extends State<EditorScreen>
             ? _total.toDouble()
             : _total.clamp(1, widget.maxSeconds!).toDouble();
         _mute = false;
-        _c?.setVolume(1);
+        _speed = 1;
+        _turns = 0;
+        _smooth.rate = 1;
+        _c?.setPlaybackSpeed(1);
         _rangeN.value = (_start, _end);
       }
     });
+    _c?.setVolume(_videoVolume);
   }
 
   // ------------------------------------------------------------------- done
@@ -494,11 +758,15 @@ class _EditorScreenState extends State<EditorScreen>
   Future<void> _done() async {
     if (_busy) return;
     if (_isVideo) {
+      if (_recording) await _stopRecording();
+      if (!mounted) return;
       final ve = VideoEdits(
         start: _start.round(),
         end: _end.round(),
         total: _total,
         mute: _mute,
+        speed: _speed,
+        turns: _turns,
       );
       final look = VideoLook(
         filter: _e.filter,
@@ -512,6 +780,7 @@ class _EditorScreenState extends State<EditorScreen>
           look: look.isEmpty ? null : look,
           overlays: List.of(_overlays),
           music: _music,
+          audio: _a,
         ),
       );
       return;
@@ -526,6 +795,7 @@ class _EditorScreenState extends State<EditorScreen>
           photoEdits: _e.isEmpty ? null : _e,
           overlays: List.of(_overlays),
           music: _music,
+          audio: _a,
         ),
       );
     } catch (_) {
@@ -737,7 +1007,8 @@ class _EditorScreenState extends State<EditorScreen>
   Widget _videoPreview(BoxConstraints c) {
     final v = _c!;
     final size = v.value.size;
-    final aspect = size.height == 0 ? 16 / 9 : size.width / size.height;
+    final raw = size.height == 0 ? 16 / 9 : size.width / size.height;
+    final aspect = _turns.isOdd ? 1 / raw : raw;
     var w = c.maxWidth;
     var h = w / aspect;
     if (h > c.maxHeight) {
@@ -754,6 +1025,7 @@ class _EditorScreenState extends State<EditorScreen>
     if (!look.isEmpty) {
       video = ColorFiltered(colorFilter: lookFilter(look), child: video);
     }
+    if (_turns != 0) video = RotatedBox(quarterTurns: _turns, child: video);
     return Center(
       child: SizedBox(
         width: w,
@@ -768,6 +1040,39 @@ class _EditorScreenState extends State<EditorScreen>
               child: video,
             ),
             _overlayLayer(),
+            if (_recording)
+              Positioned(
+                top: 10,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    key: const ValueKey('voiceRecording'),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.mic_rounded, size: 18, color: Colors.white),
+                        SizedBox(width: 6),
+                        Text(
+                          'Recording - tap Voice to stop',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             if (_paused)
               const IgnorePointer(
                 child: Center(
@@ -795,11 +1100,13 @@ class _EditorScreenState extends State<EditorScreen>
         children: [
           if (_tool != null)
             SizedBox(
-              height: _isVideo ? 130 : 150,
+              height: _tool == _Tool.audio ? 190 : (_isVideo ? 130 : 150),
               child: switch (_tool!) {
                 _Tool.crop => _cropTools(),
                 _Tool.filters => _filterTools(),
                 _Tool.adjust => _adjustTools(),
+                _Tool.audio => _audioTools(),
+                _Tool.speed => _speedTools(),
               },
             ),
           Container(
@@ -818,12 +1125,29 @@ class _EditorScreenState extends State<EditorScreen>
                   _audio,
                   on: _music != null,
                 ),
+                if (_music != null || (_isVideo && widget.voiceover && _a.hasVoice))
+                  _toolButton(
+                    const ValueKey('tool_audio_edit'),
+                    Icons.graphic_eq_rounded,
+                    'Edit audio',
+                    _Tool.audio,
+                  ),
                 if (_music != null)
                   _actionButton(
                     const ValueKey('tool_audio_off'),
                     Icons.music_off_rounded,
                     'No audio',
                     _removeAudio,
+                  ),
+                if (_isVideo && widget.voiceover)
+                  _actionButton(
+                    const ValueKey('tool_voice'),
+                    _recording ? Icons.stop_circle_rounded : Icons.mic_rounded,
+                    _recording
+                        ? 'Stop'
+                        : (_a.hasVoice ? 'Voice again' : 'Voiceover'),
+                    _recordVoice,
+                    on: _recording || _a.hasVoice,
                   ),
                 _actionButton(
                   const ValueKey('tool_text'),
@@ -857,6 +1181,19 @@ class _EditorScreenState extends State<EditorScreen>
                     _Tool.crop,
                   ),
                 if (_isVideo) ...[
+                  _toolButton(
+                    const ValueKey('tool_speed'),
+                    Icons.speed_rounded,
+                    _speed == 1 ? 'Speed' : speedLabel(_speed),
+                    _Tool.speed,
+                  ),
+                  _actionButton(
+                    const ValueKey('tool_rotate'),
+                    Icons.rotate_90_degrees_cw_rounded,
+                    _turns == 0 ? 'Rotate' : '${_turns * 90}\u00b0',
+                    _turnVideo,
+                    on: _turns != 0,
+                  ),
                   _actionButton(
                     const ValueKey('tool_mute'),
                     _mute ? Icons.volume_off_rounded : Icons.volume_up_rounded,
@@ -883,8 +1220,17 @@ class _EditorScreenState extends State<EditorScreen>
     key,
     icon,
     label,
-    // on a video a second tap closes the tool again, so the timeline keeps its room
-    () => setState(() => _tool = (_isVideo && _tool == t) ? null : t),
+    // on a video a second tap closes the tool again, so the timeline keeps its room; on a
+    // photo the audio tool goes back to the filters
+    () => setState(() {
+      if (_tool != t) {
+        _tool = t;
+      } else if (_isVideo) {
+        _tool = null;
+      } else if (t == _Tool.audio) {
+        _tool = _Tool.filters;
+      }
+    }),
     on: _tool == t,
   );
 
@@ -895,10 +1241,11 @@ class _EditorScreenState extends State<EditorScreen>
     VoidCallback onTap, {
     bool on = false,
   }) {
+    final locked = _recording && key != const ValueKey('tool_voice');
     return InkWell(
       key: key,
       borderRadius: BorderRadius.circular(14),
-      onTap: _busy ? null : onTap,
+      onTap: _busy || locked ? null : onTap,
       child: SizedBox(
         width: 78,
         child: Column(
@@ -971,6 +1318,166 @@ class _EditorScreenState extends State<EditorScreen>
             );
           },
         ),
+      ),
+    );
+  }
+
+  static String _clock2(double s) {
+    final v = s.round();
+    return '${v ~/ 60}:${(v % 60).toString().padLeft(2, '0')}';
+  }
+
+  /// One labelled slider of the audio tool.
+  Widget _slider(
+    Key key,
+    String label,
+    double value,
+    double max,
+    String shown,
+    ValueChanged<double> onChanged, {
+    ValueChanged<double>? onEnd,
+  }) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 112,
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+          ),
+        ),
+        Expanded(
+          child: Slider(
+            key: key,
+            value: value.clamp(0.0, max),
+            max: max,
+            onChanged: onChanged,
+            onChangeEnd: onEnd,
+          ),
+        ),
+        SizedBox(
+          width: 46,
+          child: Text(
+            shown,
+            textAlign: TextAlign.right,
+            style: const TextStyle(fontSize: 12, color: Colors.white70),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Which part of the song, the volumes, the fades and the voiceover.
+  Widget _audioTools() {
+    final p = _player;
+    final songLen = p != null && p.ready
+        ? p.duration.inMilliseconds / 1000
+        : (_music?.seconds ?? 0).toDouble();
+    final startMax = songLen > 2 ? songLen - 1 : 0.0;
+    String pct(double v) => '${(v * 100).round()}%';
+    return ListView(
+      key: const ValueKey('audioTools'),
+      padding: const EdgeInsets.fromLTRB(16, 4, 12, 4),
+      children: [
+        if (_music != null) ...[
+          if (startMax > 0)
+            _slider(
+              const ValueKey('songStart'),
+              'Song starts at',
+              _a.songStart,
+              startMax,
+              _clock2(_a.songStart),
+              _setSongStart,
+              onEnd: (_) => _songStartDone(),
+            ),
+          _slider(
+            const ValueKey('songVolume'),
+            'Song volume',
+            _a.songVolume,
+            1,
+            pct(_a.songVolume),
+            _setSongVolume,
+          ),
+        ],
+        if (_isVideo) ...[
+          _slider(
+            const ValueKey('originalVolume'),
+            'Original sound',
+            _speed != 1 || _mute ? 0 : _a.originalVolume,
+            1,
+            _speed != 1
+                ? 'off'
+                : (_mute ? 'muted' : pct(_a.originalVolume)),
+            _speed != 1 || _mute ? (_) {} : _setOriginalVolume,
+          ),
+          if (_music != null) ...[
+            _slider(
+              const ValueKey('fadeIn'),
+              'Fade in',
+              _a.fadeIn,
+              AudioEdits.maxFade,
+              '${_a.fadeIn.toStringAsFixed(1)} s',
+              (v) => setState(() => _a = _a.copyWith(fadeIn: v)),
+            ),
+            _slider(
+              const ValueKey('fadeOut'),
+              'Fade out',
+              _a.fadeOut,
+              AudioEdits.maxFade,
+              '${_a.fadeOut.toStringAsFixed(1)} s',
+              (v) => setState(() => _a = _a.copyWith(fadeOut: v)),
+            ),
+          ],
+          if (_a.hasVoice)
+            Row(
+              children: [
+                Expanded(
+                  child: _slider(
+                    const ValueKey('voiceVolume'),
+                    'Voiceover',
+                    _a.voiceVolume,
+                    1,
+                    pct(_a.voiceVolume),
+                    _setVoiceVolume,
+                  ),
+                ),
+                IconButton(
+                  key: const ValueKey('voiceDelete'),
+                  tooltip: 'Delete the voiceover',
+                  icon: const Icon(Icons.delete_outline_rounded),
+                  onPressed: _deleteVoice,
+                ),
+              ],
+            ),
+          if (_speed != 1)
+            const Padding(
+              padding: EdgeInsets.only(top: 2, bottom: 6),
+              child: Text(
+                'At another speed the original sound is left out; songs and voiceovers keep their own speed.',
+                style: TextStyle(fontSize: 11.5, color: Colors.white54),
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  /// 0.5x to 2x (the picture only).
+  Widget _speedTools() {
+    return Center(
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        alignment: WrapAlignment.center,
+        children: [
+          for (final sp in kClipSpeeds)
+            ChoiceChip(
+              key: ValueKey('speed_$sp'),
+              label: Text(speedLabel(sp)),
+              selected: _speed == sp,
+              onSelected: (_) => _setSpeed(sp),
+            ),
+        ],
       ),
     );
   }

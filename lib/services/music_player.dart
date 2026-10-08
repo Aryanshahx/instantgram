@@ -18,7 +18,27 @@ class MusicPlayer {
   bool _disposed = false;
   bool get ready => _c != null && _c!.value.isInitialized && !_disposed;
 
-  Future<void> init({double volume = 1}) async {
+  /// Where the track starts (seconds) and where it starts again after the end.
+  double _startAt = 0;
+  bool _wrapping = false;
+
+  /// Where the track is now (zero before it is ready).
+  Duration get position => ready ? _c!.value.position : Duration.zero;
+
+  /// Length of the track (zero when unknown).
+  Duration get duration => ready ? _c!.value.duration : Duration.zero;
+
+  bool get playing => ready && _c!.value.isPlaying;
+
+  /// [startAt] = seconds into the track where it begins, and where it begins again after
+  /// its end (the part of the song chosen in the editor).
+  /// [loop] false = plays once and stops at the end (a voiceover).
+  Future<void> init({
+    double volume = 1,
+    double startAt = 0,
+    bool loop = true,
+  }) async {
+    _startAt = startAt < 0 ? 0 : startAt;
     final opts = VideoPlayerOptions(mixWithOthers: true);
     VideoPlayerController c;
     try {
@@ -47,7 +67,14 @@ class MusicPlayer {
     }
     try {
       await c.initialize();
-      await c.setLooping(true);
+      final len = c.value.duration.inMilliseconds / 1000;
+      if (len > 0 && _startAt >= len - 0.5) _startAt = 0; // past the end: from the start
+      // From the start the player loops by itself; from a chosen point it is sent back there.
+      await c.setLooping(loop && _startAt == 0);
+      if (_startAt > 0) {
+        await c.seekTo(Duration(milliseconds: (_startAt * 1000).round()));
+      }
+      if (loop && _startAt > 0) c.addListener(() => _wrap(c));
       await c.setVolume(volume.clamp(0.0, 1.0));
     } catch (_) {
       await c.dispose();
@@ -60,6 +87,31 @@ class MusicPlayer {
     _c = c;
   }
 
+  /// At the end of the track: back to the chosen start, and on.
+  void _wrap(VideoPlayerController c) {
+    final v = c.value;
+    if (_wrapping || _disposed || !v.isInitialized) return;
+    final end = v.duration - const Duration(milliseconds: 120);
+    if (v.duration > Duration.zero && v.position >= end) {
+      _wrapping = true;
+      c
+          .seekTo(Duration(milliseconds: (_startAt * 1000).round()))
+          .then((_) => c.play())
+          .whenComplete(() => _wrapping = false);
+    }
+  }
+
+  /// Moves the track to [to] (kept inside the track).
+  Future<void> seekTo(Duration to) async {
+    if (!ready) return;
+    final len = _c!.value.duration;
+    var t = to < Duration.zero ? Duration.zero : to;
+    if (len > Duration.zero && t >= len) {
+      t = Duration(milliseconds: (_startAt * 1000).round());
+    }
+    await _c!.seekTo(t);
+  }
+
   Future<void> play() async {
     if (ready) await _c!.play();
   }
@@ -69,7 +121,9 @@ class MusicPlayer {
   }
 
   Future<void> restart() async {
-    if (ready) await _c!.seekTo(Duration.zero);
+    if (ready) {
+      await _c!.seekTo(Duration(milliseconds: (_startAt * 1000).round()));
+    }
   }
 
   Future<void> setVolume(double v) async {

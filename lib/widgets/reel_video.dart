@@ -177,7 +177,7 @@ class _ReelVideoState extends State<ReelVideo> {
       final track = widget.post.playableMusic;
       if (track != null) {
         music = MusicPlayer(track);
-        await music.init();
+        await music.init(startAt: widget.post.musicStart);
       }
       if (!mounted || gen != _gen) {
         await c.dispose();

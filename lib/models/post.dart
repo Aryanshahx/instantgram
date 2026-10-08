@@ -119,6 +119,7 @@ class Post {
     this.viewCount = 0,
     this.musicId = '',
     this.musicVolume = 0.8,
+    this.musicStart = 0,
     this.keepSound = true,
     this.musicBaked = false,
     this.media = const [],
@@ -167,6 +168,9 @@ class Post {
   final String musicId;
   final double musicVolume;
   final bool keepSound;
+
+  /// Seconds into the song where it starts (the part chosen in the editor).
+  final double musicStart;
 
   /// The song is already mixed into the video file (made on the phone with a hit song). Then
   /// nothing is played on top of it; the name is still shown.
@@ -287,6 +291,9 @@ class Post {
       musicVolume: m['musicVolume'] is num
           ? (m['musicVolume'] as num).toDouble().clamp(0.0, 1.0)
           : 0.8,
+      musicStart: m['musicStart'] is num
+          ? (m['musicStart'] as num).toDouble().clamp(0.0, 3600.0)
+          : 0,
       keepSound: m['keepSound'] is bool ? m['keepSound'] as bool : true,
       musicBaked: m['musicBaked'] == true,
       shareCount: _int(m['shareCount']),

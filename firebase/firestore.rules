@@ -139,24 +139,29 @@ service cloud.firestore {
         && request.resource.data.members[0] < request.resource.data.members[1]
         && chatId == request.resource.data.members[0] + '_' + request.resource.data.members[1];
       // members update the preview, the "seen" times and their own chat settings
-      // (pin, mute calls, mute messages), never the member list
+      // (pin, mute calls, mute messages, disappearing messages), never the member list
       allow update: if signedIn()
         && request.auth.uid in resource.data.members
-        && onlyChanges(['lastText', 'lastAt', 'lastSender', 'seen', 'pinnedId', 'pinnedPreview', 'pinnedBy', 'pinned', 'muteCalls', 'muteMessages']);
+        && onlyChanges(['lastText', 'lastAt', 'lastSender', 'seen', 'pinnedId', 'pinnedPreview', 'pinnedBy', 'pinned', 'muteCalls', 'muteMessages', 'vanish', 'vanishBy', 'vanishAt'])
+        && request.resource.data.get('vanish', '') in ['', 'seen', '24h', '7d'];
       // deleting a chat from the inbox (the app removes the messages first)
       allow delete: if signedIn() && request.auth.uid in resource.data.members;
 
       match /messages/{messageId} {
         allow read: if signedIn()
           && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.members;
-        // text, photo, GIF, voice note, location, a shared post or a call line (+ reply / forwarded)
+        // text, photo, GIF, voice note, location, a shared post, a call line or a note
+        // (+ reply / forwarded / disappearing)
         allow create: if signedIn()
           && request.resource.data.senderId == request.auth.uid
           && request.resource.data.keys().hasOnly([
             'senderId', 'type', 'text', 'createdAt', 'mediaUrl', 'width', 'height',
             'duration', 'lat', 'lng', 'postId', 'postThumb', 'postTitle',
-            'postAuthor', 'postIsClip', 'replyTo', 'forwarded', 'callVideo', 'callStatus'])
-          && request.resource.data.get('type', 'text') in ['text', 'image', 'gif', 'voice', 'location', 'post', 'call']
+            'postAuthor', 'postIsClip', 'replyTo', 'forwarded', 'callVideo', 'callStatus',
+            'vanish', 'expireAt'])
+          && request.resource.data.get('type', 'text') in ['text', 'image', 'gif', 'voice', 'location', 'post', 'call', 'system']
+          && request.resource.data.get('vanish', '') in ['', 'seen', '24h', '7d']
+          && (!('expireAt' in request.resource.data) || request.resource.data.expireAt is timestamp)
           && request.resource.data.text is string
           && request.resource.data.text.size() <= 2000
           && (request.resource.data.get('type', 'text') != 'text' || request.resource.data.text.size() > 0)

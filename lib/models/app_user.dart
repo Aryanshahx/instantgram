@@ -20,6 +20,7 @@ class AppUser {
     this.language = '',
     this.country = '',
     this.birthDate,
+    this.lastActive,
   });
 
   final String uid;
@@ -56,6 +57,9 @@ class AppUser {
   final String country;
   final DateTime? birthDate;
 
+  /// When the app was last open (for "Active now" in chats).
+  final DateTime? lastActive;
+
   factory AppUser.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? const <String, dynamic>{};
     return AppUser(
@@ -83,6 +87,9 @@ class AppUser {
       isPrivate: m['isPrivate'] == true,
       language: _str(m['language']),
       country: _str(m['country']),
+      lastActive: m['lastActive'] is Timestamp
+          ? (m['lastActive'] as Timestamp).toDate()
+          : null,
       birthDate: m['birthDate'] is Timestamp
           ? (m['birthDate'] as Timestamp).toDate()
           : null,

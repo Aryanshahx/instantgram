@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handle, presign, s3Store, verifyFirebaseToken, AuthError, sniffOk, parseKey, LIMITS } from "../lib/core.js";
+import { handle, presign, s3Store, verifyFirebaseToken, AuthError, sniffOk, parseKey, parseList, sameSecret, LIMITS } from "../lib/core.js";
 
 const PROJECT = "demo-project";
 const b64u = (buf) => Buffer.from(buf).toString("base64url");
@@ -43,6 +43,12 @@ class FakeBucket {
     return { arrayBuffer: async () => part.buffer.slice(part.byteOffset, part.byteOffset + part.byteLength) };
   }
   async delete(key) { this.objs.delete(key); this.deleted.push(key); }
+  async list(prefix, token = "") {
+    const all = [...this.objs.keys()].filter((k) => k.startsWith(prefix)).sort();
+    const from = token ? Number(token) : 0;
+    const page = all.slice(from, from + 2); // tiny pages, so paging is tested too
+    return { keys: page, next: from + 2 < all.length ? String(from + 2) : "" };
+  }
 }
 
 const baseEnv = () => ({
@@ -322,4 +328,67 @@ test("music: a busy Openverse gives a friendly message, a registered key is used
     globalThis.fetch = prevFetch;
     console.error = quiet;
   }
+});
+
+// ------------------------------------------------------------ admin (account deletion)
+const ADMIN = "k".repeat(40);
+const admin = (body, key, env) =>
+  handle(new Request("https://w.example/api/admin", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(key ? { "x-admin-key": key } : {}) },
+    body: JSON.stringify(body ?? {}),
+  }), env, "admin", env.BUCKET);
+
+test("admin: switched off without ADMIN_KEY, refuses a wrong key", async () => {
+  const env = baseEnv();
+  assert.equal((await admin({ op: "check" }, ADMIN, env)).status, 404);
+  env.ADMIN_KEY = "short";
+  assert.equal((await admin({ op: "check" }, "short", env)).status, 404); // too short to be safe
+  env.ADMIN_KEY = ADMIN;
+  assert.equal((await admin({ op: "check" }, null, env)).status, 403);
+  assert.equal((await admin({ op: "check" }, "x".repeat(40), env)).status, 403);
+  const ok = await admin({ op: "check" }, ADMIN, env);
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { ok: true });
+  assert.equal((await admin({ op: "wipe", uid: "../etc" }, ADMIN, env)).status, 400);
+  assert.equal((await admin({ op: "nope" }, ADMIN, env)).status, 400);
+});
+
+test("admin: wipe removes every file of that user and nobody else's", async () => {
+  const env = { ...baseEnv(), ADMIN_KEY: ADMIN };
+  const h = (c) => c.repeat(32);
+  const gone = [
+    `image/deaduser/${h("a")}.jpg`, `image/deaduser/${h("b")}.png`,
+    `video/deaduser/${h("c")}.mp4`, `video/deaduser/${h("d")}.mp4`, `video/deaduser/${h("e")}.mp4`,
+    `thumb/deaduser/${h("f")}.jpg`,
+  ];
+  const kept = [`image/deaduser2/${h("a")}.jpg`, `video/alive/${h("c")}.mp4`, `image/deaduser/notours.txt`];
+  for (const k of [...gone, ...kept]) env.BUCKET.put(k, new Uint8Array(4));
+  const res = await admin({ op: "wipe", uid: "deaduser" }, ADMIN, env);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true, deleted: gone.length, more: false });
+  for (const k of gone) assert.ok(!env.BUCKET.objs.has(k), k);
+  for (const k of kept) assert.ok(env.BUCKET.objs.has(k), k);
+  // nothing left: a second wipe deletes nothing
+  assert.deepEqual(await (await admin({ op: "wipe", uid: "deaduser" }, ADMIN, env)).json(), { ok: true, deleted: 0, more: false });
+});
+
+test("admin: big wipes come back in batches", async () => {
+  const env = { ...baseEnv(), ADMIN_KEY: ADMIN };
+  for (let i = 0; i < 160; i++) env.BUCKET.put(`image/many/${i.toString(16).padStart(32, "0")}.jpg`, new Uint8Array(1));
+  const first = await (await admin({ op: "wipe", uid: "many" }, ADMIN, env)).json();
+  assert.deepEqual(first, { ok: true, deleted: 150, more: true });
+  const second = await (await admin({ op: "wipe", uid: "many" }, ADMIN, env)).json();
+  assert.deepEqual(second, { ok: true, deleted: 10, more: false });
+});
+
+test("parseList and sameSecret", () => {
+  const xml = "<ListBucketResult><IsTruncated>true</IsTruncated><Contents><Key>image/u/a&amp;b.jpg</Key></Contents>" +
+    "<Contents><Key>video/u/c.mp4</Key></Contents><NextContinuationToken>tok=1</NextContinuationToken></ListBucketResult>";
+  assert.deepEqual(parseList(xml), { keys: ["image/u/a&b.jpg", "video/u/c.mp4"], next: "tok=1" });
+  assert.deepEqual(parseList("<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>"), { keys: [], next: "" });
+  assert.ok(sameSecret("abc", "abc"));
+  assert.ok(!sameSecret("abc", "abd"));
+  assert.ok(!sameSecret("abc", "abcd"));
+  assert.ok(!sameSecret(undefined, "abc"));
 });

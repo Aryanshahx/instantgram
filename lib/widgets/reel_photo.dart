@@ -76,7 +76,7 @@ class _ReelPhotoState extends State<ReelPhoto>
       final track = musicById(widget.post.musicId);
       if (track != null) {
         final m = MusicPlayer(track);
-        await m.init();
+        await m.init(startAt: widget.post.musicStart);
         if (!mounted) {
           await m.dispose();
           return;

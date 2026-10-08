@@ -12,8 +12,9 @@ import '../reels/reels_screen.dart';
 
 /// Numbers of one account: Overview, Reach, Engagement and Audience.
 ///
-/// Opened from the Me screen. Everything is counted from what the app already stores, so
-/// these numbers start with this version; older posts have what was counted since then.
+/// The Dashboard button in the Me screen opens the whole account. Holding a post or a clip
+/// opens it with [postId]: then only that one post's numbers are shown, nothing else.
+/// Everything is counted from what the app already stores.
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key, this.uid, this.postId});
 
@@ -36,7 +37,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   @override
   void initState() {
     super.initState();
-    _future = AnalyticsService.instance.load(_days, uid: widget.uid);
+    _future = AnalyticsService.instance.load(
+      _days,
+      uid: widget.uid,
+      postId: widget.postId,
+    );
   }
 
   void _reload() {
@@ -67,7 +72,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.postId == null ? 'Analytics' : 'Post analytics'),
+        title: Text(widget.postId == null ? 'Dashboard' : 'Insights'),
       ),
       body: FutureBuilder<Insights>(
         key: const ValueKey('analyticsBody'),
@@ -78,6 +83,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           }
           if (!snap.hasData) return const CenteredLoader();
           final data = snap.data!;
+          if (widget.postId != null) return _postView(data);
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
             children: [
@@ -114,6 +120,151 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           );
         },
       ),
+    );
+  }
+
+  // -------------------------------------------------------------- one post only
+
+  /// The numbers of the one post or clip that was held: no other posts, no account totals.
+  Widget _postView(Insights d) {
+    if (d.posts.isEmpty) {
+      return const EmptyState(
+        key: ValueKey('postInsightsGone'),
+        icon: Icons.insights_rounded,
+        title: 'Not available',
+        subtitle: 'This post was deleted, so it has no numbers any more.',
+      );
+    }
+    final p = d.posts.first;
+    final kind = p.post.isClip ? 'clip' : 'post';
+    // With one post loaded, the period's viewers are exactly this post's viewers.
+    final followers = d.followersReached;
+    final others = d.nonFollowersReached;
+    return ListView(
+      key: const ValueKey('postInsights'),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
+      children: [
+        _Card(
+          child: _PostRow(
+            insight: p,
+            onTap: () => _openPost(p.post),
+            trailing: 'Open',
+          ),
+        ),
+        const SizedBox(height: 12),
+        PillTabs(
+          labels: const ['7 days', '30 days', '90 days'],
+          index: _ranges.indexOf(_days),
+          onChanged: (i) => _pickRange(_ranges[i]),
+        ),
+        const SizedBox(height: 12),
+        _Grid(children: [
+          _BigNumber(
+            key: const ValueKey('postViews'),
+            label: 'Views',
+            value: _fmt(p.views),
+            hint: 'in the last ${d.days} days',
+          ),
+          _BigNumber(
+            key: const ValueKey('postReach'),
+            label: 'Accounts reached',
+            value: _fmt(p.reach),
+            hint: 'everybody counted once',
+          ),
+          _BigNumber(
+            key: const ValueKey('postLikes'),
+            label: 'Likes',
+            value: _fmt(p.likes),
+            hint: 'on this $kind',
+          ),
+          _BigNumber(
+            key: const ValueKey('postComments'),
+            label: 'Comments',
+            value: _fmt(p.comments),
+            hint: 'on this $kind',
+          ),
+          _BigNumber(
+            key: const ValueKey('postShares'),
+            label: 'Shares',
+            value: _fmt(p.shares),
+            hint: 'sent on',
+          ),
+          _BigNumber(
+            key: const ValueKey('postReposts'),
+            label: 'Reposts',
+            value: _fmt(p.reposts),
+            hint: 'shared again',
+          ),
+        ]),
+        const SizedBox(height: 12),
+        _Card(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Head('Views per day'),
+              const SizedBox(height: 10),
+              _Chart(values: d.dailyViews, days: d.days),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _Card(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Head('Who saw it'),
+              const SizedBox(height: 10),
+              _Split(
+                left: followers,
+                right: others,
+                leftLabel: 'Followers',
+                rightLabel: 'Others',
+              ),
+              const SizedBox(height: 8),
+              _Line('Engagement', '${_fmt(p.engagement)} reactions'),
+              _Line('Engagement rate', _pct(p.engagementRate)),
+            ],
+          ),
+        ),
+        if (d.countries.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _Card(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _Head('Where they are'),
+                const SizedBox(height: 10),
+                for (final e in d.countries.entries)
+                  _BarRow(
+                    label: e.key,
+                    value: e.value,
+                    of: p.reach == 0 ? 1 : p.reach,
+                    showNumber: true,
+                  ),
+              ],
+            ),
+          ),
+        ],
+        if (d.languages.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _Card(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _Head('Language'),
+                const SizedBox(height: 10),
+                for (final e in d.languages.entries)
+                  _BarRow(
+                    label: e.key,
+                    value: e.value,
+                    of: p.reach == 0 ? 1 : p.reach,
+                    showNumber: true,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 

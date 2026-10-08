@@ -5,13 +5,15 @@ import 'package:video_player/video_player.dart';
 
 import '../../core/theme.dart';
 
-/// Trim and sound settings for a clip. Times are whole seconds.
+/// Trim, sound, speed and rotation of a clip. Times are whole seconds.
 class VideoEdits {
   const VideoEdits({
     required this.start,
     required this.end,
     required this.total,
     this.mute = false,
+    this.speed = 1,
+    this.turns = 0,
   });
 
   final int start;
@@ -21,9 +23,26 @@ class VideoEdits {
   final int total;
   final bool mute;
 
+  /// 0.5 = slow motion, 2 = twice as fast (the picture only; songs keep their speed).
+  final double speed;
+
+  /// Quarter turns to the right (0-3).
+  final int turns;
+
   bool get trimmed => start > 0 || end < total;
-  bool get isEmpty => !trimmed && !mute;
+  bool get changesSpeed => speed != 1;
+  bool get rotated => turns % 4 != 0;
+  bool get isEmpty => !trimmed && !mute && !changesSpeed && !rotated;
+
+  /// Seconds of the video that are kept.
   int get length => end - start;
+
+  /// Seconds the clip lasts once the speed is applied.
+  int get playSeconds {
+    final s = speed <= 0 ? 1.0 : speed;
+    final v = (length / s).round();
+    return v < 1 ? 1 : v;
+  }
 }
 
 /// Pick the part of the clip to keep and switch the sound off. The preview plays only the

@@ -15,17 +15,18 @@ import '../../core/media_url.dart';
 import '../../core/responsive.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import '../../models/audio_edits.dart';
 import '../../models/finish.dart';
 import '../../models/music.dart';
 import '../../models/post.dart';
 import '../../models/story.dart' show StoryOverlay, kMaxStorySeconds;
 import '../../services/audio_merger.dart';
+import '../../services/clip_sound.dart';
 import '../../services/device_audio.dart';
 import '../../services/itunes_service.dart';
 import '../../services/media_server.dart';
 import '../../services/media_service.dart';
 import '../../services/mp4_faststart.dart';
-import '../../services/music_player.dart';
 import '../../services/overlay_painter.dart';
 import '../../services/photo_edit.dart';
 import '../../services/post_service.dart';
@@ -155,8 +156,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   bool _previewPaused = false;
   int _previewGen = 0;
 
-  /// The chosen track, heard while you look at the preview.
-  MusicPlayer? _previewMusic;
+  /// The chosen track (and a voiceover), heard in step with the preview.
+  final ClipSound _sound = ClipSound();
+
+  /// Which part of the song, volumes, fades and the voiceover (set in the editor).
+  AudioEdits _audio = AudioEdits.none;
 
   final _caption = TextEditingController();
   bool _busy = false;
@@ -198,7 +202,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   @override
   void dispose() {
     _caption.dispose();
-    _previewMusic?.dispose();
+    _sound.dispose();
     _preview?.dispose();
     for (final i in _items) {
       _dropEditedCopy(i);
@@ -240,7 +244,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   /// Something that can be played or paused in the preview: a video, or the music.
-  bool get _canPlay => (_active?.video ?? false) || _previewMusic != null;
+  bool get _canPlay => (_active?.video ?? false) || _sound.song != null;
 
   // ------------------------------------------------------------------ picking
 
@@ -473,45 +477,85 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       await c.initialize();
       await c.setLooping(true);
       await c.setVolume(_previewVolume(it));
+      final sp = it.videoEdits?.speed ?? 1;
+      if (sp != 1) await c.setPlaybackSpeed(sp);
       if (!mounted || gen != _previewGen) {
         await c.dispose();
         return;
       }
       c.addListener(_previewTick);
       setState(() => _preview = c);
+      await _applySound(); // this clip's trim start and speed
+      if (!mounted) return;
       _syncPreview();
     } catch (_) {
       await c.dispose(); // the frame then shows the thumbnail instead
     }
   }
 
-  /// Keeps the preview inside the trimmed part of the clip.
+  /// Keeps the preview inside the trimmed part of the clip, and the song and voiceover in
+  /// step with it.
   void _previewTick() {
     final c = _preview;
+    if (c == null) return;
     final e = _previewFor?.videoEdits;
-    if (c == null || e == null || !e.trimmed) return;
     final pos = c.value.position;
-    if (pos >= Duration(seconds: e.end) ||
-        pos < Duration(seconds: e.start) - const Duration(milliseconds: 400)) {
+    if (e != null &&
+        e.trimmed &&
+        (pos >= Duration(seconds: e.end) ||
+            pos <
+                Duration(seconds: e.start) -
+                    const Duration(milliseconds: 400))) {
       c.seekTo(Duration(seconds: e.start));
+      _sound.follow(e.start.toDouble(), playing: _previewShowing, force: true);
+      return;
     }
+    _sound.follow(
+      pos.inMilliseconds / 1000,
+      playing: _previewShowing && c.value.isPlaying,
+    );
   }
 
-  /// Sound of the video in the preview: off when it was muted in the editor.
-  double _previewVolume(_Item it) => it.videoEdits?.mute == true ? 0 : 1;
+  bool get _previewShowing =>
+      _step == 0 && !_busy && !_previewPaused && _hasMedia;
+
+  /// Sound of the video in the preview, the same as it will be posted: off when muted or at
+  /// another speed; under a song or a voiceover at the chosen "original sound" level.
+  double _previewVolume(_Item it) {
+    final ve = it.videoEdits;
+    if (ve?.mute == true || (ve?.speed ?? 1) != 1) return 0;
+    if (_music != null || _audio.hasVoice) return _audio.originalVolume;
+    return 1;
+  }
+
+  /// Gives the sound helper the current song, edits, trim start and speed.
+  Future<void> _applySound() async {
+    final it = _active;
+    final ve = it != null && it.video ? it.videoEdits : null;
+    await _sound.set(
+      track: _music,
+      audio: _audio,
+      trimStart: (ve != null && ve.trimmed ? ve.start : 0).toDouble(),
+      speed: ve?.speed ?? 1,
+      songVolumeScale: kMusicVolume,
+    );
+  }
 
   void _syncPreview() {
-    final showing = _step == 0 && !_busy && !_previewPaused && _hasMedia;
+    final showing = _previewShowing;
     final c = _preview;
     final it = _previewFor;
     if (c != null && it != null) {
       c.setVolume(_previewVolume(it));
       showing ? c.play() : c.pause();
-    }
-    final m = _previewMusic;
-    if (m != null) {
-      m.setVolume(kMusicVolume);
-      showing ? m.play() : m.pause();
+      _sound.follow(
+        c.value.position.inMilliseconds / 1000,
+        playing: showing,
+        force: true,
+      );
+    } else {
+      // a photo: the song plays on its own
+      _sound.playAlone(showing);
     }
   }
 
@@ -526,7 +570,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   /// Opens the music picker; the chosen track plays in the preview.
   Future<void> _chooseMusic() async {
     if (_busy) return;
-    _previewMusic?.pause();
+    // the clip and its sound stop while the audio sheet is open
+    _preview?.pause();
+    _sound.pause();
     final t = await pickMusic(context, current: _music);
     if (!mounted) return;
     if (t != null) {
@@ -602,25 +648,19 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   static String? _artistOf(MusicTrack? m) =>
       (m?.remote ?? false) && m!.artist.isNotEmpty ? m.artist : null;
 
-  Future<void> _setMusic(MusicTrack? t) async {
-    final old = _previewMusic;
-    _previewMusic = null;
+  Future<void> _setMusic(MusicTrack? t, {AudioEdits? audio}) async {
     setState(() {
+      // another song starts from its beginning, with the fades and volume kept
+      if (audio != null) {
+        _audio = audio;
+      } else if (t?.id != _music?.id) {
+        _audio = _audio.copyWith(songStart: 0);
+      }
       _music = t;
       _previewPaused = false;
     });
-    await old?.dispose();
-    if (t == null) {
-      _syncPreview();
-      return;
-    }
-    final p = MusicPlayer(t);
-    await p.init(volume: kMusicVolume);
-    if (!mounted || _music?.id != t.id) {
-      await p.dispose();
-      return;
-    }
-    _previewMusic = p;
+    await _applySound();
+    if (!mounted) return;
     _syncPreview();
   }
 
@@ -630,7 +670,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final it = _active;
     if (it == null || _busy) return;
     _preview?.pause();
-    _previewMusic?.pause();
+    _sound.pause();
     final r = await Navigator.of(context).push<EditorResult>(
       MaterialPageRoute(
         fullscreenDialog: true,
@@ -643,6 +683,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           look: it.look,
           overlays: it.overlays,
           music: _music,
+          audio: _audio,
+          voiceover: _mode == 1,
         ),
       ),
     );
@@ -670,23 +712,22 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final ve = r.videoEdits;
       setState(() {
         it.videoEdits = ve;
-        it.seconds = ve == null ? it.secondsFull : ve.length;
+        it.seconds = ve == null ? it.secondsFull : ve.playSeconds;
         it.look = r.look;
         it.overlays = r.overlays;
       });
       final c = _preview;
       if (c != null) {
-        await c.setVolume(_previewVolume(it));
+        await c.setPlaybackSpeed(ve?.speed ?? 1);
         await c.seekTo(
           Duration(seconds: ve != null && ve.trimmed ? ve.start : 0),
         );
       }
     }
-    if (r.music?.id != _music?.id) {
-      await _setMusic(r.music);
-    } else {
-      _syncPreview();
-    }
+    // the song, its part, volumes, fades and the voiceover all come back from the editor
+    await _setMusic(r.music, audio: r.audio);
+    final c = _preview;
+    if (c != null && it.video) await c.setVolume(_previewVolume(it));
   }
 
   // --------------------------------------------------------------- navigation
@@ -796,7 +837,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           musicId: music?.id,
           musicTitle: _titleOf(music),
           musicArtist: _artistOf(music),
-          musicVolume: kMusicVolume,
+          musicVolume: kMusicVolume * _audio.songVolume,
+          musicStart: _audio.songStart,
           clip: _photoClip,
           clipSeconds: kPhotoClipSeconds,
         );
@@ -815,7 +857,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             musicId: music?.id,
             musicTitle: _titleOf(music),
             musicArtist: _artistOf(music),
-            musicVolume: kMusicVolume,
+            musicVolume: kMusicVolume * _audio.songVolume,
+            musicStart: _baked ? 0 : _audio.songStart,
             keepSound: _baked ? true : _keepSound,
             musicBaked: _baked,
             finish: chosen.first.finish,
@@ -840,7 +883,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             musicId: music?.id,
             musicTitle: _titleOf(music),
             musicArtist: _artistOf(music),
-            musicVolume: kMusicVolume,
+            musicVolume: kMusicVolume * _audio.songVolume,
+            musicStart: _audio.songStart,
             keepSound: _keepSound,
           );
         }
@@ -1072,39 +1116,73 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       }
       file = shrunk;
     }
-    // A hit song (Apple preview) is mixed into a clip on the phone: it replaces the video's
-    // own sound and the clip is cut to the length of the preview.
+    // The clip's sound is made on the phone: the song (from the chosen part, at its volume,
+    // with fades), the video's own sound and a voiceover. Speed and rotation are applied to
+    // the picture in the same pass. A plain song with nothing else is copied in as before.
     File? merged;
     int? cutSeconds;
     final song = _bakeTrack;
-    if (song != null) {
+    final ve = it.videoEdits;
+    // a voiceover belongs to the one clip it was recorded over
+    final voice = _mode == 1 && _audio.hasVoice ? File(_audio.voicePath) : null;
+    final needsMix =
+        voice != null ||
+        (ve?.changesSpeed ?? false) ||
+        (ve?.rotated ?? false) ||
+        (song != null && _audio.needsMix);
+    if (song != null || needsMix) {
       if (mounted) {
         setState(() {
-          _stage = 'Adding the song...';
+          _stage = song != null ? 'Adding the song...' : 'Finishing the clip...';
           _progress = null;
         });
       }
       try {
-        final audio = song.isLocal
+        final audio = song == null
+            ? null
+            : song.isLocal
             ? File(song.localPath)
             : await ItunesService.instance.downloadPreview(song);
-        final m = await AudioMerger.merge(
-          video: file,
-          audio: audio,
-          maxSeconds: song.isApple
-              ? kSongPreviewSeconds.toDouble()
-              : kMaxVideoSeconds.toDouble(),
-        );
+        final max = song != null && song.isApple
+            ? kSongPreviewSeconds.toDouble()
+            : kMaxVideoSeconds.toDouble();
+        final MergeResult m;
+        if (needsMix) {
+          final muted = ve?.mute ?? false;
+          final otherSpeed = ve?.changesSpeed ?? false;
+          m = await AudioMerger.mix(
+            video: file,
+            song: audio,
+            songStart: _audio.songStart,
+            songVolume: _audio.songVolume,
+            // under a song or a voiceover: the chosen level; alone: as recorded
+            originalVolume: muted || otherSpeed
+                ? 0
+                : (song != null || voice != null ? _audio.originalVolume : 1),
+            voice: voice,
+            voiceVolume: _audio.voiceVolume,
+            fadeIn: song != null ? _audio.fadeIn : 0,
+            fadeOut: song != null ? _audio.fadeOut : 0,
+            speed: ve?.speed ?? 1,
+            turns: ve?.turns ?? 0,
+            maxSeconds: max,
+            cutToSong: song != null,
+          );
+        } else {
+          m = await AudioMerger.merge(video: file, audio: audio!, maxSeconds: max);
+        }
         merged = m.file;
         file = m.file;
         cutSeconds = math.max(1, m.seconds.round());
-        _baked = true;
+        _baked = song != null;
       } catch (e) {
         _baked = false;
         if (mounted) {
           showToast(
             context,
-            'The song could not be put into the video (${friendlyError(e)}). It plays next to the video instead.',
+            song != null
+                ? 'The song could not be put into the video (${friendlyError(e)}). It plays next to the video instead.'
+                : 'The voiceover, speed or rotation could not be applied (${friendlyError(e)}). Posted as it is.',
           );
         }
       }
@@ -1123,6 +1201,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (w == 0 || h == 0) {
       w = info?.width ?? 0;
       h = info?.height ?? 0;
+    }
+    if (merged != null && (ve?.turns ?? 0).isOdd) {
+      final t = w;
+      w = h;
+      h = t;
     }
     return _Ready(fast, temp, w, h, merged: merged, seconds: cutSeconds);
   }
@@ -1352,16 +1435,20 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
     final c = _preview;
     if (c != null && c.value.isInitialized && identical(_previewFor, it)) {
+      final turns = it.videoEdits?.turns ?? 0;
+      final size = c.value.size;
       return SizedBox.expand(
         child: FittedBox(
           fit: BoxFit.contain,
           child: SizedBox(
-            width: c.value.size.width,
-            height: c.value.size.height,
+            width: turns.isOdd ? size.height : size.width,
+            height: turns.isOdd ? size.width : size.height,
             child: FinishedMedia(
               finish: it.finish,
               player: c,
-              child: VideoPlayer(c),
+              child: turns == 0
+                  ? VideoPlayer(c)
+                  : RotatedBox(quarterTurns: turns, child: VideoPlayer(c)),
             ),
           ),
         ),

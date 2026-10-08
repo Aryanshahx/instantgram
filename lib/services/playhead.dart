@@ -17,11 +17,14 @@ class PlayheadSmoother {
   Duration _at = Duration.zero;
   bool _playing = false;
 
+  /// Playback speed of the video (0.5 = slow motion): the position moves this much per second.
+  double rate = 1;
+
   bool get playing => _playing;
 
   /// The position at [now] (seconds).
   double value(Duration now) =>
-      _playing ? _base + (now - _at).inMicroseconds / 1e6 : _base;
+      _playing ? _base + (now - _at).inMicroseconds / 1e6 * rate : _base;
 
   /// The player says it is at [sec].
   void report(double sec, bool playing, Duration now) {

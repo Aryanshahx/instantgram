@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../core/media_url.dart';
 import 'call.dart';
+import 'vanish.dart';
 
 /// The id of the chat between two people: both uids, in alphabetical order. The same two
 /// people always get the same chat, whoever writes first.
@@ -24,6 +25,7 @@ class ChatThread {
     this.pinned = false,
     this.muteCalls = false,
     this.muteMessages = false,
+    this.vanish = '',
   });
 
   final String id;
@@ -43,6 +45,9 @@ class ChatThread {
 
   /// No sound or badge for new messages of this chat.
   final bool muteMessages;
+
+  /// Disappearing messages: one of [Vanish] ('' = off).
+  final String vanish;
 
   /// The other person.
   String other(String me) =>
@@ -78,6 +83,9 @@ class ChatThread {
       pinned: m['pinned'] == true,
       muteCalls: m['muteCalls'] == true,
       muteMessages: m['muteMessages'] == true,
+      vanish: Vanish.isValid('${m['vanish'] ?? ''}')
+          ? '${m['vanish'] ?? ''}'
+          : '',
       seen: seenRaw is Map
           ? {
               for (final e in seenRaw.entries)
@@ -100,7 +108,10 @@ class MsgType {
 
   /// A line in the chat about a voice or video call.
   static const call = 'call';
-  static const all = [text, image, gif, voice, location, post, call];
+
+  /// A centered note in the chat (e.g. disappearing messages turned on).
+  static const system = 'system';
+  static const all = [text, image, gif, voice, location, post, call, system];
 }
 
 /// The emoji people can react with.
@@ -124,6 +135,8 @@ String messagePreview(
 }) {
   if (deleted) return 'Message deleted';
   switch (type) {
+    case MsgType.system:
+      return text;
     case MsgType.call:
       return (callVideo ? '\u{1F4F9} ' : '\u{1F4DE} ') +
           callLabel(video: callVideo, status: callStatus);
@@ -206,6 +219,8 @@ class ChatMessage {
     this.pinnedBy = '',
     this.callVideo = false,
     this.callStatus = '',
+    this.vanish = '',
+    this.expireAt,
   });
 
   final String id;
@@ -251,6 +266,18 @@ class ChatMessage {
   /// For [MsgType.call]: a video call, and how it ended (ended, missed or declined).
   final bool callVideo;
   final String callStatus;
+
+  /// Sent while disappearing messages were on (one of [Vanish]).
+  final String vanish;
+
+  /// A timed disappearing message is gone after this.
+  final DateTime? expireAt;
+
+  /// Its time is up (it is hidden at once and removed by whoever opens the chat).
+  bool expired(DateTime now) {
+    final e = expireAt;
+    return e != null && !now.isBefore(e);
+  }
 
   String get mediaUrl => resolveMediaUrl(mediaRef);
   String get postThumbUrl => resolveMediaUrl(postThumbRef);
@@ -325,6 +352,10 @@ class ChatMessage {
       pinnedBy: s(m['pinnedBy']),
       callVideo: m['callVideo'] == true,
       callStatus: s(m['callStatus']),
+      vanish: Vanish.isValid(s(m['vanish'])) ? s(m['vanish']) : '',
+      expireAt: m['expireAt'] is Timestamp
+          ? (m['expireAt'] as Timestamp).toDate()
+          : null,
     );
   }
 }

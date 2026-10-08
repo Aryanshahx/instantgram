@@ -4,6 +4,7 @@ import '../../core/app_events.dart';
 import '../../core/l10n.dart';
 import '../../services/app_prefs.dart';
 import '../../services/safety_service.dart';
+import '../../services/presence_service.dart';
 import '../../services/usage_tracker.dart';
 import '../../services/auth_service.dart';
 import '../../services/call_service.dart';
@@ -45,6 +46,7 @@ class _MainShellState extends State<MainShell> {
       if (mounted) AppEvents.refreshFeed(); // hide posts of people I blocked
     });
     UsageTracker.instance.start();
+    PresenceService.instance.start();
     UsageTracker.instance.limitReached.addListener(_onLimit);
     _syncProfile();
   }

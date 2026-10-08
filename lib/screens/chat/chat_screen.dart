@@ -12,16 +12,19 @@ import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/app_user.dart';
 import '../../models/chat.dart';
+import '../../models/vanish.dart';
 import '../../services/chat_service.dart';
 import '../../services/location_service.dart';
 import '../../services/media_server.dart';
 import '../../services/media_service.dart';
 import '../../services/photo_edit.dart';
+import '../../services/presence_service.dart';
 import '../../services/user_service.dart';
 import '../../services/voice_recorder.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/location_card.dart';
 import '../../widgets/message_bubble.dart';
+import '../../widgets/pull_hold.dart';
 import '../../widgets/recipient_sheet.dart';
 import '../../widgets/share_sheet.dart';
 import '../../widgets/state_views.dart';
@@ -32,11 +35,16 @@ import '../profile/profile_screen.dart';
 import 'gif_picker.dart';
 import 'image_viewer.dart';
 import 'message_actions.dart';
+import 'vanish_sheet.dart';
 
 /// A one-to-one chat. Anyone can message anyone: open a profile and tap Message.
 ///
 /// Besides text: photos, GIFs (Giphy), voice notes, your location and shared posts. Swipe a
 /// message to reply, hold it to react, forward, pin, copy or delete.
+
+/// Shown instead of the name of an account that was deleted.
+const String kUserNotAvailable = 'User not available';
+
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key, required this.otherUid, this.user});
 
@@ -58,6 +66,14 @@ class _ChatScreenState extends State<ChatScreen> {
   late final String _me = UserService.instance.myUid;
 
   AppUser? _user;
+
+  /// The other account was deleted: history stays readable, nothing can be sent.
+  bool _gone = false;
+
+  /// Their profile, live (for "Active now").
+  late final Stream<AppUser?> _live = UserService.instance.watchUser(
+    widget.otherUid,
+  );
   String? _chatId;
   Stream<List<ChatMessage>>? _stream;
   Stream<({String id, String preview, String by})?>? _pinStream;
@@ -73,6 +89,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   List<ChatMessage> _current = const [];
   final Map<String, GlobalKey> _keys = {};
+
+  /// Disappearing messages of this chat ('' = off); pull down and hold to change it.
+  String _vanish = Vanish.off;
+  StreamSubscription<String>? _vanishSub;
+  late final PullHold _pull = PullHold(onFire: _pickVanish);
   String? _highlight;
 
   @override
@@ -85,6 +106,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    final id = _chatId;
+    // "after seen" messages I had on screen are gone once I leave
+    if (id != null) unawaited(_service.removeSeen(id, _current));
+    _vanishSub?.cancel();
+    _pull.dispose();
     _recTimer?.cancel();
     _voice.dispose();
     _text.dispose();
@@ -98,7 +124,8 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       if (_user == null) {
         UserService.instance.getUser(widget.otherUid).then((u) {
-          if (mounted && u != null) setState(() => _user = u);
+          if (!mounted) return;
+          setState(() => u == null ? _gone = true : _user = u);
         });
       }
       unawaited(MediaServer.instance.warmUp());
@@ -109,6 +136,11 @@ class _ChatScreenState extends State<ChatScreen> {
         _stream = _service.watchMessages(id);
         _pinStream = _service.watchPin(id);
       });
+      _vanishSub?.cancel();
+      _vanishSub = _service.watchVanish(id).listen((v) {
+        if (mounted && v != _vanish) setState(() => _vanish = v);
+      }, onError: (_) {});
+      unawaited(_service.sweepExpired(id));
       _service.markSeen(id);
     } catch (e) {
       if (mounted) setState(() => _error = e);
@@ -564,7 +596,7 @@ class _ChatScreenState extends State<ChatScreen> {
         titleSpacing: 0,
         title: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: _openProfile,
+          onTap: _gone ? null : _openProfile,
           child: Row(
             children: [
               UserAvatar(
@@ -575,29 +607,58 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  u?.username ?? '...',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _gone ? kUserNotAvailable : (u?.username ?? '...'),
+                      key: const ValueKey('chatTitle'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    if (!_gone)
+                      StreamBuilder<AppUser?>(
+                        stream: _live,
+                        builder: (context, snap) {
+                          final label = presenceLabel(
+                            snap.data?.lastActive ?? u?.lastActive,
+                            DateTime.now(),
+                          );
+                          if (label.isEmpty) return const SizedBox.shrink();
+                          return Text(
+                            label,
+                            key: const ValueKey('chatPresence'),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: context.muted,
+                            ),
+                          );
+                        },
+                      ),
+                  ],
                 ),
               ),
             ],
           ),
         ),
         actions: [
-          IconButton(
-            key: const ValueKey('voiceCall'),
-            tooltip: 'Voice call',
-            icon: const Icon(Icons.call_rounded),
-            onPressed: () => _call(video: false),
-          ),
-          IconButton(
-            key: const ValueKey('videoCall'),
-            tooltip: 'Video call',
-            icon: const Icon(Icons.videocam_rounded),
-            onPressed: () => _call(video: true),
-          ),
+          if (!_gone) ...[
+            IconButton(
+              key: const ValueKey('voiceCall'),
+              tooltip: 'Voice call',
+              icon: const Icon(Icons.call_rounded),
+              onPressed: () => _call(video: false),
+            ),
+            IconButton(
+              key: const ValueKey('videoCall'),
+              tooltip: 'Video call',
+              icon: const Icon(Icons.videocam_rounded),
+              onPressed: () => _call(video: true),
+            ),
+          ],
           const SizedBox(width: 4),
         ],
       ),
@@ -606,10 +667,21 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Column(
           children: [
             _pinBanner(context),
-            Expanded(child: _messages(context)),
+            if (_vanish.isNotEmpty) _vanishBanner(context),
+            Expanded(
+              child: Stack(
+                children: [
+                  NotificationListener<ScrollNotification>(
+                    onNotification: _gone ? null : _pull.handle,
+                    child: _messages(context),
+                  ),
+                  _pullHint(context),
+                ],
+              ),
+            ),
             if (_busy.isNotEmpty) _busyBar(context),
-            if (_replying != null) _replyBar(context),
-            _composer(context),
+            if (_replying != null && !_gone) _replyBar(context),
+            _gone ? _goneBar(context) : _composer(context),
           ],
         ),
       ),
@@ -737,16 +809,28 @@ class _ChatScreenState extends State<ChatScreen> {
         }
         final all = snap.data;
         if (all == null) return const CenteredLoader();
+        final now = DateTime.now();
         final msgs = [
           for (final m in all)
-            if (m.visibleFor(_me)) m,
+            if (m.visibleFor(_me) && !m.expired(now)) m,
         ];
         _current = msgs;
         if (msgs.isEmpty && _outbox.isEmpty) {
-          return EmptyState(
-            icon: Icons.waving_hand_rounded,
-            title: 'Say hi',
-            subtitle: 'Send the first message to ${_user?.username ?? 'them'}.',
+          // still scrollable, so pull down and hold works in an empty chat too
+          return LayoutBuilder(
+            builder: (context, c) => SingleChildScrollView(
+              reverse: true,
+              physics: const AlwaysScrollableScrollPhysics(),
+              child: SizedBox(
+                height: c.maxHeight,
+                child: EmptyState(
+                  icon: Icons.waving_hand_rounded,
+                  title: 'Say hi',
+                  subtitle:
+                      'Send the first message to ${_user?.username ?? 'them'}.',
+                ),
+              ),
+            ),
           );
         }
         // someone else's new message is on screen: mark the chat as read
@@ -765,6 +849,7 @@ class _ChatScreenState extends State<ChatScreen> {
         return ListView.builder(
           controller: _scroll,
           reverse: true,
+          physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
           itemCount: _outbox.length + msgs.length,
           itemBuilder: (context, i) => i < _outbox.length
@@ -781,6 +866,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _item(ChatMessage m) {
+    if (m.type == MsgType.system) return _systemLine(context, m);
     final mine = m.senderId == _me;
     return KeyedSubtree(
       key: _keys.putIfAbsent(m.id, GlobalKey.new),
@@ -810,6 +896,120 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
   }
+
+  // ---------------------------------------------------- disappearing messages
+
+  Future<void> _pickVanish() async {
+    if (_gone || _chatId == null || !mounted) return;
+    final pick = await showVanishPicker(context, current: _vanish);
+    if (pick == null || pick == _vanish || !mounted) return;
+    await _guard(() async {
+      final me = await UserService.instance.getUser(_me);
+      await _service.setVanish(
+        widget.otherUid,
+        pick,
+        myName: me?.username ?? 'Someone',
+      );
+      if (mounted) setState(() => _vanish = pick);
+    });
+  }
+
+  Widget _vanishBanner(BuildContext context) => Material(
+    key: const ValueKey('vanishBanner'),
+    color: context.cardHigh,
+    child: InkWell(
+      onTap: _pickVanish,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            const Icon(Icons.timer_outlined, size: 17),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Disappearing messages: ${Vanish.label(_vanish).toLowerCase()}',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            Text('Change', style: TextStyle(color: context.muted)),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  /// While pulling down: "keep holding" with a little progress ring.
+  Widget _pullHint(BuildContext context) => ValueListenableBuilder<double>(
+    valueListenable: _pull.progress,
+    builder: (context, p, _) {
+      if (p <= 0) return const SizedBox.shrink();
+      return Positioned(
+        top: 10,
+        left: 0,
+        right: 0,
+        child: Center(
+          child: Container(
+            key: const ValueKey('vanishPullHint'),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: context.cardHigh,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(value: p, strokeWidth: 2.5),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  p < 1
+                      ? 'Pull down for disappearing messages'
+                      : 'Keep holding…',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
+
+  Widget _systemLine(BuildContext context, ChatMessage m) => Padding(
+    key: _keys.putIfAbsent(m.id, GlobalKey.new),
+    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 24),
+    child: Text(
+      m.text,
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        fontSize: 12.5,
+        fontWeight: FontWeight.w600,
+        color: context.muted,
+      ),
+    ),
+  );
+
+  Widget _goneBar(BuildContext context) => SafeArea(
+    top: false,
+    child: Container(
+      key: const ValueKey('userGoneBar'),
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: context.cardHigh,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Text(
+        'This account was deleted. You can still read your messages.',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: context.muted, fontWeight: FontWeight.w600),
+      ),
+    ),
+  );
 
   Widget _composer(BuildContext context) {
     if (_recording) return _recordingBar(context);

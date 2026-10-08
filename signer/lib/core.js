@@ -10,12 +10,14 @@
 //   POST /api/delete   {keys:[...]}                                   -> removes your own files
 //   POST /api/music    {op:"search", term, offset, limit}             -> Epidemic Sound tracks
 //   POST /api/music    {op:"url", id}                                 -> short-lived mp3 link
+//   POST /api/admin    {op:"check"|"wipe", uid}  header x-admin-key   -> developer only
 //   GET  /api/health
 //
 // Settings (Vercel environment variables):
 //   FIREBASE_PROJECT_ID, TIGRIS_BUCKET, TIGRIS_ACCESS_KEY_ID, TIGRIS_SECRET_ACCESS_KEY
 //   (optional) TIGRIS_ENDPOINT, default t3.storage.dev
 //   (optional, for music) OPENVERSE_CLIENT_ID and OPENVERSE_CLIENT_SECRET - raise the music search limit
+//   (optional, for deleting accounts) ADMIN_KEY - a long random secret only the developer has
 
 const MB = 1024 * 1024;
 export const LIMITS = { image: 30 * MB, video: 300 * MB, thumb: 2 * MB };
@@ -59,7 +61,7 @@ async function hmac(key, data) {
 // ------------------------------------------------- AWS Signature V4, query form
 /** Returns a pre-signed URL. Only the Host header is signed; the body is not hashed. */
 export async function presign({
-  method, host, path, region, service, accessKeyId, secret, expires, date,
+  method, host, path, region, service, accessKeyId, secret, expires, date, params = {},
 }) {
   const stamp = date.toISOString().replace(/[:-]|\.\d{3}/g, ""); // 20130524T000000Z
   const day = stamp.slice(0, 8);
@@ -71,6 +73,7 @@ export async function presign({
     "X-Amz-Date": stamp,
     "X-Amz-Expires": String(expires),
     "X-Amz-SignedHeaders": "host",
+    ...params,
   };
   const canonicalQuery = Object.keys(query).sort()
     .map((k) => `${enc3986(k)}=${enc3986(query[k])}`).join("&");
@@ -180,11 +183,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Talks to the bucket with short-lived signed links made from the secret keys. */
 export function s3Store(env) {
   const host = `${env.TIGRIS_BUCKET}.${env.TIGRIS_ENDPOINT || "t3.storage.dev"}`;
-  const link = (method, key, expires = 300) =>
+  const link = (method, key, expires = 300, params = {}) =>
     presign({
       method, host, path: `/${key}`, region: "auto", service: "s3",
       accessKeyId: env.TIGRIS_ACCESS_KEY_ID, secret: env.TIGRIS_SECRET_ACCESS_KEY,
-      expires, date: new Date(),
+      expires, date: new Date(), params,
     });
   return {
     /** {size} or null when the object is not there (after a few short retries). */
@@ -222,8 +225,26 @@ export function s3Store(env) {
       const res = await fetch(await link("DELETE", key), { method: "DELETE" });
       if (![200, 204, 404].includes(res.status)) throw new Error(`storage DELETE answered ${res.status}`);
     },
+    /** Up to 1000 keys that start with `prefix` -> {keys, next} (next = "" when done). */
+    async list(prefix, token = "") {
+      const params = { "list-type": "2", prefix, "max-keys": "1000" };
+      if (token) params["continuation-token"] = token;
+      const res = await fetch(await link("GET", "", 300, params));
+      if (res.status !== 200) throw new Error(`storage LIST answered ${res.status}`);
+      return parseList(await res.text());
+    },
     link,
   };
+}
+
+/** The keys and the continuation token of a ListObjectsV2 answer. */
+export function parseList(xml) {
+  const unescape = (t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+  const keys = [...xml.matchAll(/<Key>([^<]*)<\/Key>/g)].map((m) => unescape(m[1]));
+  const truncated = /<IsTruncated>true<\/IsTruncated>/.test(xml);
+  const next = truncated ? (/<NextContinuationToken>([^<]*)<\/NextContinuationToken>/.exec(xml) || [])[1] || "" : "";
+  return { keys, next: unescape(next) };
 }
 
 const configured = (env) =>
@@ -279,6 +300,51 @@ async function handleDelete(request, env, uid, store) {
   }
   for (const k of mine) await store.delete(k);
   return json({ ok: true, deleted: mine.length });
+}
+
+// ------------------------------------------------------------- developer only
+// Deleting an account: the developer's tool (tools/delete_user.sh) removes everything the
+// user stored in Firestore, then asks here to remove their files. Only a request carrying
+// ADMIN_KEY gets in; without ADMIN_KEY set this route is switched off.
+
+/** Same length and same characters, compared without stopping at the first difference. */
+export function sameSecret(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+
+const UID = /^[A-Za-z0-9]{1,128}$/;
+// Each call removes at most this many files, so it ends well inside Vercel's time limit;
+// the tool calls again while `more` is true.
+const WIPE_BATCH = 150;
+
+async function handleAdmin(request, env, store) {
+  const key = env.ADMIN_KEY || "";
+  if (key.length < 32) return fail(404, "Not found");
+  if (!sameSecret(request.headers.get("x-admin-key") || "", key)) return fail(403, "Wrong admin key.");
+  const body = await readJson(request);
+  if (body.op === "check") return json({ ok: true });
+  if (body.op !== "wipe") return fail(400, "Unknown op.");
+  const uid = String(body.uid || "");
+  if (!UID.test(uid)) return fail(400, "Bad user id.");
+  // First the whole list, then the deletes: deleting while paging could skip files.
+  const keys = [];
+  for (const kind of ["image", "video", "thumb"]) {
+    let token = "";
+    do {
+      const page = await store.list(`${kind}/${uid}/`, token);
+      for (const k of page.keys) {
+        const p = parseKey(k);
+        if (p && p.uid === uid) keys.push(k); // never anything outside this user's folders
+      }
+      token = page.next;
+    } while (token);
+  }
+  const now = keys.slice(0, WIPE_BATCH);
+  for (const k of now) await store.delete(k);
+  return json({ ok: true, deleted: now.length, more: keys.length > now.length });
 }
 
 // ------------------------------------------------------- Openverse (free music)
@@ -416,6 +482,16 @@ const ROUTES = { sign: handleSign, confirm: handleConfirm, delete: handleDelete,
 export async function handle(request, env, route, store = null) {
   if (route === "health") {
     return request.method === "GET" ? json({ ok: true, ready: configured(env), music: true, musicKey: Boolean(env.OPENVERSE_CLIENT_ID && env.OPENVERSE_CLIENT_SECRET) }) : fail(404, "Not found");
+  }
+  if (route === "admin") {
+    if (request.method !== "POST") return fail(404, "Not found");
+    if (!store && !configured(env)) return fail(500, "The media service is not fully set up (missing settings).");
+    try {
+      return await handleAdmin(request, env, store || s3Store(env));
+    } catch (e) {
+      console.error("media signer admin error", e && e.stack ? e.stack : e);
+      return fail(500, "The media service had a problem. Try again.");
+    }
   }
   const fn = ROUTES[route];
   if (!fn || request.method !== "POST") return fail(404, "Not found");
