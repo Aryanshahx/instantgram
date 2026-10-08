@@ -160,6 +160,7 @@ export function activityBody(item) {
   const text = cut(String(item.text || ""), 100);
   switch (item.type) {
     case "like": return `${who} liked your post`;
+    case "super": return `${who} sent you a super heart 💖`;
     case "comment": return text ? `${who} commented: ${text}` : `${who} commented on your post`;
     case "reply": return text ? `${who} replied: ${text}` : `${who} replied to your comment`;
     case "mention": return `${who} mentioned you`;

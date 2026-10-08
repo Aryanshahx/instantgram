@@ -29,7 +29,7 @@ import '../../widgets/repost_controller.dart';
 import '../../widgets/save_controller.dart';
 import '../../widgets/state_views.dart';
 import '../post/comments_screen.dart'
-  show commentsSheetHeight, showCommentsSheet;
+    show commentsSheetHeight, showCommentsSheet;
 import '../profile/analytics_screen.dart';
 import '../profile/profile_screen.dart';
 
@@ -86,6 +86,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
   late final PostPager _pager = PostPager(
     PostService.instance.videoQuery,
     pageSize: 8,
+    feed: true,
     first: widget.initialPost,
   );
   final PageController _pages = PageController();
@@ -99,6 +100,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
     final now = ClipFocus.instance.canPlay(widget.focusToken);
     if (now != _front && mounted) setState(() => _front = now);
   }
+
   bool _headerShown = true;
   bool _started = false;
   bool _wanting = false;
@@ -235,7 +237,10 @@ class _ReelsScreenState extends State<ReelsScreen> {
                   // so you keep watching it while you read and type.
                   final h = MediaQuery.of(context).size.height;
                   final scale = open
-                      ? ((h - commentsSheetHeight(context)) / h).clamp(0.34, 1.0)
+                      ? ((h - commentsSheetHeight(context)) / h).clamp(
+                          0.34,
+                          1.0,
+                        )
                       : 1.0;
                   return AnimatedScale(
                     scale: scale,
@@ -246,36 +251,36 @@ class _ReelsScreenState extends State<ReelsScreen> {
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 560),
                         child: PageView.builder(
-                    scrollDirection: Axis.vertical,
-                    controller: _pages,
-                    itemCount: _pager.posts.length,
-                    onPageChanged: (i) {
-                      setState(() {
-                        // scrolling down hides the Clips title and the back button, scrolling
-                        // back up brings them back
-                        _headerShown = i < _page || i == 0;
-                        _page = i;
-                      });
-                      _preload();
-                      if (i >= _pager.posts.length - 3) _pager.loadMore();
-                    },
-                    itemBuilder: (context, i) {
-                        final post = _pager.posts[i];
-                        return _ReelPage(
-                          key: ValueKey(post.id),
-                          post: post,
-                          playing: _canPlay && i == _page,
-                          showHeader: _headerShown,
-                          preload: _canPlay && i == _page + 1,
-                          sheetOpen: _sheetOpen,
-                          onBack: widget.onBack,
-                          onDeleted: () => _pager.removeById(post.id),
-                        );
-                        },
+                          scrollDirection: Axis.vertical,
+                          controller: _pages,
+                          itemCount: _pager.posts.length,
+                          onPageChanged: (i) {
+                            setState(() {
+                              // scrolling down hides the Clips title and the back button, scrolling
+                              // back up brings them back
+                              _headerShown = i < _page || i == 0;
+                              _page = i;
+                            });
+                            _preload();
+                            if (i >= _pager.posts.length - 3) _pager.loadMore();
+                          },
+                          itemBuilder: (context, i) {
+                            final post = _pager.posts[i];
+                            return _ReelPage(
+                              key: ValueKey(post.id),
+                              post: post,
+                              playing: _canPlay && i == _page,
+                              showHeader: _headerShown,
+                              preload: _canPlay && i == _page + 1,
+                              sheetOpen: _sheetOpen,
+                              onBack: widget.onBack,
+                              onDeleted: () => _pager.removeById(post.id),
+                            );
+                          },
+                        ),
                       ),
                     ),
-                  ),
-                );
+                  );
                 },
               );
             },
@@ -317,6 +322,7 @@ class _ReelPageState extends State<_ReelPage> {
   late final LikeController _like = LikeController(
     widget.post.id,
     widget.post.likeCount,
+    superCount: widget.post.superCount,
   );
   late final SaveController _save = SaveController(widget.post.id);
   late final RepostController _repost = RepostController(widget.post);
@@ -571,45 +577,46 @@ class _ReelPageState extends State<_ReelPage> {
                       children: [
                         Flexible(
                           child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => openScreen(
-                        context,
-                        ProfileScreen(uid: post.authorId),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          UserAvatar(
-                            url: post.authorPhotoUrl,
-                            name: post.authorUsername,
-                            radius: 17,
-                            uid: post.authorId,
-                          ),
-                          const SizedBox(width: 10),
-                          Flexible(
-                            child: Column(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => openScreen(
+                              context,
+                              ProfileScreen(uid: post.authorId),
+                            ),
+                            child: Row(
                               mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  post.authorUsername,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    color: Colors.white,
-                                    shadows: kReelShadow,
+                                UserAvatar(
+                                  url: post.authorPhotoUrl,
+                                  name: post.authorUsername,
+                                  radius: 17,
+                                  uid: post.authorId,
+                                ),
+                                const SizedBox(width: 10),
+                                Flexible(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        post.authorUsername,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          color: Colors.white,
+                                          shadows: kReelShadow,
+                                        ),
+                                      ),
+                                      // the audio name goes right under the username
+                                      if (post.hasMusic)
+                                        MusicLabel(musicId: post.musicId),
+                                    ],
                                   ),
                                 ),
-                                // the audio name goes right under the username
-                                if (post.hasMusic)
-                                  MusicLabel(musicId: post.musicId),
                               ],
                             ),
                           ),
-                        ],
-                      ),
-                    ),
                         ),
                         if (post.authorId != UserService.instance.myUid) ...[
                           const SizedBox(width: 12),
@@ -688,8 +695,11 @@ class _Rail extends StatelessWidget {
             icon: like.liked
                 ? Icons.favorite_rounded
                 : Icons.favorite_border_rounded,
-            color: like.liked ? _heart : Colors.white,
+            color: like.superHeart
+                ? kSuperHeartColor
+                : (like.liked ? _heart : Colors.white),
             pop: like.liked,
+            onLongPress: () => superHeartFrom(context, like),
             label: SafetyService.instance.showsNumber(post, post.hideLikes)
                 ? '${like.count}'
                 : 'Like',
@@ -748,10 +758,7 @@ class _Rail extends StatelessWidget {
             key: const ValueKey('clipAnalytics'),
             icon: Icons.insights_rounded,
             label: 'Insights',
-            onTap: () => openScreen(
-              context,
-              AnalyticsScreen(postId: post.id),
-            ),
+            onTap: () => openScreen(context, AnalyticsScreen(postId: post.id)),
           ),
         ] else ...[
           const SizedBox(height: _gap),

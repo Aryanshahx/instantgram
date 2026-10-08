@@ -80,6 +80,7 @@ test("texts", () => {
   assert.equal(messageBody({ type: "system" }), null);
   assert.equal(messageBody({ type: "text", text: "x", deleted: true }), null);
   assert.equal(activityBody({ type: "like", actorName: "zoe" }), "zoe liked your post");
+  assert.equal(activityBody({ type: "super", actorName: "zoe" }), "zoe sent you a super heart 💖");
   assert.equal(activityBody({ type: "comment", actorName: "zoe", text: "nice" }), "zoe commented: nice");
   assert.equal(activityBody({ type: "follow", actorName: "zoe" }), "zoe started following you");
   assert.deepEqual(decodeValue({ mapValue: { fields: { a: { arrayValue: { values: [{ integerValue: "3" }] } } } } }), { a: [3] });

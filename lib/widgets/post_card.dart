@@ -56,7 +56,11 @@ class _PostCardState extends State<PostCard> {
   @override
   void initState() {
     super.initState();
-    _like = LikeController(post.id, post.likeCount);
+    _like = LikeController(
+      post.id,
+      post.likeCount,
+      superCount: post.superCount,
+    );
     _save = SaveController(post.id);
     _repost = RepostController(post);
     _comments = post.commentCount;
@@ -239,11 +243,8 @@ class _PostCardState extends State<PostCard> {
           IconButton(
             key: const ValueKey('postMore'),
             icon: const Icon(Icons.more_horiz_rounded),
-            onPressed: () => showPostActions(
-              context,
-              post,
-              onDeleted: widget.onDeleted,
-            ),
+            onPressed: () =>
+                showPostActions(context, post, onDeleted: widget.onDeleted),
           ),
         ],
       ),
@@ -308,7 +309,10 @@ class _PostCardState extends State<PostCard> {
                 behavior: HitTestBehavior.opaque,
                 onTap: _toggleRepost,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 8,
+                  ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [

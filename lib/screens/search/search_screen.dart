@@ -30,6 +30,7 @@ class _SearchScreenState extends State<SearchScreen> {
   late final PostPager _explore = PostPager(
     PostService.instance.latestQuery,
     pageSize: 24,
+    feed: true,
   );
   Timer? _debounce;
 

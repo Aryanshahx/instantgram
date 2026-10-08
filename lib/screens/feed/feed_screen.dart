@@ -24,6 +24,7 @@ class _FeedScreenState extends State<FeedScreen> {
   late final PostPager _pager = PostPager(
     PostService.instance.latestQuery,
     pageSize: 8,
+    feed: true,
   );
 
   @override
@@ -113,10 +114,8 @@ class _FeedHeader extends StatelessWidget {
                             ),
                         ],
                       ),
-                      onPressed: () => openScreen(
-                        context,
-                        const ActivityScreen(),
-                      ),
+                      onPressed: () =>
+                          openScreen(context, const ActivityScreen()),
                     );
                   },
                 ),

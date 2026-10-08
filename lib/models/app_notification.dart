@@ -18,7 +18,7 @@ class AppNotification {
     this.read = false,
   });
 
-  /// 'like', 'comment', 'reply', 'follow' or 'mention'.
+  /// 'like', 'super' (super heart), 'comment', 'reply', 'follow' or 'mention'.
   final String type;
 
   final String id;
@@ -74,6 +74,8 @@ class AppNotification {
     switch (type) {
       case 'like':
         return 'liked your post';
+      case 'super':
+        return 'sent you a super heart 💖';
       case 'comment':
         return 'commented';
       case 'reply':

@@ -65,6 +65,7 @@ class _ActionsSheet extends StatefulWidget {
 
 class _ActionsSheetState extends State<_ActionsSheet> {
   late final bool _pinned = widget.post.pinned;
+  late final bool _profileOnly = widget.post.profileOnly;
   bool _reposted = false;
   bool _busy = false;
 
@@ -76,9 +77,11 @@ class _ActionsSheetState extends State<_ActionsSheet> {
   void initState() {
     super.initState();
     if (!_mine) {
-      (widget.isReposted ?? PostService.instance.isReposted)(post.id).then((v) {
-        if (mounted) setState(() => _reposted = v);
-      }).catchError((_) {});
+      (widget.isReposted ?? PostService.instance.isReposted)(post.id)
+          .then((v) {
+            if (mounted) setState(() => _reposted = v);
+          })
+          .catchError((_) {});
     }
   }
 
@@ -95,12 +98,40 @@ class _ActionsSheetState extends State<_ActionsSheet> {
       AppEvents.refreshFeed();
       _close();
       if (host.mounted) {
-        showToast(host, target ? 'Pinned to the top of your profile' : 'Unpinned');
+        showToast(
+          host,
+          target ? 'Pinned to the top of your profile' : 'Unpinned',
+        );
       }
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
       showToast(context, e is PinLimitException ? e.message : friendlyError(e));
+    }
+  }
+
+  Future<void> _toggleProfileOnly() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final host = widget.host;
+    final target = !_profileOnly;
+    try {
+      await PostService.instance.setProfileOnly(post, target);
+      widget.onChanged?.call();
+      AppEvents.refreshFeed();
+      _close();
+      if (host.mounted) {
+        showToast(
+          host,
+          target
+              ? 'Now only on your profile'
+              : 'Shown in Home and Explore again',
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      showToast(context, friendlyError(e));
     }
   }
 
@@ -176,16 +207,29 @@ class _ActionsSheetState extends State<_ActionsSheet> {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (_mine) ...[
-              tile(const ValueKey('actAnalytics'), Icons.insights_rounded, 'Analytics', () {
-                final host = widget.host;
-                _close();
-                openScreen(host, AnalyticsScreen(postId: post.id));
-              }),
+              tile(
+                const ValueKey('actAnalytics'),
+                Icons.insights_rounded,
+                'Analytics',
+                () {
+                  final host = widget.host;
+                  _close();
+                  openScreen(host, AnalyticsScreen(postId: post.id));
+                },
+              ),
               tile(
                 const ValueKey('actPin'),
                 _pinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
                 _pinned ? 'Unpin' : 'Pin',
                 _pin,
+              ),
+              tile(
+                const ValueKey('actProfileOnly'),
+                _profileOnly ? Icons.public_rounded : Icons.person_pin_rounded,
+                _profileOnly
+                    ? 'Show in Home and Explore'
+                    : 'Only on my profile',
+                _toggleProfileOnly,
               ),
             ] else ...[
               tile(
@@ -195,18 +239,33 @@ class _ActionsSheetState extends State<_ActionsSheet> {
                 _repost,
                 color: _reposted ? context.accentInk : null,
               ),
-              tile(const ValueKey('actReport'), Icons.flag_outlined, 'Report', () {
+              tile(
+                const ValueKey('actReport'),
+                Icons.flag_outlined,
+                'Report',
+                () {
+                  final host = widget.host;
+                  _close();
+                  showReportSheet(host, post);
+                },
+              ),
+            ],
+            tile(
+              const ValueKey('actShare'),
+              Icons.ios_share_rounded,
+              'Share',
+              () {
                 final host = widget.host;
                 _close();
-                showReportSheet(host, post);
-              }),
-            ],
-            tile(const ValueKey('actShare'), Icons.ios_share_rounded, 'Share', () {
-              final host = widget.host;
-              _close();
-              showShareSheet(host, post);
-            }),
-            tile(const ValueKey('actCopy'), Icons.link_rounded, 'Copy link', _copy),
+                showShareSheet(host, post);
+              },
+            ),
+            tile(
+              const ValueKey('actCopy'),
+              Icons.link_rounded,
+              'Copy link',
+              _copy,
+            ),
             if (_mine)
               tile(
                 const ValueKey('actDelete'),

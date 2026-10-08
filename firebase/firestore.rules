@@ -100,7 +100,7 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
       // author edits anything; anyone may change like/comment counters
       allow update: if signedIn() && (resource.data.authorId == request.auth.uid
-                                      || onlyChanges(['likeCount', 'commentCount', 'viewCount', 'shareCount', 'repostCount']));
+                                      || onlyChanges(['likeCount', 'superCount', 'commentCount', 'viewCount', 'shareCount', 'repostCount']));
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
 
       match /likes/{uid} {

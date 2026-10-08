@@ -76,7 +76,11 @@ class PostOptions {
     this.hideLikes = false,
     this.hideComments = false,
     this.hideShares = false,
+    this.profileOnly = false,
   });
+
+  /// Shown on the author's profile only: not in Home, Clips, Explore or search.
+  final bool profileOnly;
 
   /// [kAudienceEveryone], [kAudienceFollowers] or [kAudienceMe].
   final String audience;
@@ -89,6 +93,7 @@ class PostOptions {
     'hideLikes': hideLikes,
     'hideComments': hideComments,
     'hideShares': hideShares,
+    'profileOnly': profileOnly,
     'shareCount': 0,
   };
 }
@@ -132,6 +137,8 @@ class Post {
     this.hideComments = false,
     this.hideShares = false,
     this.authorPrivate = false,
+    this.profileOnly = false,
+    this.superCount = 0,
   });
 
   final String id;
@@ -198,6 +205,12 @@ class Post {
 
   /// The author's account was private when this was posted.
   final bool authorPrivate;
+
+  /// Only on the author's profile (see [PostOptions.profileOnly]).
+  final bool profileOnly;
+
+  /// Super hearts: one per person, on top of a like.
+  final int superCount;
 
   /// The photos and videos of a carousel (empty for a normal one-photo or one-video post).
   final List<PostItem> media;
@@ -307,6 +320,8 @@ class Post {
       hideComments: m['hideComments'] == true,
       hideShares: m['hideShares'] == true,
       authorPrivate: m['authorPrivate'] == true,
+      profileOnly: m['profileOnly'] == true,
+      superCount: _int(m['superCount']),
       media: m['media'] is List
           ? [for (final e in m['media'] as List) ?PostItem.fromMap(e)]
           : const [],

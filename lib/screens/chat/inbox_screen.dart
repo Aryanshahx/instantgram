@@ -15,6 +15,7 @@ import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/state_views.dart';
 import 'chat_options_sheet.dart';
+import 'chat_peek_sheet.dart';
 import 'chat_screen.dart';
 
 /// The Chats tab: your conversations, and a search box to start one with anyone.
@@ -167,11 +168,24 @@ class _InboxScreenState extends State<InboxScreen> {
     );
   }
 
-  Future<void> _options(ChatThread thread, String name) async {
+  Future<void> _options(
+    ChatThread thread,
+    String name, {
+    VoidCallback? open,
+  }) async {
     final pick = await showChatOptions(context, thread: thread, name: name);
     if (pick == null || !mounted) return;
     final service = ChatService.instance;
     switch (pick) {
+      case ChatOption.peek:
+        await showChatPeek(
+          context,
+          chatId: thread.id,
+          myUid: UserService.instance.myUid,
+          name: name,
+          onOpenChat: open,
+        );
+        return;
       case ChatOption.delete:
         final ok = await confirmDeleteChat(
           context,
@@ -284,7 +298,14 @@ class _InboxScreenState extends State<InboxScreen> {
                       context,
                       ChatScreen(otherUid: otherUid, user: u),
                     ),
-                    onLongPress: () => _options(t, u?.username ?? ''),
+                    onLongPress: () => _options(
+                      t,
+                      u?.username ?? '',
+                      open: () => openScreen(
+                        context,
+                        ChatScreen(otherUid: otherUid, user: u),
+                      ),
+                    ),
                   );
                 },
               );

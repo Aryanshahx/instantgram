@@ -6,7 +6,7 @@ import 'safety_service.dart';
 
 /// Cursor-based pagination (keeps Firestore reads low on the free tier).
 class PostPager extends ChangeNotifier {
-  PostPager(this._build, {this.pageSize = 10, this.first}) {
+  PostPager(this._build, {this.pageSize = 10, this.first, this.feed = false}) {
     if (first != null) posts.add(first!);
   }
 
@@ -15,6 +15,9 @@ class PostPager extends ChangeNotifier {
 
   /// Shown at the top of the list (a clip the user tapped); the loaded pages skip it.
   final Post? first;
+
+  /// Home, Clips and Explore: posts the author keeps "only on my profile" are left out.
+  final bool feed;
 
   final List<Post> posts = [];
   DocumentSnapshot<Map<String, dynamic>>? _cursor;
@@ -67,6 +70,7 @@ class PostPager extends ChangeNotifier {
               (p) =>
                   !p.isLegacyLink &&
                   p.id != first?.id &&
+                  !(feed && p.profileOnly) &&
                   SafetyService.instance.canSee(p),
             ),
       );

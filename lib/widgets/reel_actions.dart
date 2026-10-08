@@ -18,10 +18,9 @@ Uri reportUri(
   String details = '',
   String about = '',
 }) {
-  final kind = about.isNotEmpty
-      ? 'comment'
-      : (post.isClip ? 'clip' : 'post');
-  final subject = 'Report: $kind ${post.id}${reason.isEmpty ? '' : ' ($reason)'}';
+  final kind = about.isNotEmpty ? 'comment' : (post.isClip ? 'clip' : 'post');
+  final subject =
+      'Report: $kind ${post.id}${reason.isEmpty ? '' : ' ($reason)'}';
   final body =
       'I want to report this $kind.\n\n'
       '${reason.isEmpty ? '' : 'Reason: $reason\n'}'
@@ -281,10 +280,12 @@ class ReelIconButton extends StatelessWidget {
     this.color = Colors.white,
     this.size = 25,
     this.pop = false,
+    this.onLongPress,
   });
 
   final IconData icon;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   /// Small number or word under the icon.
   final String? label;
@@ -299,6 +300,7 @@ class ReelIconButton extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
+      onLongPress: onLongPress,
       child: SizedBox(
         width: 54,
         child: Column(

@@ -175,6 +175,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   bool _hideComments = false;
   bool _hideShares = false;
   bool _alsoStory = false;
+  bool _profileOnly = false;
   int _coverVer = 0;
 
   PostOptions get _options => PostOptions(
@@ -182,6 +183,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     hideLikes: _hideLikes,
     hideComments: _hideComments,
     hideShares: _hideShares,
+    profileOnly: _profileOnly,
   );
   final Stopwatch _clock = Stopwatch();
   DateTime _lastTick = DateTime.fromMillisecondsSinceEpoch(0);
@@ -1133,7 +1135,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (song != null || needsMix) {
       if (mounted) {
         setState(() {
-          _stage = song != null ? 'Adding the song...' : 'Finishing the clip...';
+          _stage = song != null
+              ? 'Adding the song...'
+              : 'Finishing the clip...';
           _progress = null;
         });
       }
@@ -1169,7 +1173,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             cutToSong: song != null,
           );
         } else {
-          m = await AudioMerger.merge(video: file, audio: audio!, maxSeconds: max);
+          m = await AudioMerger.merge(
+            video: file,
+            audio: audio!,
+            maxSeconds: max,
+          );
         }
         merged = m.file;
         file = m.file;
@@ -1767,6 +1775,22 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 subtitle: const Text('It stays there for 24 hours.'),
+              ),
+              SwitchListTile(
+                key: const ValueKey('profileOnlyRow'),
+                value: _profileOnly,
+                onChanged: _busy
+                    ? null
+                    : (v) => setState(() => _profileOnly = v),
+                activeTrackColor: AppTheme.volt,
+                secondary: const Icon(Icons.person_pin_rounded),
+                title: const Text(
+                  'Only on my profile',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: const Text(
+                  'Not shown in Home, Clips, Explore or search.',
+                ),
               ),
               if (_photoClip)
                 ListTile(

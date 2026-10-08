@@ -64,7 +64,7 @@ class PostService {
       final snap = await latestQuery().limit(300).get();
       _pool = snap.docs
           .map(Post.fromDoc)
-          .where((p) => !p.isLegacyLink)
+          .where((p) => !p.isLegacyLink && !p.profileOnly)
           .toList();
       _poolAt = DateTime.now();
     }
@@ -321,7 +321,7 @@ class PostService {
   // -------------------------------------------------------------------- pins
 
   /// Most posts and clips a person can pin to the top of their profile.
-  static const int maxPins = 3;
+  static const int maxPins = 6;
 
   Future<List<Post>> pinnedPosts(String uid) async {
     final snap = await _posts
@@ -346,6 +346,11 @@ class PostService {
     }
     await _posts.doc(post.id).update({'pinned': pin});
   }
+
+  /// Keeps one of my posts only on my profile (out of Home, Clips, Explore and search),
+  /// or puts it back.
+  Future<void> setProfileOnly(Post post, bool on) =>
+      _posts.doc(post.id).update({'profileOnly': on});
 
   // ------------------------------------------------------------------- saved
 
@@ -403,12 +408,20 @@ class PostService {
 
   // ------------------------------------------------------------------- likes
 
-  Future<bool> isLiked(String postId) async {
+  Future<bool> isLiked(String postId) async => (await likeState(postId)).liked;
+
+  /// Whether I liked [postId], and whether that like is a super heart.
+  Future<({bool liked, bool superHeart})> likeState(String postId) async {
     final d = await _posts.doc(postId).collection('likes').doc(_uid).get();
-    return d.exists;
+    return (liked: d.exists, superHeart: d.data()?['super'] == true);
   }
 
-  Future<void> setLike(String postId, bool like) async {
+  /// Likes or unlikes. Taking back a like also takes back its super heart ([wasSuper]).
+  Future<void> setLike(
+    String postId,
+    bool like, {
+    bool wasSuper = false,
+  }) async {
     final postRef = _posts.doc(postId);
     final likeRef = postRef.collection('likes').doc(_uid);
     final batch = _db.batch();
@@ -417,14 +430,36 @@ class PostService {
       batch.update(postRef, {'likeCount': FieldValue.increment(1)});
     } else {
       batch.delete(likeRef);
-      batch.update(postRef, {'likeCount': FieldValue.increment(-1)});
+      batch.update(postRef, {
+        'likeCount': FieldValue.increment(-1),
+        if (wasSuper) 'superCount': FieldValue.increment(-1),
+      });
     }
     await batch.commit();
     if (like) unawaited(_notifyLike(postId));
   }
 
+  /// A super heart: one per person per post, and it also counts as a like.
+  Future<void> sendSuperHeart(
+    String postId, {
+    required bool alreadyLiked,
+  }) async {
+    final postRef = _posts.doc(postId);
+    final batch = _db.batch();
+    batch.set(postRef.collection('likes').doc(_uid), {
+      if (!alreadyLiked) 'createdAt': FieldValue.serverTimestamp(),
+      'super': true,
+    }, SetOptions(merge: true));
+    batch.update(postRef, {
+      'superCount': FieldValue.increment(1),
+      if (!alreadyLiked) 'likeCount': FieldValue.increment(1),
+    });
+    await batch.commit();
+    unawaited(_notifyLike(postId, type: 'super'));
+  }
+
   /// Tells the author of [postId] that someone liked it (one line in their activity).
-  Future<void> _notifyLike(String postId) async {
+  Future<void> _notifyLike(String postId, {String type = 'like'}) async {
     try {
       final d = await _posts.doc(postId).get();
       final m = d.data();
@@ -433,7 +468,7 @@ class PostService {
       if (author.isEmpty || author == _uid) return;
       await NotificationService.instance.notify(
         toUid: author,
-        type: 'like',
+        type: type,
         postId: postId,
         thumb: _thumbOf(m),
       );
@@ -496,11 +531,7 @@ class PostService {
     batch.update(postRef, {'commentCount': FieldValue.increment(1)});
     await batch.commit();
     unawaited(
-      _notifyComment(
-        postId: postId,
-        text: text.trim(),
-        parentId: parentId,
-      ),
+      _notifyComment(postId: postId, text: text.trim(), parentId: parentId),
     );
   }
 
