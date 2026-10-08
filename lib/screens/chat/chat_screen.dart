@@ -25,6 +25,7 @@ import '../../core/fonts.dart';
 import '../../services/app_prefs.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/font_picker.dart';
+import '../../widgets/live_presence.dart';
 import '../../widgets/location_card.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/pull_hold.dart';
@@ -73,10 +74,6 @@ class _ChatScreenState extends State<ChatScreen> {
   /// The other account was deleted: history stays readable, nothing can be sent.
   bool _gone = false;
 
-  /// Their profile, live (for "Active now").
-  late final Stream<AppUser?> _live = UserService.instance.watchUser(
-    widget.otherUid,
-  );
   String? _chatId;
   Stream<List<ChatMessage>>? _stream;
   Stream<({String id, String preview, String by})?>? _pinStream;
@@ -96,7 +93,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Disappearing messages of this chat ('' = off); pull down and hold to change it.
   String _vanish = Vanish.off;
   StreamSubscription<String>? _vanishSub;
-  late final PullHold _pull = PullHold(onFire: _pickVanish);
+  late final PullHold _pull = PullHold(onFire: _slideVanish);
   String? _highlight;
 
   @override
@@ -624,12 +621,15 @@ class _ChatScreenState extends State<ChatScreen> {
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                     if (!_gone)
-                      StreamBuilder<AppUser?>(
-                        stream: _live,
-                        builder: (context, snap) {
+                      LivePresence(
+                        uid: widget.otherUid,
+                        initial: u,
+                        builder: (context, live) {
+                          final p = live ?? u;
                           final label = presenceLabel(
-                            snap.data?.lastActive ?? u?.lastActive,
+                            p?.lastActive,
                             DateTime.now(),
+                            online: p?.online ?? true,
                           );
                           if (label.isEmpty) return const SizedBox.shrink();
                           return Text(
@@ -904,6 +904,23 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ---------------------------------------------------- disappearing messages
 
+  /// Slide up and hold: on -> off straight away; off -> pick how long messages stay.
+  Future<void> _slideVanish() async {
+    if (_gone || _chatId == null || !mounted) return;
+    if (_vanish.isEmpty) return _pickVanish();
+    await _guard(() async {
+      final me = await UserService.instance.getUser(_me);
+      await _service.setVanish(
+        widget.otherUid,
+        Vanish.off,
+        myName: me?.username ?? 'Someone',
+      );
+      if (!mounted) return;
+      setState(() => _vanish = '');
+      showToast(context, 'Disappearing messages off');
+    });
+  }
+
   Future<void> _pickVanish() async {
     if (_gone || _chatId == null || !mounted) return;
     final pick = await showVanishPicker(context, current: _vanish);
@@ -943,13 +960,13 @@ class _ChatScreenState extends State<ChatScreen> {
     ),
   );
 
-  /// While pulling down: "keep holding" with a little progress ring.
+  /// While sliding up: "keep holding" with a little progress ring (above the newest message).
   Widget _pullHint(BuildContext context) => ValueListenableBuilder<double>(
     valueListenable: _pull.progress,
     builder: (context, p, _) {
       if (p <= 0) return const SizedBox.shrink();
       return Positioned(
-        top: 10,
+        bottom: 10,
         left: 0,
         right: 0,
         child: Center(
@@ -971,7 +988,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 const SizedBox(width: 10),
                 Text(
                   p < 1
-                      ? 'Pull down for disappearing messages'
+                      ? (_vanish.isEmpty
+                            ? 'Slide up for disappearing messages'
+                            : 'Slide up to turn them off')
                       : 'Keep holding…',
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),

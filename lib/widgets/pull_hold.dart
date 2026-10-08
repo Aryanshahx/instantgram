@@ -2,8 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
-/// Pull down and hold: feed it the notifications of a reversed (chat) list. Pulling the
-/// top edge further than [distance] and keeping the finger there for [hold] calls [onFire].
+/// Slide up and hold: feed it the notifications of a reversed (chat) list. Sliding the
+/// finger up past the newest message (the bottom edge) further than [distance] and keeping
+/// it there for [hold] calls [onFire].
 class PullHold {
   PullHold({
     required this.onFire,
@@ -27,16 +28,17 @@ class PullHold {
     if (n is ScrollStartNotification) {
       _reset();
     } else if (n is OverscrollNotification) {
-      // a reversed list: the top (older messages) is the far end
-      if (n.dragDetails != null && n.overscroll > 0) _add(n.overscroll);
+      // a reversed list: the newest message is at pixels 0, so sliding up past it is
+      // a negative overscroll
+      if (n.dragDetails != null && n.overscroll < 0) _add(-n.overscroll);
     } else if (n is ScrollUpdateNotification) {
       final m = n.metrics;
-      if (n.dragDetails != null && m.pixels > m.maxScrollExtent) {
+      if (n.dragDetails != null && m.pixels < m.minScrollExtent) {
         _set(
-          m.pixels - m.maxScrollExtent,
+          m.minScrollExtent - m.pixels,
         ); // bouncing lists (iOS) go past the edge
-      } else if ((n.scrollDelta ?? 0) < 0) {
-        _reset(); // pulled back
+      } else if ((n.scrollDelta ?? 0) > 0) {
+        _reset(); // slid back down
       }
     } else if (n is ScrollEndNotification) {
       _reset();

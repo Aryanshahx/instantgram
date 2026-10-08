@@ -231,7 +231,7 @@ void main() {
     });
 
     testWidgets(
-      'pull down and hold opens the picker; a short pull or letting go does not',
+      'slide up and hold opens the picker; a short slide or letting go does not',
       (tester) async {
         var fired = 0;
         final pull = PullHold(onFire: () => fired++);
@@ -243,7 +243,7 @@ void main() {
           tester.getCenter(find.byKey(const ValueKey('list'))),
         );
         for (var i = 0; i < 10; i++) {
-          await g.moveBy(const Offset(0, 20));
+          await g.moveBy(const Offset(0, -20));
           await tester.pump(const Duration(milliseconds: 16));
         }
         expect(pull.progress.value, 1);
@@ -257,7 +257,7 @@ void main() {
           tester.getCenter(find.byKey(const ValueKey('list'))),
         );
         for (var i = 0; i < 10; i++) {
-          await g.moveBy(const Offset(0, 20));
+          await g.moveBy(const Offset(0, -20));
           await tester.pump(const Duration(milliseconds: 16));
         }
         await g.up();
@@ -269,20 +269,20 @@ void main() {
         g = await tester.startGesture(
           tester.getCenter(find.byKey(const ValueKey('list'))),
         );
-        await g.moveBy(const Offset(0, 20));
+        await g.moveBy(const Offset(0, -20));
         await tester.pump(const Duration(milliseconds: 16));
-        await g.moveBy(const Offset(0, 20));
+        await g.moveBy(const Offset(0, -20));
         await tester.pump(const Duration(milliseconds: 900));
         expect(fired, 1);
         await g.up();
         await tester.pump();
 
-        // pulling up (towards the newest messages) never counts
+        // sliding down (towards older messages) never counts
         g = await tester.startGesture(
           tester.getCenter(find.byKey(const ValueKey('list'))),
         );
         for (var i = 0; i < 10; i++) {
-          await g.moveBy(const Offset(0, -20));
+          await g.moveBy(const Offset(0, 20));
           await tester.pump(const Duration(milliseconds: 16));
         }
         await tester.pump(const Duration(milliseconds: 900));

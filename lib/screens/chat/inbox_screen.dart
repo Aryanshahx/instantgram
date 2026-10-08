@@ -13,6 +13,7 @@ import '../../services/chat_service.dart';
 import '../../services/presence_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/live_presence.dart';
 import '../../widgets/state_views.dart';
 import 'chat_options_sheet.dart';
 import 'chat_peek_sheet.dart';
@@ -284,26 +285,37 @@ class _InboxScreenState extends State<InboxScreen> {
                       u == null;
                   final unread = t.isUnread(me);
                   final mine = t.lastSender == me;
-                  return _Row(
-                    uid: gone ? null : otherUid,
-                    avatarUrl: u?.photoUrl ?? '',
-                    name: gone ? kUserNotAvailable : (u?.username ?? '...'),
-                    subtitle: '${mine ? 'You: ' : ''}${t.lastText}',
-                    time: t.lastAt == null
-                        ? ''
-                        : timeago.format(t.lastAt!, locale: 'en_short'),
-                    unread: unread,
-                    online: isActiveNow(u?.lastActive, DateTime.now()),
-                    onTap: () => openScreen(
-                      context,
-                      ChatScreen(otherUid: otherUid, user: u),
-                    ),
-                    onLongPress: () => _options(
-                      t,
-                      u?.username ?? '',
-                      open: () => openScreen(
+                  return LivePresence(
+                    key: ValueKey('presence_$otherUid'),
+                    uid: otherUid,
+                    initial: u,
+                    builder: (context, live) => _Row(
+                      uid: gone ? null : otherUid,
+                      avatarUrl: u?.photoUrl ?? '',
+                      name: gone ? kUserNotAvailable : (u?.username ?? '...'),
+                      subtitle: '${mine ? 'You: ' : ''}${t.lastText}',
+                      time: t.lastAt == null
+                          ? ''
+                          : timeago.format(t.lastAt!, locale: 'en_short'),
+                      unread: unread,
+                      online:
+                          !gone &&
+                          isActiveNow(
+                            (live ?? u)?.lastActive,
+                            DateTime.now(),
+                            online: (live ?? u)?.online ?? true,
+                          ),
+                      onTap: () => openScreen(
                         context,
                         ChatScreen(otherUid: otherUid, user: u),
+                      ),
+                      onLongPress: () => _options(
+                        t,
+                        u?.username ?? '',
+                        open: () => openScreen(
+                          context,
+                          ChatScreen(otherUid: otherUid, user: u),
+                        ),
                       ),
                     ),
                   );
