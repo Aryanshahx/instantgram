@@ -66,6 +66,10 @@ public class AudioMergePlugin implements FlutterPlugin, MethodCallHandler {
             mix(call, result);
             return;
         }
+        if ("join".equals(call.method)) {
+            join(call, result);
+            return;
+        }
         final boolean merge = "merge".equals(call.method);
         final boolean convert = "toAac".equals(call.method);
         if (!merge && !convert) {
@@ -153,6 +157,39 @@ public class AudioMergePlugin implements FlutterPlugin, MethodCallHandler {
                         @Override
                         public void run() {
                             result.error("mix_failed", String.valueOf(e.getMessage()), null);
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    /** `join(inputs: [paths], output)` -> {seconds}: the parts one after the other. */
+    private void join(@NonNull MethodCall call, @NonNull final Result result) {
+        final java.util.List<String> inputs = call.argument("inputs");
+        final String output = call.argument("output");
+        if (inputs == null || inputs.isEmpty() || output == null) {
+            result.error("bad_args", "the file names are missing", null);
+            return;
+        }
+        pool.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final long us = VideoJoiner.join(inputs, output);
+                    final Map<String, Object> out = new HashMap<>();
+                    out.put("seconds", us / 1000000.0);
+                    main.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            result.success(out);
+                        }
+                    });
+                } catch (final Exception e) {
+                    main.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            result.error("join_failed", String.valueOf(e.getMessage()), null);
                         }
                     });
                 }

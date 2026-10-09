@@ -12,6 +12,7 @@ import '../services/giphy.dart';
 import '../models/finish.dart';
 import '../core/fonts.dart';
 import '../models/story.dart';
+import 'media_layers.dart';
 import 'story_overlays.dart';
 
 /// Text and sticker tools shared by the moment composer and the post editor.
@@ -357,13 +358,20 @@ class OverlayEditLayer extends StatefulWidget {
 class _OverlayEditLayerState extends State<OverlayEditLayer> {
   double _baseScale = 1;
 
-  Widget _dim(Widget chip, StoryOverlay o) {
+  Widget _dim(Widget chip, StoryOverlay o, Size canvas) {
     final pos = widget.position;
-    if (pos == null || o.isAlways) return chip;
+    final a = o.anim;
+    final moves = a != null && !a.isEmpty;
+    if (pos == null || (o.isAlways && !moves)) return chip;
     return ValueListenableBuilder<double>(
       valueListenable: pos,
-      builder: (_, p, child) =>
-          Opacity(opacity: o.visibleAt(p) ? 1 : 0.35, child: child),
+      builder: (_, p, child) {
+        Widget c = Opacity(opacity: o.visibleAt(p) ? 1 : 0.35, child: child);
+        if (moves && o.visibleAt(p)) {
+          c = applyMotion(c, motionAt(a, p, from: o.from, to: o.to), canvas);
+        }
+        return c;
+      },
       child: chip,
     );
   }
@@ -434,6 +442,7 @@ class _OverlayEditLayerState extends State<OverlayEditLayer> {
                                 canvasWidth: w,
                               ),
                               list[i],
+                              Size(w, h),
                             ),
                     ),
                   ),
@@ -527,8 +536,12 @@ class OverlaySelectionBar extends StatelessWidget {
     required this.onDelete,
     required this.onDone,
     this.onEdit,
+    this.onAnimate,
     this.dark = true,
   });
+
+  /// Videos: choose how the item comes in and goes out (null = not offered).
+  final VoidCallback? onAnimate;
 
   final StoryOverlay overlay;
   final ValueChanged<double> onScale;
@@ -584,6 +597,16 @@ class OverlaySelectionBar extends StatelessWidget {
               icon: const Icon(Icons.edit_outlined),
               onPressed: onEdit,
             ),
+          if (onAnimate != null)
+            IconButton(
+              key: const ValueKey('selAnimate'),
+              tooltip: 'Animate',
+              color: o.anim == null || o.anim!.isEmpty
+                  ? Colors.white
+                  : AppTheme.volt,
+              icon: const Icon(Icons.animation_rounded),
+              onPressed: onAnimate,
+            ),
           IconButton(
             key: const ValueKey('selDelete'),
             tooltip: 'Delete',
@@ -607,7 +630,7 @@ class OverlaySelectionBar extends StatelessWidget {
 /// A video (or any picture) with its colour look and its texts and stickers on top.
 /// Pass the video's [player] so that texts and stickers that only belong to a part of the
 /// clip appear and disappear with it.
-class FinishedMedia extends StatelessWidget {
+class FinishedMedia extends StatefulWidget {
   const FinishedMedia({
     super.key,
     required this.finish,
@@ -619,14 +642,88 @@ class FinishedMedia extends StatelessWidget {
   final ValueListenable<VideoPlayerValue>? player;
 
   @override
+  State<FinishedMedia> createState() => _FinishedMediaState();
+}
+
+class _FinishedMediaState extends State<FinishedMedia> {
+  PlayerClock? _clock;
+  PlayingFlag? _playing;
+
+  void _setUp() {
+    final p = widget.player;
+    final f = widget.finish;
+    _clock = clockFor(p, f != null && f.animated);
+    _playing = p != null && f != null && f.layers.any((l) => l.video)
+        ? PlayingFlag(p)
+        : null;
+  }
+
+  void _tearDown() {
+    _clock?.dispose();
+    _playing?.dispose();
+    _clock = null;
+    _playing = null;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _setUp();
+  }
+
+  @override
+  void didUpdateWidget(FinishedMedia old) {
+    super.didUpdateWidget(old);
+    final was = old.finish?.animated ?? false;
+    final now = widget.finish?.animated ?? false;
+    final vids =
+        (old.finish?.layers.any((l) => l.video) ?? false) !=
+        (widget.finish?.layers.any((l) => l.video) ?? false);
+    if (old.player != widget.player || was != now || vids) {
+      _tearDown();
+      _setUp();
+    }
+  }
+
+  @override
+  void dispose() {
+    _tearDown();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final f = finish;
+    final f = widget.finish;
+    final child = widget.child;
     if (f == null || f.isEmpty) return child;
     final look = f.look;
-    final colored = look == null || look.isEmpty
+    Widget body = look == null || look.isEmpty
         ? child
         : ColorFiltered(colorFilter: lookFilter(look), child: child);
-    return OverlayShow(overlays: f.overlays, player: player, child: colored);
+    if (f.mask != null) body = MaskedBox(mask: f.mask, child: body);
+    if (f.layers.isNotEmpty) {
+      body = Stack(
+        fit: StackFit.passthrough,
+        children: [
+          body,
+          Positioned.fill(
+            child: LayerStack(
+              layers: f.layers,
+              clock: _clock,
+              playing: _playing,
+              clipSeconds: playerSeconds(widget.player?.value),
+            ),
+          ),
+        ],
+      );
+    }
+    return OverlayShow(
+      overlays: f.overlays,
+      player: widget.player,
+      clock: _clock,
+      clipSeconds: playerSeconds(widget.player?.value),
+      child: body,
+    );
   }
 }
 
@@ -643,7 +740,15 @@ class OverlayShow extends StatefulWidget {
     required this.overlays,
     required this.child,
     this.player,
+    this.clock,
+    this.clipSeconds = 0,
   });
+
+  /// Smooth position of the clip; items with an animation move with it.
+  final ValueListenable<double>? clock;
+
+  /// Length of the clip (an animation out of an item shown to the end ends here).
+  final double clipSeconds;
   final List<StoryOverlay> overlays;
   final Widget child;
   final ValueListenable<VideoPlayerValue>? player;
@@ -690,6 +795,28 @@ class _OverlayShowState extends State<OverlayShow> {
     super.dispose();
   }
 
+  /// An item with an animation, moved for every frame of the clip.
+  Widget _moving(Widget chip, StoryOverlay o, Size canvas) {
+    final a = o.anim;
+    final c = widget.clock;
+    if (a == null || a.isEmpty || c == null) return chip;
+    return ValueListenableBuilder<double>(
+      valueListenable: c,
+      builder: (_, sec, child) => applyMotion(
+        child!,
+        motionAt(
+          a,
+          sec,
+          from: o.isAlways ? 0 : o.from,
+          to: o.isAlways ? -1 : o.to,
+          clipEnd: widget.clipSeconds,
+        ),
+        canvas,
+      ),
+      child: chip,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final overlays = widget.overlays;
@@ -720,9 +847,13 @@ class _OverlayShowState extends State<OverlayShow> {
                                   constraints: BoxConstraints(
                                     maxWidth: w * 0.92,
                                   ),
-                                  child: StoryOverlayChip(
-                                    overlay: overlays[i],
-                                    canvasWidth: w,
+                                  child: _moving(
+                                    StoryOverlayChip(
+                                      overlay: overlays[i],
+                                      canvasWidth: w,
+                                    ),
+                                    overlays[i],
+                                    Size(w, h),
                                   ),
                                 ),
                               ),
@@ -876,6 +1007,132 @@ class _OverlayTextSheetState extends State<_OverlayTextSheet> {
           ),
           const SizedBox(height: 14),
         ],
+      ),
+    );
+  }
+}
+
+/// Sheet to pick how a text, sticker or layer comes in and goes out. Returns the new
+/// animation (empty = none), or null when closed without a change.
+Future<MotionAnim?> showMotionSheet(
+  BuildContext context,
+  MotionAnim? current,
+) => showModalBottomSheet<MotionAnim>(
+  context: context,
+  backgroundColor: const Color(0xFF15171C),
+  isScrollControlled: true,
+  builder: (_) => MotionPicker(initial: current ?? const MotionAnim()),
+);
+
+/// In / Out rows of animation chips and a length slider.
+class MotionPicker extends StatefulWidget {
+  const MotionPicker({super.key, required this.initial});
+  final MotionAnim initial;
+
+  @override
+  State<MotionPicker> createState() => _MotionPickerState();
+}
+
+class _MotionPickerState extends State<MotionPicker> {
+  late MotionAnim _a = widget.initial;
+
+  Widget _row(String label, String now, ValueChanged<String> pick, String id) {
+    final kinds = {'': 'None', ...kMotionKinds};
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 4),
+          SizedBox(
+            height: 34,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final e in kinds.entries)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      key: ValueKey('${id}_${e.key.isEmpty ? 'none' : e.key}'),
+                      label: Text(
+                        e.value,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      selected: now == e.key,
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (_) => pick(e.key),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        child: Column(
+          key: const ValueKey('motionSheet'),
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Animate',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            _row(
+              'In',
+              _a.inn,
+              (k) => setState(() => _a = _a.copyWith(inn: k)),
+              'animIn',
+            ),
+            _row(
+              'Out',
+              _a.out,
+              (k) => setState(() => _a = _a.copyWith(out: k)),
+              'animOut',
+            ),
+            Row(
+              children: [
+                const Text(
+                  'Length',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                Expanded(
+                  child: Slider(
+                    key: const ValueKey('animSecs'),
+                    value: _a.secs.clamp(0.2, 2.0),
+                    min: 0.2,
+                    max: 2,
+                    activeColor: AppTheme.volt,
+                    onChanged: (v) => setState(() => _a = _a.copyWith(secs: v)),
+                  ),
+                ),
+                Text(
+                  '${_a.secs.toStringAsFixed(1)} s',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ],
+            ),
+            FilledButton(
+              key: const ValueKey('animDone'),
+              onPressed: () => Navigator.pop(context, _a),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
       ),
     );
   }

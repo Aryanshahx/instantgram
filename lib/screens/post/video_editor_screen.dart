@@ -14,6 +14,7 @@ class VideoEdits {
     this.mute = false,
     this.speed = 1,
     this.turns = 0,
+    this.parts = const [],
   });
 
   final int start;
@@ -29,13 +30,23 @@ class VideoEdits {
   /// Quarter turns to the right (0-3).
   final int turns;
 
-  bool get trimmed => start > 0 || end < total;
+  /// After Split: the parts that are kept (seconds of the original video, in order).
+  /// Empty = the whole range from [start] to [end].
+  final List<(int, int)> parts;
+
+  /// The kept parts (one part when nothing was split off).
+  List<(int, int)> get kept => parts.isEmpty ? [(start, end)] : parts;
+
+  /// Parts were removed from the middle.
+  bool get split => kept.length > 1;
+
+  bool get trimmed => start > 0 || end < total || split;
   bool get changesSpeed => speed != 1;
   bool get rotated => turns % 4 != 0;
   bool get isEmpty => !trimmed && !mute && !changesSpeed && !rotated;
 
   /// Seconds of the video that are kept.
-  int get length => end - start;
+  int get length => kept.fold(0, (a, p) => a + p.$2 - p.$1);
 
   /// Seconds the clip lasts once the speed is applied.
   int get playSeconds {

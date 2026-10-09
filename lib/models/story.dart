@@ -3,6 +3,7 @@ import 'package:flutter/painting.dart';
 
 import '../core/fonts.dart';
 import '../core/media_url.dart';
+import 'finish.dart';
 import 'music.dart';
 
 /// The longest video that can be put in a moment.
@@ -28,7 +29,11 @@ class StoryOverlay {
     this.from = 0,
     this.to = -1,
     this.font = '',
+    this.anim,
   });
+
+  /// Coming in / going out animation (videos).
+  final MotionAnim? anim;
 
   final String text;
 
@@ -77,6 +82,8 @@ class StoryOverlay {
     double? from,
     double? to,
     String? font,
+    MotionAnim? anim,
+    bool clearAnim = false,
   }) => StoryOverlay(
     text: text ?? this.text,
     dx: dx ?? this.dx,
@@ -91,6 +98,7 @@ class StoryOverlay {
     from: from ?? this.from,
     to: to ?? this.to,
     font: font ?? this.font,
+    anim: clearAnim ? null : (anim ?? this.anim),
   );
 
   /// Font size for a picture that is [canvasWidth] wide.
@@ -113,6 +121,7 @@ class StoryOverlay {
     if (from > 0) 'ts': double.parse(from.toStringAsFixed(2)),
     if (to >= 0) 'te': double.parse(to.toStringAsFixed(2)),
     if (font.isNotEmpty) 'f': font,
+    if (anim != null && !anim!.isEmpty) 'an': anim!.toMap(),
   };
 
   static StoryOverlay? fromMap(Object? v) {
@@ -136,6 +145,7 @@ class StoryOverlay {
       from: d(v['ts'], 0).clamp(0.0, 36000.0),
       to: v['te'] is num ? (v['te'] as num).toDouble().clamp(0.0, 36000.0) : -1,
       font: cleanFontId(v['f']),
+      anim: MotionAnim.fromMap(v['an']),
     );
   }
 }

@@ -276,8 +276,14 @@ class PostService {
     // Free the space in the bucket (best effort).
     await MediaServer.instance.deleteRefs([
       if (p.media.isNotEmpty)
-        for (final m in p.media) ...[m.ref, m.thumbRef]
+        for (final m in p.media) ...[
+          m.ref,
+          m.thumbRef,
+          // photos / videos placed over a clip
+          for (final l in m.finish?.layers ?? const <MediaLayer>[]) l.ref,
+        ]
       else ...[p.isVideo ? p.videoRef : p.imageRef, p.thumbRef],
+      for (final l in p.finish?.layers ?? const <MediaLayer>[]) l.ref,
       deviceMusicRef(p.musicId), // a sound that came from the phone
     ]);
   }

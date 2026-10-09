@@ -20,9 +20,12 @@ import '../../services/voice_recorder.dart';
 import '../../services/overlay_painter.dart';
 import '../../services/photo_edit.dart';
 import '../../services/playhead.dart';
+import '../../services/video_frames.dart';
 import '../../widgets/music_widgets.dart';
 import '../../widgets/overlay_tools.dart';
 import '../../widgets/edit_timeline.dart';
+import '../../widgets/media_layers.dart';
+import 'package:image_picker/image_picker.dart';
 import 'photo_editor_screen.dart' show CropOverlay;
 import 'video_editor_screen.dart' show VideoEdits;
 
@@ -36,7 +39,13 @@ class EditorResult {
     this.overlays = const [],
     this.music,
     this.audio = AudioEdits.none,
+    this.layers = const [],
+    this.mask,
   });
+
+  /// Videos: photos / videos placed over the clip (Overlay) and the clip's mask.
+  final List<MediaLayer> layers;
+  final LayerMask? mask;
 
   /// Photos: the picture to upload (texts and stickers are burned in). Null for videos.
   final File? photoFile;
@@ -77,7 +86,13 @@ class EditorScreen extends StatefulWidget {
     this.audio = AudioEdits.none,
     this.voiceover = true,
     this.maxSeconds,
+    this.layers = const [],
+    this.mask,
   });
+
+  /// Videos: layers placed over the clip and the clip's mask.
+  final List<MediaLayer> layers;
+  final LayerMask? mask;
 
   /// The photo as it was picked, or the video.
   final File file;
@@ -102,7 +117,10 @@ class EditorScreen extends StatefulWidget {
   State<EditorScreen> createState() => _EditorScreenState();
 }
 
-enum _Tool { filters, adjust, crop, audio, speed }
+/// Test hook: picks a photo or video for Overlay (file, width / height).
+Future<(File, double)?> Function(bool video)? debugPickLayer;
+
+enum _Tool { filters, adjust, crop, audio, speed, split, layer, mask }
 
 class _EditorScreenState extends State<EditorScreen>
     with SingleTickerProviderStateMixin {
@@ -132,6 +150,19 @@ class _EditorScreenState extends State<EditorScreen>
   // video: speed and quarter turns
   double _speed = 1;
   int _turns = 0;
+
+  // split: cut points (whole seconds) and the parts taken out (by their first second)
+  final List<int> _cuts = [];
+  final Set<int> _removed = {};
+
+  // layers placed over the clip, the clip's own mask
+  final List<MediaLayer> _layers = [];
+  LayerMask? _clipMask;
+  int? _layerSel;
+  int _layerTab = 0;
+  final ValueNotifier<bool> _playingN = ValueNotifier(false);
+  double _layerBaseScale = 1;
+  double _layerBaseTurns = 0;
   // photos always have a tool open; videos keep the timeline in view and open a tool on demand
   _Tool? _tool = _Tool.filters;
   int _preset = 0; // index into _presets (0 = free)
@@ -195,6 +226,8 @@ class _EditorScreenState extends State<EditorScreen>
   void initState() {
     super.initState();
     _overlays.addAll(widget.overlays);
+    _layers.addAll(widget.layers);
+    _clipMask = widget.mask;
     _music = widget.music;
     if (_isVideo) {
       _tool = null;
@@ -250,6 +283,7 @@ class _EditorScreenState extends State<EditorScreen>
         _mute = init?.mute ?? false;
         _speed = init?.speed ?? 1;
         _turns = init?.turns ?? 0;
+        _restoreParts(init?.parts ?? const []);
         _rangeN.value = (_start, _end);
       });
       _smooth.rate = _speed;
@@ -258,9 +292,9 @@ class _EditorScreenState extends State<EditorScreen>
       if (_speed != 1) await c.setPlaybackSpeed(_speed);
       c.addListener(_tick);
       unawaited(_loadFrames());
-      await c.seekTo(Duration(seconds: _start.round()));
-      _smooth.seek(_start, _clock.elapsed);
-      _pos.value = _start;
+      await c.seekTo(Duration(milliseconds: (_playStart * 1000).round()));
+      _smooth.seek(_playStart, _clock.elapsed);
+      _pos.value = _playStart;
       final m = _music;
       if (m != null) unawaited(_startPlayer(m));
       if (_a.hasVoice) unawaited(_startVoice());
@@ -279,7 +313,7 @@ class _EditorScreenState extends State<EditorScreen>
         final b = await VideoCompress.getByteThumbnail(
           widget.file.path,
           quality: 40,
-          position: ((i + 0.5) / n * _total * 1000).round(),
+          position: framePosition(((i + 0.5) / n * _total * 1000).round()),
         );
         if (!mounted) return;
         _frames[i] = b;
@@ -297,6 +331,7 @@ class _EditorScreenState extends State<EditorScreen>
     final v = c.value;
     final now = _clock.elapsed;
     _smooth.report(v.position.inMilliseconds / 1000, v.isPlaying, now);
+    _playingN.value = v.isPlaying;
     if (v.isPlaying && !_tk.isActive) {
       _tk.start();
     } else if (!v.isPlaying && _tk.isActive) {
@@ -304,7 +339,7 @@ class _EditorScreenState extends State<EditorScreen>
       _pos.value = _smooth.value(now);
     }
     if (_paused) return;
-    final end = Duration(milliseconds: (_end * 1000).round());
+    final end = Duration(milliseconds: (_playEnd * 1000).round());
     if (v.isInitialized &&
         (v.position >= end ||
             (v.position >= v.duration && v.duration > Duration.zero))) {
@@ -321,12 +356,152 @@ class _EditorScreenState extends State<EditorScreen>
   /// One step per screen frame: the playhead moves smoothly between the player's reports.
   void _onFrame(Duration _) {
     final est = _smooth.value(_clock.elapsed);
-    if (est >= _end - 0.02) {
+    if (est >= _playEnd - 0.02) {
       _loopBack();
+      return;
+    }
+    final skip = _recording ? null : _skipFrom(est);
+    if (skip != null) {
+      skip.isInfinite ? _loopBack() : _jumpTo(skip);
       return;
     }
     _pos.value = est;
   }
+
+  /// Playing ran into a part that was taken out: on to the next kept part.
+  void _jumpTo(double sec) {
+    final c = _c;
+    if (c == null || _looping) return;
+    _looping = true;
+    _smooth.seek(sec, _clock.elapsed);
+    _pos.value = sec;
+    c.seekTo(Duration(milliseconds: (sec * 1000).round())).whenComplete(() {
+      _looping = false;
+      _syncSound(force: true, at: sec);
+    });
+  }
+
+  // ------------------------------------------------------------------ split
+
+  /// The parts between the trim handles and the cuts (seconds of the video).
+  List<(double, double)> get _segs {
+    final b = <double>[
+      _start,
+      for (final x in _cuts)
+        if (x > _start + 0.01 && x < _end - 0.01) x.toDouble(),
+      _end,
+    ];
+    return [for (var i = 0; i + 1 < b.length; i++) (b[i], b[i + 1])];
+  }
+
+  bool _isRemoved((double, double) seg) => _removed.contains(seg.$1.round());
+
+  /// The parts that are kept (never none).
+  List<(double, double)> get _keptSegs {
+    final all = _segs;
+    final k = [
+      for (final g in all)
+        if (!_isRemoved(g)) g,
+    ];
+    return k.isEmpty ? all : k;
+  }
+
+  double get _playStart => _keptSegs.first.$1;
+  double get _playEnd => _keptSegs.last.$2;
+
+  /// Seconds of the finished clip (before the speed) that come before [sec] of the video.
+  double _outOffset(double sec) {
+    var acc = 0.0;
+    for (final g in _keptSegs) {
+      if (sec <= g.$1) break;
+      acc += math.min(sec, g.$2) - g.$1;
+    }
+    return acc;
+  }
+
+  double get _keptLength => _keptSegs.fold(0.0, (a, g) => a + g.$2 - g.$1);
+
+  /// [sec] is inside a part that was taken out: where playing goes on (infinity = loop).
+  double? _skipFrom(double sec) {
+    if (_removed.isEmpty) return null;
+    for (final g in _segs) {
+      if (sec >= g.$1 - 0.001 && sec < g.$2 - 0.01) {
+        if (!_isRemoved(g)) return null;
+        for (final k in _keptSegs) {
+          if (k.$1 >= g.$2 - 0.001) return k.$1;
+        }
+        return double.infinity;
+      }
+    }
+    return null;
+  }
+
+  /// Kept parts in whole seconds, neighbours joined.
+  List<(int, int)> get _keptParts {
+    final out = <(int, int)>[];
+    for (final g in _keptSegs) {
+      final a = g.$1.round(), b = g.$2.round();
+      if (b <= a) continue;
+      if (out.isNotEmpty && out.last.$2 == a) {
+        out[out.length - 1] = (out.last.$1, b);
+      } else {
+        out.add((a, b));
+      }
+    }
+    return out;
+  }
+
+  /// Opening the editor again: cuts and taken-out parts from the saved parts.
+  void _restoreParts(List<(int, int)> parts) {
+    if (parts.length < 2) return;
+    _start = parts.first.$1.toDouble();
+    _end = parts.last.$2.toDouble();
+    for (var i = 0; i + 1 < parts.length; i++) {
+      final a = parts[i].$2, b = parts[i + 1].$1;
+      _cuts.add(a);
+      if (b > a) {
+        _cuts.add(b);
+        _removed.add(a);
+      }
+    }
+    _cuts.sort();
+  }
+
+  /// Split at the playhead (whole seconds; a part is at least one second).
+  void _splitHere() {
+    final at = _pos.value.round();
+    final ok = at > _start.round() && at < _end.round() && !_cuts.contains(at);
+    if (!ok) {
+      showToast(context, 'Move the playhead inside the clip to split.');
+      return;
+    }
+    setState(() {
+      final seg = _segs.firstWhere((g) => at > g.$1 && at < g.$2);
+      _cuts
+        ..add(at)
+        ..sort();
+      if (_isRemoved(seg)) _removed.add(at);
+    });
+  }
+
+  void _toggleSeg((double, double) g) {
+    final key = g.$1.round();
+    if (!_removed.contains(key) && _keptSegs.length <= 1) {
+      showToast(context, 'At least one part has to stay.');
+      return;
+    }
+    setState(() {
+      if (!_removed.remove(key)) _removed.add(key);
+    });
+    final p = _pos.value;
+    final skip = _skipFrom(p);
+    if (skip != null) _scrubTo(skip.isInfinite ? _playStart : skip);
+  }
+
+  void _joinAll() => setState(() {
+    _cuts.clear();
+    _removed.clear();
+  });
 
   void _loopBack() {
     final c = _c;
@@ -337,14 +512,15 @@ class _EditorScreenState extends State<EditorScreen>
       return;
     }
     _looping = true;
-    _smooth.seek(_start, _clock.elapsed);
-    _pos.value = _start;
+    final from = _playStart;
+    _smooth.seek(from, _clock.elapsed);
+    _pos.value = from;
     c
-        .seekTo(Duration(milliseconds: (_start * 1000).round()))
+        .seekTo(Duration(milliseconds: (from * 1000).round()))
         .then((_) => c.play())
         .whenComplete(() {
           _looping = false;
-          _syncSound(force: true, at: _start);
+          _syncSound(force: true, at: from);
         });
   }
 
@@ -366,13 +542,15 @@ class _EditorScreenState extends State<EditorScreen>
     _lastSync = DateTime.now();
     final c = _c;
     if (!_isVideo || c == null) return;
-    final videoSec = at ?? c.value.position.inMilliseconds / 1000;
+    // where the finished clip is: parts that were taken out do not count
+    final videoSec =
+        _playStart + _outOffset(at ?? c.value.position.inMilliseconds / 1000);
     final p = _player;
     if (p != null && p.ready) {
       final len = p.duration.inMilliseconds / 1000;
       final want = songPositionFor(
         videoSec: videoSec,
-        trimStart: _start,
+        trimStart: _playStart,
         songStart: _a.songStart,
         speed: _speed,
         songLength: len,
@@ -386,7 +564,7 @@ class _EditorScreenState extends State<EditorScreen>
     if (v != null && v.ready && !_recording) {
       final want = songPositionFor(
         videoSec: videoSec,
-        trimStart: _start,
+        trimStart: _playStart,
         speed: _speed,
       );
       final len = v.duration.inMilliseconds / 1000;
@@ -411,6 +589,7 @@ class _EditorScreenState extends State<EditorScreen>
     _rangeN.dispose();
     _ovTick.dispose();
     _framesTick.dispose();
+    _playingN.dispose();
     _c?.dispose();
     _player?.dispose();
     _voice?.dispose();
@@ -543,9 +722,9 @@ class _EditorScreenState extends State<EditorScreen>
     _voice?.pause();
     await c.pause();
     await c.setVolume(0);
-    await c.seekTo(Duration(milliseconds: (_start * 1000).round()));
-    _smooth.seek(_start, _clock.elapsed);
-    _pos.value = _start;
+    await c.seekTo(Duration(milliseconds: (_playStart * 1000).round()));
+    _smooth.seek(_playStart, _clock.elapsed);
+    _pos.value = _playStart;
     try {
       await rec.start();
     } catch (e) {
@@ -569,9 +748,9 @@ class _EditorScreenState extends State<EditorScreen>
     final c = _c;
     if (c != null) {
       await c.pause();
-      await c.seekTo(Duration(milliseconds: (_start * 1000).round()));
-      _smooth.seek(_start, _clock.elapsed);
-      _pos.value = _start;
+      await c.seekTo(Duration(milliseconds: (_playStart * 1000).round()));
+      _smooth.seek(_playStart, _clock.elapsed);
+      _pos.value = _playStart;
     }
     if (!mounted) return;
     if (r == null) {
@@ -585,7 +764,7 @@ class _EditorScreenState extends State<EditorScreen>
     if (!_paused) {
       await c?.play();
       _player?.play();
-      _syncSound(force: true, at: _start);
+      _syncSound(force: true, at: _playStart);
     }
   }
 
@@ -682,7 +861,19 @@ class _EditorScreenState extends State<EditorScreen>
       onEdit: !o.emoji && !o.isImage ? _editSelected : null,
       onDelete: _deleteSelected,
       onDone: () => setState(() => _sel = null),
+      onAnimate: _isVideo ? () => _animateOverlay(i) : null,
     );
+  }
+
+  Future<void> _animateOverlay(int i) async {
+    final a = await showMotionSheet(context, _overlays[i].anim);
+    if (a == null || !mounted || i >= _overlays.length) return;
+    setState(() {
+      _overlays[i] = a.isEmpty
+          ? _overlays[i].copyWith(clearAnim: true)
+          : _overlays[i].copyWith(anim: a);
+    });
+    _ovTick.value++;
   }
 
   // ------------------------------------------------------------------ video
@@ -697,7 +888,10 @@ class _EditorScreenState extends State<EditorScreen>
       _voice?.pause();
     } else {
       final p = _pos.value;
-      if (p < _start || p >= _end - 0.05) _scrubTo(_start);
+      final skip = _skipFrom(p);
+      if (p < _playStart || p >= _playEnd - 0.05 || skip != null) {
+        _scrubTo(skip == null || skip.isInfinite ? _playStart : skip);
+      }
       c.play();
       _player?.play();
       _syncSound(force: true);
@@ -776,6 +970,10 @@ class _EditorScreenState extends State<EditorScreen>
     overlays: List.of(_overlays),
     music: _music,
     audio: _a,
+    cuts: List.of(_cuts),
+    removed: Set.of(_removed),
+    layers: List.of(_layers),
+    mask: _clipMask,
   );
 
   @override
@@ -840,6 +1038,17 @@ class _EditorScreenState extends State<EditorScreen>
       _sel = null;
       _music = x.music;
       _a = x.audio;
+      _cuts
+        ..clear()
+        ..addAll(x.cuts);
+      _removed
+        ..clear()
+        ..addAll(x.removed);
+      _layers
+        ..clear()
+        ..addAll(x.layers);
+      _clipMask = x.mask;
+      if (_layerSel != null && _layerSel! >= _layers.length) _layerSel = null;
       _rangeN.value = (_start, _end);
     });
     _ovTick.value++;
@@ -871,7 +1080,7 @@ class _EditorScreenState extends State<EditorScreen>
       }
       await c.setVolume(_videoVolume);
       final p = _pos.value;
-      if (p < _start || p > _end) _scrubTo(_start);
+      if (p < _start || p > _end) _scrubTo(_playStart);
       _syncSound(force: true);
     }
   }
@@ -949,13 +1158,15 @@ class _EditorScreenState extends State<EditorScreen>
       if (_recording) await _stopRecording();
       if (!mounted) return;
       _keptVoice = _a.voicePath;
+      final parts = _keptParts;
       final ve = VideoEdits(
-        start: _start.round(),
-        end: _end.round(),
+        start: parts.isEmpty ? _start.round() : parts.first.$1,
+        end: parts.isEmpty ? _end.round() : parts.last.$2,
         total: _total,
         mute: _mute,
         speed: _speed,
         turns: _turns,
+        parts: parts.length > 1 ? parts : const [],
       );
       final look = VideoLook(
         filter: _e.filter,
@@ -970,6 +1181,8 @@ class _EditorScreenState extends State<EditorScreen>
           overlays: List.of(_overlays),
           music: _music,
           audio: _a,
+          layers: List.of(_layers),
+          mask: _clipMask,
         ),
       );
       return;
@@ -1141,13 +1354,22 @@ class _EditorScreenState extends State<EditorScreen>
         _selectionBar(),
         if (toolOpen)
           SizedBox(
-            height: _tool == _Tool.audio ? 176 : (_isVideo ? 120 : 150),
+            height: switch (_tool!) {
+              _Tool.audio => 176,
+              _Tool.layer => 172,
+              _Tool.mask => 132,
+              _Tool.split => 140,
+              _ => _isVideo ? 120 : 150,
+            },
             child: switch (_tool!) {
               _Tool.crop => _cropTools(),
               _Tool.filters => _filterTools(),
               _Tool.adjust => _adjustTools(),
               _Tool.audio => _audioTools(),
               _Tool.speed => _speedTools(),
+              _Tool.split => _splitTools(),
+              _Tool.layer => _layerTools(),
+              _Tool.mask => _maskTools(),
             },
           )
         else if (_isVideo && _sel == null)
@@ -1209,8 +1431,8 @@ class _EditorScreenState extends State<EditorScreen>
                     valueListenable: _pos,
                     builder: (_, p, _) {
                       final sp = _speed <= 0 ? 1.0 : _speed;
-                      final at = ((p - _start) / sp).clamp(0.0, 36000.0);
-                      final len = (_end - _start) / sp;
+                      final at = (_outOffset(p) / sp).clamp(0.0, 36000.0);
+                      final len = _keptLength / sp;
                       return Text(
                         '${_clock2(at)} / ${_clock2(len)}',
                         key: const ValueKey('editorTime'),
@@ -1373,6 +1595,7 @@ class _EditorScreenState extends State<EditorScreen>
       video = ColorFiltered(colorFilter: lookFilter(look), child: video);
     }
     if (_turns != 0) video = RotatedBox(quarterTurns: _turns, child: video);
+    if (_clipMask != null) video = MaskedBox(mask: _clipMask, child: video);
     return Center(
       child: Container(
         width: w,
@@ -1392,6 +1615,19 @@ class _EditorScreenState extends State<EditorScreen>
               onTap: _togglePause,
               child: video,
             ),
+            if (_layers.isNotEmpty)
+              Positioned.fill(
+                child: LayerStack(
+                  layers: List.of(_layers),
+                  clock: _pos,
+                  playing: _playingN,
+                  clipSeconds: _end,
+                ),
+              ),
+            if (_tool == _Tool.mask && _clipMask != null)
+              Positioned.fill(child: _maskDrag(Size(w, h))),
+            if (_tool == _Tool.layer && _layerSel != null)
+              _layerHandle(Size(w, h)),
             _overlayLayer(),
             if (_recording)
               Positioned(
@@ -1514,6 +1750,24 @@ class _EditorScreenState extends State<EditorScreen>
                 _Tool.crop,
               ),
             if (_isVideo) ...[
+              _toolButton(
+                const ValueKey('tool_split'),
+                Icons.content_cut_rounded,
+                _cuts.isEmpty ? 'Split' : 'Parts',
+                _Tool.split,
+              ),
+              _toolButton(
+                const ValueKey('tool_layer'),
+                Icons.layers_outlined,
+                'Overlay',
+                _Tool.layer,
+              ),
+              _toolButton(
+                const ValueKey('tool_mask'),
+                Icons.vignette_outlined,
+                'Mask',
+                _Tool.mask,
+              ),
               _toolButton(
                 const ValueKey('tool_speed'),
                 Icons.speed_rounded,
@@ -1864,6 +2118,591 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
   /// 0.5x to 2x (the picture only).
+  // ---- split ----
+
+  Widget _splitTools() {
+    final segs = _segs;
+    final total = (_end - _start).clamp(0.001, 1e9);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+      child: Column(
+        key: const ValueKey('splitTools'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            height: 40,
+            child: Row(
+              children: [
+                for (var i = 0; i < segs.length; i++)
+                  Expanded(
+                    flex: math.max(
+                      1,
+                      ((segs[i].$2 - segs[i].$1) / total * 1000).round(),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 1.5),
+                      child: InkWell(
+                        key: ValueKey('seg_$i'),
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: segs.length > 1
+                            ? () => _toggleSeg(segs[i])
+                            : null,
+                        child: Container(
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: _isRemoved(segs[i])
+                                ? Colors.white10
+                                : AppTheme.volt.withValues(alpha: 0.85),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: FittedBox(
+                            child: Padding(
+                              padding: const EdgeInsets.all(4),
+                              child: _isRemoved(segs[i])
+                                  ? const Icon(
+                                      Icons.close_rounded,
+                                      color: Colors.white54,
+                                      size: 18,
+                                    )
+                                  : Text(
+                                      _clock2(
+                                        (segs[i].$2 - segs[i].$1).toDouble(),
+                                      ),
+                                      style: const TextStyle(
+                                        color: Colors.black,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            segs.length > 1
+                ? 'Tap a part to take it out or put it back.'
+                : 'Move the playhead and tap Split.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white38, fontSize: 11.5),
+          ),
+          const Spacer(),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              FilledButton.tonalIcon(
+                key: const ValueKey('splitHere'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 36),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: _splitHere,
+                icon: const Icon(Icons.content_cut_rounded, size: 16),
+                label: const Text('Split'),
+              ),
+              const SizedBox(width: 8),
+              if (_cuts.isNotEmpty)
+                TextButton(
+                  key: const ValueKey('splitJoin'),
+                  style: TextButton.styleFrom(minimumSize: const Size(0, 34)),
+                  onPressed: _joinAll,
+                  child: const Text('Join all'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---- overlay layers ----
+
+  Widget _mini(
+    Key key,
+    String label,
+    double v,
+    double min,
+    double max,
+    ValueChanged<double> on,
+  ) => Row(
+    children: [
+      SizedBox(
+        width: 58,
+        child: Text(
+          label,
+          style: const TextStyle(color: Colors.white70, fontSize: 11.5),
+        ),
+      ),
+      Expanded(
+        child: SliderTheme(
+          data: const SliderThemeData(
+            trackHeight: 2,
+            overlayShape: RoundSliderOverlayShape(overlayRadius: 12),
+          ),
+          child: Slider(
+            key: key,
+            value: v.clamp(min, max).toDouble(),
+            min: min,
+            max: max,
+            activeColor: AppTheme.volt,
+            onChanged: on,
+          ),
+        ),
+      ),
+    ],
+  );
+
+  Widget _chip(Key key, String label, bool on, VoidCallback tap) => Padding(
+    padding: const EdgeInsets.only(right: 6),
+    child: ChoiceChip(
+      key: key,
+      label: Text(label, style: const TextStyle(fontSize: 11.5)),
+      selected: on,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      onSelected: (_) => tap(),
+    ),
+  );
+
+  Future<void> _addLayer(bool video) async {
+    final hook = debugPickLayer;
+    File? file;
+    double aspect = 1;
+    if (hook != null) {
+      final r = await hook(video);
+      if (r == null) return;
+      file = r.$1;
+      aspect = r.$2;
+    } else {
+      final x = video
+          ? await ImagePicker().pickVideo(source: ImageSource.gallery)
+          : await ImagePicker().pickImage(source: ImageSource.gallery);
+      if (x == null) return;
+      file = File(x.path);
+      try {
+        if (video) {
+          final info = await VideoCompress.getMediaInfo(x.path);
+          var w = (info.width ?? 0).toDouble(),
+              h = (info.height ?? 0).toDouble();
+          if ((info.orientation ?? 0) % 180 == 90) (w, h) = (h, w);
+          if (w > 0 && h > 0) aspect = w / h;
+        } else {
+          final sz = await PhotoEditor.probeSize(file);
+          if (sz != null && sz.height > 0) aspect = sz.width / sz.height;
+        }
+      } catch (_) {
+        // keeps a square frame
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _layers.add(MediaLayer(ref: file!.path, video: video, aspect: aspect));
+      _layerSel = _layers.length - 1;
+      _layerTab = 0;
+    });
+  }
+
+  void _setLayer(MediaLayer Function(MediaLayer l) f) {
+    final i = _layerSel;
+    if (i == null || i >= _layers.length) return;
+    setState(() => _layers[i] = f(_layers[i]));
+  }
+
+  Widget _layerTools() {
+    final i = _layerSel;
+    final l = i != null && i < _layers.length ? _layers[i] : null;
+    const tabs = ['Blend', 'Key', 'Mask', 'Animate', 'Time'];
+    return Padding(
+      key: const ValueKey('layerTools'),
+      padding: const EdgeInsets.fromLTRB(10, 4, 10, 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            height: 34,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (var k = 0; k < _layers.length; k++)
+                  _chip(
+                    ValueKey('layerChip$k'),
+                    '${_layers[k].video ? 'Video' : 'Photo'} ${k + 1}',
+                    k == i,
+                    () => setState(() => _layerSel = k == i ? null : k),
+                  ),
+                ActionChip(
+                  key: const ValueKey('layerAddPhoto'),
+                  avatar: const Icon(
+                    Icons.add_photo_alternate_outlined,
+                    size: 16,
+                  ),
+                  label: const Text('Photo', style: TextStyle(fontSize: 11.5)),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _addLayer(false),
+                ),
+                const SizedBox(width: 6),
+                ActionChip(
+                  key: const ValueKey('layerAddVideo'),
+                  avatar: const Icon(Icons.video_call_outlined, size: 16),
+                  label: const Text('Video', style: TextStyle(fontSize: 11.5)),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _addLayer(true),
+                ),
+              ],
+            ),
+          ),
+          if (l == null)
+            const Expanded(
+              child: Center(
+                child: Text(
+                  'Add a photo or video on top of the clip, then drag and pinch it.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white38, fontSize: 11.5),
+                ),
+              ),
+            )
+          else ...[
+            SizedBox(
+              height: 30,
+              child: Row(
+                children: [
+                  for (var t = 0; t < tabs.length; t++)
+                    Expanded(
+                      child: InkWell(
+                        key: ValueKey('layerTab$t'),
+                        onTap: () async {
+                          setState(() => _layerTab = t);
+                          if (t == 3) {
+                            final a = await showMotionSheet(context, l.anim);
+                            if (a == null || !mounted) return;
+                            _setLayer(
+                              (x) => a.isEmpty
+                                  ? x.copyWith(clearAnim: true)
+                                  : x.copyWith(anim: a),
+                            );
+                          }
+                        },
+                        child: Center(
+                          child: Text(
+                            tabs[t],
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: _layerTab == t
+                                  ? AppTheme.volt
+                                  : Colors.white60,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  IconButton(
+                    key: const ValueKey('layerDelete'),
+                    tooltip: 'Delete',
+                    visualDensity: VisualDensity.compact,
+                    color: AppTheme.coral,
+                    icon: const Icon(Icons.delete_outline_rounded, size: 20),
+                    onPressed: () => setState(() {
+                      _layers.removeAt(i!);
+                      _layerSel = null;
+                    }),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(child: _layerTabBody(l)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _layerTabBody(MediaLayer l) {
+    switch (_layerTab) {
+      case 1:
+        final k = l.chroma;
+        const keys = <(int, String)>[
+          (0xFF00FF00, 'Green'),
+          (0xFF0000FF, 'Blue'),
+          (0xFF000000, 'Black'),
+          (0xFFFFFFFF, 'White'),
+        ];
+        return Column(
+          children: [
+            SizedBox(
+              height: 34,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  _chip(
+                    const ValueKey('key_off'),
+                    'Off',
+                    k == null,
+                    () => _setLayer((x) => x.copyWith(clearChroma: true)),
+                  ),
+                  for (final c in keys)
+                    _chip(
+                      ValueKey('key_${c.$2.toLowerCase()}'),
+                      c.$2,
+                      k?.color == c.$1,
+                      () => _setLayer(
+                        (x) => x.copyWith(
+                          chroma: (x.chroma ?? const ChromaKey()).copyWith(
+                            color: c.$1,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (k != null) ...[
+              _mini(
+                const ValueKey('keyStrength'),
+                'Strength',
+                k.strength,
+                0,
+                1,
+                (v) => _setLayer(
+                  (x) => x.copyWith(chroma: k.copyWith(strength: v)),
+                ),
+              ),
+              _mini(
+                const ValueKey('keySoft'),
+                'Soft',
+                k.soft,
+                0,
+                1,
+                (v) =>
+                    _setLayer((x) => x.copyWith(chroma: k.copyWith(soft: v))),
+              ),
+            ],
+          ],
+        );
+      case 2:
+        return _maskControls(
+          l.mask,
+          (m) => _setLayer(
+            (x) =>
+                m == null ? x.copyWith(clearMask: true) : x.copyWith(mask: m),
+          ),
+          'lm',
+        );
+      case 3:
+        final a = l.anim;
+        return Center(
+          child: Text(
+            a == null || a.isEmpty
+                ? 'No animation. Tap Animate to choose one.'
+                : 'In: ${kMotionKinds[a.inn] ?? 'none'}   Out: ${kMotionKinds[a.out] ?? 'none'}',
+            style: const TextStyle(color: Colors.white60, fontSize: 12),
+          ),
+        );
+      case 4:
+        String t(double s) => s < 0 ? 'end' : _clock2(s);
+        return Column(
+          children: [
+            Text(
+              'Shown ${t(l.from)} to ${t(l.to)}',
+              key: const ValueKey('layerTime'),
+              style: const TextStyle(color: Colors.white60, fontSize: 12),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TextButton(
+                  key: const ValueKey('layerFrom'),
+                  style: TextButton.styleFrom(minimumSize: const Size(0, 34)),
+                  onPressed: () => _setLayer((x) {
+                    final p = _pos.value;
+                    return x.copyWith(
+                      from: p,
+                      to: x.to >= 0 && x.to <= p ? -1 : x.to,
+                    );
+                  }),
+                  child: const Text('Start here'),
+                ),
+                TextButton(
+                  key: const ValueKey('layerTo'),
+                  style: TextButton.styleFrom(minimumSize: const Size(0, 34)),
+                  onPressed: () => _setLayer((x) {
+                    final p = _pos.value;
+                    return p > x.from ? x.copyWith(to: p) : x;
+                  }),
+                  child: const Text('End here'),
+                ),
+                TextButton(
+                  key: const ValueKey('layerAll'),
+                  style: TextButton.styleFrom(minimumSize: const Size(0, 34)),
+                  onPressed: () =>
+                      _setLayer((x) => x.copyWith(from: 0, to: -1)),
+                  child: const Text('Whole clip'),
+                ),
+              ],
+            ),
+          ],
+        );
+    }
+    return Column(
+      children: [
+        SizedBox(
+          height: 34,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: [
+              for (final e in kBlendModes.entries)
+                _chip(
+                  ValueKey('blend_${e.key}'),
+                  e.value.$1,
+                  l.blend == e.key,
+                  () => _setLayer((x) => x.copyWith(blend: e.key)),
+                ),
+            ],
+          ),
+        ),
+        _mini(
+          const ValueKey('layerOpacity'),
+          'Opacity',
+          l.opacity,
+          0.05,
+          1,
+          (v) => _setLayer((x) => x.copyWith(opacity: v)),
+        ),
+      ],
+    );
+  }
+
+  /// Shape chips, invert, size and soft edge for a mask.
+  Widget _maskControls(LayerMask? m, ValueChanged<LayerMask?> on, String id) {
+    return Column(
+      children: [
+        SizedBox(
+          height: 34,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: [
+              _chip(ValueKey('${id}_none'), 'None', m == null, () => on(null)),
+              for (final e in kMaskShapes.entries)
+                _chip(
+                  ValueKey('${id}_${e.key}'),
+                  e.value,
+                  m?.shape == e.key,
+                  () => on((m ?? const LayerMask()).copyWith(shape: e.key)),
+                ),
+              if (m != null)
+                _chip(
+                  ValueKey('${id}_invert'),
+                  'Invert',
+                  m.invert,
+                  () => on(m.copyWith(invert: !m.invert)),
+                ),
+            ],
+          ),
+        ),
+        if (m != null) ...[
+          _mini(
+            ValueKey('${id}_size'),
+            'Size',
+            m.size,
+            0.05,
+            2,
+            (v) => on(m.copyWith(size: v)),
+          ),
+          _mini(
+            ValueKey('${id}_soft'),
+            'Soft',
+            m.feather,
+            0,
+            0.5,
+            (v) => on(m.copyWith(feather: v)),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _maskTools() => Padding(
+    key: const ValueKey('maskTools'),
+    padding: const EdgeInsets.fromLTRB(10, 6, 10, 2),
+    child: _maskControls(
+      _clipMask,
+      (m) => setState(() => _clipMask = m),
+      'mask',
+    ),
+  );
+
+  /// Drag over the picture moves the clip's mask; pinch changes its size.
+  Widget _maskDrag(Size box) {
+    double base = 1;
+    return GestureDetector(
+      key: const ValueKey('maskDrag'),
+      behavior: HitTestBehavior.opaque,
+      onScaleStart: (_) => base = _clipMask?.size ?? 1,
+      onScaleUpdate: (d) {
+        final m = _clipMask;
+        if (m == null) return;
+        setState(() {
+          _clipMask = m.copyWith(
+            cx: (m.cx + d.focalPointDelta.dx / box.width).clamp(0.0, 1.0),
+            cy: (m.cy + d.focalPointDelta.dy / box.height).clamp(0.0, 1.0),
+            size: d.pointerCount > 1
+                ? (base * d.scale).clamp(0.05, 2.0)
+                : m.size,
+          );
+        });
+      },
+    );
+  }
+
+  /// A frame on the selected layer: drag to move, pinch to size and turn.
+  Widget _layerHandle(Size box) {
+    final i = _layerSel!;
+    if (i >= _layers.length) return const SizedBox.shrink();
+    final l = _layers[i];
+    final s = layerSize(l, box);
+    return Positioned(
+      left: l.dx * box.width - s.width / 2,
+      top: l.dy * box.height - s.height / 2,
+      width: s.width,
+      height: s.height,
+      child: Transform.rotate(
+        angle: l.turns * 2 * math.pi,
+        child: GestureDetector(
+          key: const ValueKey('layerHandle'),
+          behavior: HitTestBehavior.opaque,
+          onScaleStart: (_) {
+            _layerBaseScale = l.scale;
+            _layerBaseTurns = l.turns;
+          },
+          onScaleUpdate: (d) => _setLayer(
+            (x) => x.copyWith(
+              dx: (x.dx + d.focalPointDelta.dx / box.width).clamp(0.0, 1.0),
+              dy: (x.dy + d.focalPointDelta.dy / box.height).clamp(0.0, 1.0),
+              scale: d.pointerCount > 1
+                  ? (_layerBaseScale * d.scale).clamp(0.1, 3.0)
+                  : x.scale,
+              turns: d.pointerCount > 1
+                  ? _layerBaseTurns + d.rotation / (2 * math.pi)
+                  : x.turns,
+            ),
+          ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.white, width: 1.5),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _speedTools() {
     return Center(
       child: Wrap(
@@ -2073,7 +2912,16 @@ class _Snap {
     required this.overlays,
     required this.music,
     required this.audio,
+    required this.cuts,
+    required this.removed,
+    required this.layers,
+    required this.mask,
   });
+
+  final List<int> cuts;
+  final Set<int> removed;
+  final List<MediaLayer> layers;
+  final LayerMask? mask;
 
   final double start;
   final double end;
@@ -2104,6 +2952,10 @@ class _Snap {
     music?.id,
     audio.hashCode,
     for (final o in overlays)
-      '${o.text}|${o.dx}|${o.dy}|${o.scale}|${o.color}|${o.pill}|${o.emoji}|${o.image}|${o.from}|${o.to}',
+      '${o.text}|${o.dx}|${o.dy}|${o.scale}|${o.color}|${o.pill}|${o.emoji}|${o.image}|${o.from}|${o.to}|${o.anim?.toMap()}',
+    cuts.join(','),
+    (removed.toList()..sort()).join(','),
+    for (final l in layers) l.toMap().toString(),
+    mask?.toMap().toString(),
   ].join('~');
 }

@@ -160,6 +160,39 @@ class AudioMerger {
     }
   }
 
+  /// Tests replace this: (inputs, output) -> seconds written.
+  static Future<double> Function(List<String> inputs, String output)?
+  joinBackend;
+
+  /// Joins the parts left after Split into one clip (no re-encoding).
+  static Future<MergeResult> join(List<File> parts) async {
+    final out = File(
+      '${Directory.systemTemp.path}/instantgram_join_${DateTime.now().microsecondsSinceEpoch}.mp4',
+    );
+    final inputs = [for (final p in parts) p.path];
+    try {
+      final b = joinBackend;
+      final double seconds;
+      if (b != null) {
+        seconds = await b(inputs, out.path);
+      } else {
+        final r = await _channel.invokeMapMethod<String, Object?>('join', {
+          'inputs': inputs,
+          'output': out.path,
+        });
+        final s = r?['seconds'];
+        seconds = s is num ? s.toDouble() : 0;
+      }
+      return MergeResult(out, seconds);
+    } on PlatformException catch (e) {
+      throw MediaException(
+        e.message ?? 'Could not join the parts of the clip.',
+      );
+    } on MissingPluginException {
+      throw const MediaException('Split is not available here.');
+    }
+  }
+
   /// Merges [audio] (an AAC .m4a) into [video]; the sound of the video is replaced.
   static Future<MergeResult> merge({
     required File video,

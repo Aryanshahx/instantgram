@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -20,6 +21,7 @@ import '../../models/finish.dart';
 import '../../models/music.dart';
 import '../../models/post.dart';
 import '../../models/story.dart' show StoryOverlay, kMaxStorySeconds;
+import '../../services/video_frames.dart';
 import '../../services/audio_merger.dart';
 import '../../services/clip_sound.dart';
 import '../../services/device_audio.dart';
@@ -79,10 +81,19 @@ class _Item {
   /// Texts and stickers (photos: burned into [file], kept here to edit them again).
   List<StoryOverlay> overlays = [];
 
+  /// Videos: photos / videos placed over the clip, and the clip's mask.
+  List<MediaLayer> layers = [];
+  LayerMask? mask;
+
   /// What viewers see on top of a video.
   MediaFinish? get finish {
     if (!video) return null;
-    final f = MediaFinish(overlays: overlays, look: look);
+    final f = MediaFinish(
+      overlays: overlays,
+      look: look,
+      layers: layers,
+      mask: mask,
+    );
     return f.isEmpty ? null : f;
   }
 
@@ -684,6 +695,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           videoEdits: it.videoEdits,
           look: it.look,
           overlays: it.overlays,
+          layers: it.layers,
+          mask: it.mask,
           music: _music,
           audio: _audio,
           voiceover: _mode == 1,
@@ -717,6 +730,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         it.seconds = ve == null ? it.secondsFull : ve.playSeconds;
         it.look = r.look;
         it.overlays = r.overlays;
+        it.layers = r.layers;
+        it.mask = r.mask;
       });
       final c = _preview;
       if (c != null) {
@@ -1026,7 +1041,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               width: r.width,
               height: r.height,
               seconds: r.seconds ?? it.seconds,
-              finish: it.finish,
+              finish: await _finishForUpload(it),
             );
           } else {
             final media = await MediaServer.instance.uploadImage(
@@ -1055,6 +1070,30 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       }
       VideoCompress.deleteAllCache();
     }
+  }
+
+  /// What viewers see over the clip, as it goes up: times moved to the uploaded clip (trim,
+  /// split and speed) and the photos / videos of layers uploaded.
+  Future<MediaFinish?> _finishForUpload(_Item it) async {
+    var f = it.finish;
+    if (f == null) return null;
+    final ve = it.videoEdits;
+    if (ve != null) f = f.retimed(ve.kept, ve.speed);
+    if (!f.layers.any((l) => l.isLocal)) return f;
+    final layers = <MediaLayer>[];
+    for (final l in f.layers) {
+      if (!l.isLocal) {
+        layers.add(l);
+        continue;
+      }
+      final file = File(l.ref);
+      if (!file.existsSync()) continue;
+      final up = l.video
+          ? await MediaServer.instance.uploadVideo(file: file)
+          : await MediaServer.instance.uploadImage(file);
+      layers.add(l.copyWith(ref: up.ref));
+    }
+    return f.copyWith(layers: layers);
   }
 
   /// The cover of a video with its colour look and texts burned in, so grids and previews
@@ -1098,15 +1137,64 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       });
       final ve = it.videoEdits;
       final cut = ve != null && ve.trimmed;
+      final parts = ve != null && ve.split ? ve.kept : const <(int, int)>[];
       try {
-        info = await VideoCompress.compressVideo(
-          it.file.path,
-          quality: VideoQuality.Res1920x1080Quality,
-          deleteOrigin: false,
-          startTime: cut ? ve.start : null,
-          duration: cut ? ve.length : null,
-          includeAudio: !(ve?.mute ?? false),
-        );
+        if (parts.isEmpty) {
+          info = await VideoCompress.compressVideo(
+            it.file.path,
+            quality: VideoQuality.Res1920x1080Quality,
+            deleteOrigin: false,
+            startTime: cut ? ve.start : null,
+            duration: cut ? ve.length : null,
+            includeAudio: !(ve?.mute ?? false),
+          );
+        } else {
+          // Split: every kept part on its own (same settings), then joined
+          final pieces = <File>[];
+          for (var k = 0; k < parts.length; k++) {
+            if (mounted) {
+              setState(
+                () => _stage =
+                    'Processing part ${k + 1} of ${parts.length}$tag...',
+              );
+            }
+            final one = await VideoCompress.compressVideo(
+              it.file.path,
+              quality: VideoQuality.Res1920x1080Quality,
+              deleteOrigin: false,
+              startTime: parts[k].$1,
+              duration: parts[k].$2 - parts[k].$1,
+              includeAudio: !(ve?.mute ?? false),
+            );
+            final f = one?.file;
+            if (f == null) break;
+            // the compressor reuses its output name: keep each part
+            final keep = File('${f.path}.part$k.mp4');
+            await f.copy(keep.path);
+            pieces.add(keep);
+            info = one;
+          }
+          if (pieces.length != parts.length) {
+            for (final p in pieces) {
+              p.delete().ignore();
+            }
+            throw const MediaException(
+              'Could not process that video. Try another one.',
+            );
+          }
+          final joined = await AudioMerger.join(pieces);
+          for (final p in pieces) {
+            p.delete().ignore();
+          }
+          file = joined.file;
+          info = MediaInfo(
+            path: joined.file.path,
+            file: joined.file,
+            width: info?.width,
+            height: info?.height,
+            orientation: info?.orientation,
+          );
+        }
       } finally {
         sub.unsubscribe();
       }
@@ -2053,7 +2141,7 @@ Future<File> frameAt(String videoPath, int ms) async {
   final f = await VideoCompress.getFileThumbnail(
     videoPath,
     quality: 85,
-    position: ms,
+    position: framePosition(ms),
   );
   final copy = File(
     '${Directory.systemTemp.path}/instantgram_cover_${DateTime.now().microsecondsSinceEpoch}.jpg',
@@ -2076,10 +2164,39 @@ class _CoverSheetState extends State<_CoverSheet> {
   File? _frame;
   bool _loading = false;
   int _gen = 0;
+  static const _n = 10;
+  final List<Uint8List?> _strip = List<Uint8List?>.filled(_n, null);
+
+  /// Second of the [i]th picture of the strip.
+  double _stripAt(int i) => (i + 0.5) / _n * widget.seconds;
 
   @override
   void initState() {
     super.initState();
+    _load();
+    _loadStrip();
+  }
+
+  /// The strip of small pictures across the whole video.
+  Future<void> _loadStrip() async {
+    for (var i = 0; i < _n; i++) {
+      if (!mounted) return;
+      try {
+        final b = await VideoCompress.getByteThumbnail(
+          widget.path,
+          quality: 30,
+          position: framePosition((_stripAt(i) * 1000).round()),
+        );
+        if (!mounted) return;
+        setState(() => _strip[i] = b);
+      } catch (_) {
+        // that picture stays dark
+      }
+    }
+  }
+
+  void _pickStrip(int i) {
+    setState(() => _t = _stripAt(i).clamp(0, widget.seconds.toDouble()));
     _load();
   }
 
@@ -2142,6 +2259,67 @@ class _CoverSheetState extends State<_CoverSheet> {
                     ],
                   ),
                 ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              key: const ValueKey('coverStrip'),
+              height: 56,
+              child: LayoutBuilder(
+                builder: (context, box) {
+                  final cell = box.maxWidth / _n;
+                  final at = (_t / widget.seconds * box.maxWidth).clamp(
+                    0.0,
+                    box.maxWidth,
+                  );
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Row(
+                          children: [
+                            for (var i = 0; i < _n; i++)
+                              GestureDetector(
+                                key: ValueKey('coverFrame$i'),
+                                onTap: () => _pickStrip(i),
+                                child: SizedBox(
+                                  width: cell,
+                                  height: 56,
+                                  child: _strip[i] == null
+                                      ? const ColoredBox(
+                                          color: Color(0xFF22252B),
+                                        )
+                                      : Image.memory(
+                                          _strip[i]!,
+                                          fit: BoxFit.cover,
+                                          gaplessPlayback: true,
+                                        ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      Positioned(
+                        left: at - 18,
+                        top: -3,
+                        child: IgnorePointer(
+                          child: Container(
+                            width: 36,
+                            height: 62,
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: Colors.white,
+                                width: 2.5,
+                              ),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
             Slider(
