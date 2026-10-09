@@ -24,9 +24,13 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read: if signedIn();
-      allow create: if signedIn() && request.auth.uid == uid;
-      // owner edits anything; anyone may change followersCount (follow/unfollow)
-      allow update: if signedIn() && (request.auth.uid == uid || onlyChanges(['followersCount']));
+      allow create: if signedIn() && request.auth.uid == uid && !('banned' in request.resource.data);
+      // owner edits anything except the ban (only the admin panel sets it);
+      // anyone may change followersCount (follow/unfollow)
+      allow update: if signedIn() && (
+        (request.auth.uid == uid &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['banned', 'bannedReason'])) ||
+        onlyChanges(['followersCount']));
       allow delete: if false;
 
       // people who follow {uid}: the follower writes their own doc
@@ -83,6 +87,18 @@ service cloud.firestore {
     // reaches its author); only the owner reads it and marks it as seen.
     // Push addresses of a person's phones: only that person. The media signer reads them with
     // the service account (rules do not apply to it).
+    // Reports from the app (posts, clips, comments). Anybody signed in may send one; only the
+    // admin panel reads and handles them (it uses the service account).
+    match /reports/{reportId} {
+      allow create: if signedIn()
+        && request.resource.data.by == request.auth.uid
+        && request.resource.data.status == 'open'
+        && request.resource.data.keys().hasOnly(['kind', 'postId', 'commentId', 'comment', 'ownerId',
+             'ownerUsername', 'by', 'byUsername', 'reason', 'text', 'status', 'createdAt'])
+        && request.resource.data.text is string && request.resource.data.text.size() <= 2000;
+      allow read, update, delete: if false;
+    }
+
     match /pushTokens/{uid} {
       allow read, write: if signedIn() && request.auth.uid == uid;
     }

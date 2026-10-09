@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>InstantGram Admin</title>
+<style>
+:root{--bg:#0b0d10;--card:#14171c;--card2:#1b1f26;--line:#262b33;--text:#e9edf2;--mute:#8a93a0;--lime:#c6ff3d;--red:#ff5470;--amber:#ffb547;--blue:#5aa9ff;--r:14px}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:var(--blue)}
+.hide{display:none!important}
+.btn{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:7px 12px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:#3a414c}
+.btn.lime{background:var(--lime);color:#111;border-color:var(--lime);font-weight:600}
+.btn.red{background:transparent;color:var(--red);border-color:#5a2632}
+.btn.red:hover{background:#2a1218}
+.btn.sm{padding:4px 9px;font-size:12px;border-radius:8px}
+.btn:disabled{opacity:.5;cursor:default}
+input.f,textarea.f,select.f{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:9px 12px;outline:none;width:100%}
+input.f:focus,textarea.f:focus{border-color:var(--lime)}
+.muted{color:var(--mute)}
+.small{font-size:12px}
+.row{display:flex;gap:10px;align-items:center}
+.wrap{flex-wrap:wrap}
+.grow{flex:1}
+#login{min-height:100vh;display:grid;place-items:center;padding:20px}
+#login .box{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:28px;width:min(420px,100%)}
+.logo{font-weight:800;font-size:20px;letter-spacing:.2px}
+.logo b{color:var(--lime)}
+header{position:sticky;top:0;z-index:5;background:rgba(11,13,16,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+header .in{max-width:1280px;margin:auto;padding:10px 18px;display:flex;gap:14px;align-items:center}
+nav{display:flex;gap:4px;overflow-x:auto;flex:1}
+nav button{background:none;border:0;padding:8px 12px;border-radius:9px;color:var(--mute);cursor:pointer;white-space:nowrap}
+nav button.on{background:var(--card2);color:var(--text)}
+nav .badge{background:var(--red);color:#fff;border-radius:99px;padding:0 6px;font-size:11px;margin-left:4px}
+main{max-width:1280px;margin:auto;padding:18px}
+h2{margin:4px 0 14px;font-size:18px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px}
+.stat .n{font-size:26px;font-weight:700;margin-top:2px}
+.stat .l{color:var(--mute);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+.stat.hot .n{color:var(--lime)}
+.stat.warn .n{color:var(--amber)}
+.list{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.urow{display:flex;gap:12px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.urow:last-child{border-bottom:0}
+.urow:hover{background:var(--card2)}
+.av{width:38px;height:38px;border-radius:50%;background:#2a2f37;object-fit:cover;flex:none;display:grid;place-items:center;font-weight:700;color:var(--mute)}
+.av.lg{width:72px;height:72px;font-size:26px}
+.tag{display:inline-block;font-size:11px;border-radius:99px;padding:1px 8px;border:1px solid var(--line);color:var(--mute);margin-left:6px}
+.tag.on{color:var(--lime);border-color:#4b6a12}
+.tag.ban{color:var(--red);border-color:#5a2632}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.pc{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}
+.pc .media{aspect-ratio:4/5;background:#000;position:relative;overflow:hidden}
+.pc .media img,.pc .media video{width:100%;height:100%;object-fit:cover;display:block}
+.pc .kind{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);border-radius:99px;padding:2px 8px;font-size:11px}
+.pc .body{padding:10px 12px;display:flex;flex-direction:column;gap:6px;flex:1}
+.pc .cap{color:var(--mute);font-size:12px;max-height:3.9em;overflow:hidden;word-break:break-word}
+.pc .acts{display:flex;gap:6px;margin-top:auto}
+.who{color:var(--text);cursor:pointer;font-weight:600}
+.who:hover{text-decoration:underline}
+.more{display:block;margin:14px auto}
+.chips{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+.chip{background:var(--card);border:1px solid var(--line);padding:6px 12px;border-radius:99px;cursor:pointer;color:var(--mute)}
+.chip.on{color:#111;background:var(--lime);border-color:var(--lime)}
+#drawer{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.55);display:flex;justify-content:flex-end}
+#drawer .pane{width:min(720px,100%);height:100%;overflow:auto;background:var(--bg);border-left:1px solid var(--line);padding:20px}
+.modal{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.6);display:grid;place-items:center;padding:16px}
+.modal .box{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;width:min(520px,100%);max-height:88vh;overflow:auto}
+.kv{display:grid;grid-template-columns:130px 1fr;gap:6px 12px;font-size:13px;margin:12px 0}
+.kv div:nth-child(odd){color:var(--mute)}
+.rep{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;gap:14px;margin-bottom:12px}
+.rep .thumb{width:110px;flex:none;aspect-ratio:4/5;background:#000;border-radius:10px;overflow:hidden}
+.rep .thumb img,.rep .thumb video{width:100%;height:100%;object-fit:cover}
+.reason{display:inline-block;background:#2a1a10;color:var(--amber);border-radius:8px;padding:2px 8px;font-size:12px}
+.empty{padding:40px;text-align:center;color:var(--mute)}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#20252d;border:1px solid var(--line);padding:10px 16px;border-radius:12px;z-index:50;max-width:90vw}
+#toast.err{border-color:#5a2632;color:#ffb3c0}
+.bar{height:8px;background:var(--card2);border-radius:99px;overflow:hidden;margin:10px 0}
+.bar i{display:block;height:100%;background:var(--lime);width:0;transition:width .3s}
+.phone{background:#1d2229;border-radius:14px;padding:12px 14px;display:flex;gap:10px;margin:12px 0;border:1px solid var(--line)}
+.phone .ic{width:34px;height:34px;border-radius:9px;background:var(--lime);flex:none}
+.comment{padding:8px 0;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:flex-start}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--mute);border-top-color:transparent;border-radius:50%;animation:s 1s linear infinite;vertical-align:-2px}
+@keyframes s{to{transform:rotate(360deg)}}
+@media (max-width:640px){header .in{flex-wrap:wrap}nav{order:3;flex-basis:100%}.urow>.small{display:none}.kv{grid-template-columns:100px 1fr}.rep{flex-direction:column}.rep .thumb{width:100%;max-width:220px}}
+</style>
+</head>
+<body>
+
+<section id="login">
+  <div class="box">
+    <div class="logo">Instant<b>Gram</b> · Admin</div>
+    <p class="muted">Enter the admin key (ADMIN_KEY in Vercel; on the Pi it is in <code>~/.instantgram-admin/admin_key</code>).</p>
+    <form id="loginForm">
+      <input class="f" id="key" type="password" autocomplete="current-password" placeholder="Admin key" autofocus>
+      <label class="row small muted" style="margin:10px 0"><input type="checkbox" id="remember"> Remember on this device</label>
+      <button class="btn lime" style="width:100%">Open panel</button>
+    </form>
+    <p id="loginErr" class="small" style="color:var(--red)"></p>
+  </div>
+</section>
+
+<section id="app" class="hide">
+  <header><div class="in">
+    <div class="logo">Instant<b>Gram</b></div>
+    <nav id="nav">
+      <button data-tab="overview" class="on">Overview</button>
+      <button data-tab="users">Users</button>
+      <button data-tab="posts">Posts &amp; clips</button>
+      <button data-tab="moments">Moments</button>
+      <button data-tab="reports">Reports <span id="repBadge" class="badge hide"></span></button>
+      <button data-tab="broadcast">Broadcast</button>
+    </nav>
+    <button class="btn sm" id="logout">Log out</button>
+  </div></header>
+  <main>
+    <div id="warn" class="hide stat warn" style="margin-bottom:14px"></div>
+
+    <div data-view="overview">
+      <div class="row"><h2 class="grow">Overview</h2><span class="muted small" id="statAt"></span><button class="btn sm" id="statRefresh">Refresh</button></div>
+      <div class="cards" id="stats"></div>
+    </div>
+
+    <div data-view="users" class="hide">
+      <h2>Users</h2>
+      <form id="userSearch" class="row" style="margin-bottom:14px">
+        <input class="f grow" id="uq" placeholder="Search by username, email or user id (empty = newest)">
+        <button class="btn lime">Search</button>
+      </form>
+      <div class="list" id="users"></div>
+      <button class="btn more hide" id="usersMore">Load more</button>
+    </div>
+
+    <div data-view="posts" class="hide">
+      <h2>Posts &amp; clips</h2>
+      <div class="chips" id="postKinds">
+        <span class="chip on" data-k="">All</span><span class="chip" data-k="post">Posts</span><span class="chip" data-k="clip">Clips</span>
+      </div>
+      <div class="grid" id="posts"></div>
+      <button class="btn more hide" id="postsMore">Load more</button>
+    </div>
+
+    <div data-view="moments" class="hide">
+      <div class="row"><h2 class="grow">Live moments</h2><button class="btn sm" id="momRefresh">Refresh</button></div>
+      <div class="grid" id="moments"></div>
+    </div>
+
+    <div data-view="reports" class="hide">
+      <h2>Reports</h2>
+      <div class="chips" id="repKinds"><span class="chip on" data-s="open">Open</span><span class="chip" data-s="done">Handled</span></div>
+      <div id="reports"></div>
+    </div>
+
+    <div data-view="broadcast" class="hide">
+      <h2>Push to everyone</h2>
+      <div class="stat" style="max-width:620px">
+        <label class="small muted">Title</label>
+        <input class="f" id="bTitle" maxlength="60" placeholder="InstantGram">
+        <label class="small muted" style="display:block;margin-top:10px">Message</label>
+        <textarea class="f" id="bBody" rows="3" maxlength="240" placeholder="What's new…"></textarea>
+        <div class="small muted" style="text-align:right"><span id="bCount">0</span>/240</div>
+        <div class="small muted">Preview</div>
+        <div class="phone"><div class="ic"></div><div><b id="pTitle">InstantGram</b><div class="muted" id="pBody">What's new…</div></div></div>
+        <button class="btn lime" id="bSend">Send to everyone</button>
+        <div id="bProg" class="hide"><div class="bar"><i id="bBar"></i></div><div class="small" id="bText"></div></div>
+        <p class="small muted">Goes to every phone with notifications on. People who turned notifications off get nothing.</p>
+      </div>
+    </div>
+  </main>
+</section>
+
+<div id="drawer" class="hide"><div class="pane" id="pane"></div></div>
+<div id="toast" class="hide"></div>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let KEY = sessionStorage.getItem("igKey") || localStorage.getItem("igKey") || "";
+let MEDIA = "";
+let BUCKET = "";
+const FALLBACK = ["t3.tigrisfiles.io", "t3.tigrisbucket.io", "t3.tigrisblob.io"];
+
+async function api(op, data = {}) {
+  const res = await fetch("/api/admin", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-admin-key": KEY },
+    body: JSON.stringify({ op, ...data }),
+  });
+  let j = {};
+  try { j = await res.json(); } catch {}
+  if (res.status === 403) { logout("Wrong admin key."); throw new Error("Wrong admin key."); }
+  if (!res.ok) throw new Error(j.detail || `Error ${res.status}`);
+  return j;
+}
+
+function toast(msg, err = false) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.className = err ? "err" : "";
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => t.classList.add("hide"), 3500);
+}
+
+const url = (ref) => !ref ? "" : ref.startsWith("m:") ? `${MEDIA}/${ref.slice(2)}` : /^https?:/.test(ref) ? ref : "";
+// another public address of the same bucket, if the first does not load
+window.imgFail = (el) => {
+  const n = Number(el.dataset.try || 0);
+  if (!BUCKET || n >= FALLBACK.length || !el.dataset.ref || !el.dataset.ref.startsWith("m:")) { el.style.visibility = "hidden"; return; }
+  el.dataset.try = n + 1;
+  el.src = `https://${BUCKET}.${FALLBACK[n]}/${el.dataset.ref.slice(2)}`;
+};
+const img = (ref, cls = "") => ref ? `<img class="${cls}" loading="lazy" data-ref="${esc(ref)}" src="${esc(url(ref))}" onerror="imgFail(this)" alt="">` : "";
+const vid = (ref, poster) => `<video preload="none" playsinline controls ${poster ? `poster="${esc(url(poster))}"` : ""} src="${esc(url(ref))}"></video>`;
+const media = (p) => p.video ? vid(p.video, p.image) : img(p.image);
+const avatar = (u, lg = false) => u.photo ? `<img class="av${lg ? " lg" : ""}" src="${esc(url(u.photo))}" data-ref="${esc(u.photo)}" onerror="imgFail(this)" alt="">` : `<div class="av${lg ? " lg" : ""}">${esc((u.username || "?")[0].toUpperCase())}</div>`;
+function ago(iso) {
+  if (!iso) return "—";
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  if (s < 86400 * 30) return `${Math.floor(s / 86400)} d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+const date = (iso) => iso ? new Date(iso).toLocaleString() : "—";
+const kindName = (t) => ({ video: "Clip", photoclip: "Photo clip", image: "Post" }[t] || t);
+
+// ------------------------------------------------------------------- login
+$("#loginForm").onsubmit = async (e) => {
+  e.preventDefault();
+  KEY = $("#key").value.trim();
+  $("#loginErr").textContent = "";
+  try {
+    await start();
+    (($("#remember").checked) ? localStorage : sessionStorage).setItem("igKey", KEY);
+  } catch (err) {
+    $("#loginErr").textContent = err.message === "Not found" ? "The signer has no ADMIN_KEY set (or it was not redeployed)." : err.message;
+  }
+};
+function logout(msg) {
+  sessionStorage.removeItem("igKey"); localStorage.removeItem("igKey"); KEY = "";
+  $("#app").classList.add("hide"); $("#login").classList.remove("hide");
+  if (msg) $("#loginErr").textContent = msg;
+}
+$("#logout").onclick = () => logout();
+
+async function start() {
+  const c = await api("check");
+  MEDIA = c.media || ""; BUCKET = c.bucket || "";
+  $("#login").classList.add("hide"); $("#app").classList.remove("hide");
+  if (!c.panel) {
+    $("#warn").innerHTML = "FIREBASE_SERVICE_ACCOUNT is not set in Vercel, so the panel cannot read the app's data. Set it (the same key push notifications use) and redeploy.";
+    $("#warn").classList.remove("hide");
+  }
+  show("overview");
+}
+
+// --------------------------------------------------------------------- tabs
+const loaded = {};
+function show(tab) {
+  $$("#nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+  $$("[data-view]").forEach((v) => v.classList.toggle("hide", v.dataset.view !== tab));
+  if (tab === "overview") loadStats();
+  if (tab === "users" && !loaded.users) loadUsers(true);
+  if (tab === "posts" && !loaded.posts) loadPosts(true);
+  if (tab === "moments") loadMoments();
+  if (tab === "reports") loadReports();
+  loaded[tab] = true;
+}
+$$("#nav button").forEach((b) => (b.onclick = () => show(b.dataset.tab)));
+
+// ----------------------------------------------------------------- overview
+const STAT_NAMES = [
+  ["users", "Users"], ["activeNow", "Active now", "hot"], ["active24h", "Active 24 h"], ["new24h", "New today"],
+  ["new7d", "New this week"], ["posts", "Posts + clips"], ["clips", "Clips"], ["posts24h", "Uploads 24 h"],
+  ["moments", "Live moments"], ["chats", "Chats"], ["phones", "Push devices"], ["reports", "Open reports", "warn"], ["banned", "Banned"],
+];
+async function loadStats() {
+  $("#stats").innerHTML = `<div class="muted"><span class="spin"></span> Loading…</div>`;
+  try {
+    const j = await api("stats");
+    $("#stats").innerHTML = STAT_NAMES.map(([k, l, c]) =>
+      `<div class="stat ${c || ""}"><div class="l">${l}</div><div class="n">${j.stats[k] == null ? "—" : Number(j.stats[k]).toLocaleString()}</div></div>`).join("");
+    $("#statAt").textContent = "Updated " + new Date(j.at).toLocaleTimeString();
+    setBadge(j.stats.reports);
+  } catch (e) { $("#stats").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+function setBadge(n) { const b = $("#repBadge"); b.textContent = n; b.classList.toggle("hide", !n); }
+$("#statRefresh").onclick = loadStats;
+setInterval(() => { if (KEY && !$("[data-view=overview]").classList.contains("hide") && document.visibilityState === "visible") loadStats(); }, 60000);
+
+// -------------------------------------------------------------------- users
+let usersNext = null;
+async function loadUsers(fresh) {
+  const box = $("#users");
+  if (fresh) { box.innerHTML = `<div class="empty"><span class="spin"></span></div>`; usersNext = null; }
+  try {
+    const j = await api("users", { q: $("#uq").value, after: fresh ? undefined : usersNext });
+    if (fresh) box.innerHTML = "";
+    if (fresh && !j.users.length) box.innerHTML = `<div class="empty">Nobody found.</div>`;
+    box.insertAdjacentHTML("beforeend", j.users.map(userRow).join(""));
+    usersNext = j.next;
+    $("#usersMore").classList.toggle("hide", !usersNext);
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+const userRow = (u) => `<div class="urow" data-uid="${esc(u.uid)}">${avatar(u)}<div class="grow" style="min-width:0">
+  <div><b>@${esc(u.username || "?")}</b>${u.online && u.lastActive && Date.now() - new Date(u.lastActive) < 240000 ? '<span class="tag on">online</span>' : ""}${u.banned ? '<span class="tag ban">banned</span>' : ""}${u.private ? '<span class="tag">private</span>' : ""}</div>
+  <div class="muted small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.fullName)} ${u.email ? "· " + esc(u.email) : ""}</div></div>
+  <div class="small muted" style="text-align:right">${u.posts} posts · ${u.followers} followers<br>joined ${ago(u.createdAt)} · seen ${ago(u.lastActive)}</div></div>`;
+$("#users").onclick = (e) => { const r = e.target.closest(".urow"); if (r) openUser(r.dataset.uid); };
+$("#userSearch").onsubmit = (e) => { e.preventDefault(); loadUsers(true); };
+$("#usersMore").onclick = () => loadUsers(false);
+
+// ------------------------------------------------------------- user drawer
+function closeDrawer() { $("#drawer").classList.add("hide"); $("#pane").innerHTML = ""; }
+$("#drawer").onclick = (e) => { if (e.target.id === "drawer") closeDrawer(); };
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeModal(); closeDrawer(); } });
+
+async function openUser(uid) {
+  $("#drawer").classList.remove("hide");
+  const pane = $("#pane");
+  pane.innerHTML = `<div class="empty"><span class="spin"></span></div>`;
+  try {
+    const j = await api("user", { uid });
+    const u = j.user, l = j.login || {};
+    pane.innerHTML = `
+      <div class="row"><button class="btn sm" data-close>← Back</button><span class="grow"></span></div>
+      <div class="row" style="margin-top:14px">${avatar(u, true)}<div class="grow">
+        <div style="font-size:20px;font-weight:700">@${esc(u.username)} ${u.banned ? '<span class="tag ban">banned</span>' : ""}</div>
+        <div class="muted">${esc(u.fullName || "")}</div><div class="small" style="white-space:pre-wrap">${esc(u.bio || "")}</div></div></div>
+      <div class="kv">
+        <div>User id</div><div><code>${esc(u.uid)}</code></div>
+        <div>Email</div><div>${esc(l.email || u.email || "—")}</div>
+        <div>Sign-in</div><div>${l.error ? esc(l.error) : j.login ? (l.disabled ? '<span style="color:var(--red)">disabled</span>' : "active") : "no sign-in account"}</div>
+        <div>Joined</div><div>${date(u.createdAt)}</div>
+        <div>Last login</div><div>${l.lastLogin ? date(new Date(l.lastLogin).toISOString()) : "—"}</div>
+        <div>Last active</div><div>${ago(u.lastActive)}</div>
+        <div>Counts</div><div>${u.posts || 0} posts · ${u.followers || 0} followers · ${u.following || 0} following</div>
+        <div>Reports</div><div>${j.reports} about this account's content</div>
+        ${u.banned && u.bannedReason ? `<div>Ban reason</div><div>${esc(u.bannedReason)}</div>` : ""}
+      </div>
+      <div class="row wrap">
+        <button class="btn ${u.banned ? "" : "red"}" data-ban="${u.banned ? 0 : 1}">${u.banned ? "Unban" : "Ban"}</button>
+        <button class="btn red" data-delacct>Delete account…</button>
+      </div>
+      <h3 style="margin-top:24px">Posts &amp; clips (${j.posts.length})</h3>
+      <div class="grid">${j.posts.map(postCard).join("") || '<div class="muted">None.</div>'}</div>
+      <h3 style="margin-top:24px">Live moments (${j.moments.length})</h3>
+      <div class="grid">${j.moments.map(momentCard).join("") || '<div class="muted">None.</div>'}</div>`;
+    $("[data-close]", pane).onclick = closeDrawer;
+    $("[data-ban]", pane).onclick = () => banUser(u, $("[data-ban]", pane).dataset.ban === "1");
+    $("[data-delacct]", pane).onclick = () => deleteAccount(u);
+  } catch (e) { pane.innerHTML = `<button class="btn sm" onclick="closeDrawer()">← Back</button><div class="empty">${esc(e.message)}</div>`; }
+}
+window.closeDrawer = closeDrawer;
+
+async function banUser(u, on) {
+  let reason = "";
+  if (on) {
+    reason = prompt(`Ban @${u.username}? They are logged out and cannot sign in.\nReason (optional, only you see it):`, "");
+    if (reason === null) return;
+  } else if (!confirm(`Unban @${u.username}?`)) return;
+  try {
+    await api("ban", { uid: u.uid, on, reason });
+    toast(on ? `@${u.username} is banned.` : `@${u.username} can sign in again.`);
+    openUser(u.uid);
+  } catch (e) { toast(e.message, true); }
+}
+
+// --------------------------------------------------------- delete account
+const STAGE_NAMES = { files: "Files", posts: "Posts & clips", activity: "Likes & comments on others' posts", stories: "Moments", views: "Moment views", chats: "Messages", calls: "Calls", inbox: "Notifications", follows: "Follows", profile: "Profile & username", auth: "Sign-in account" };
+const STAGES = Object.keys(STAGE_NAMES);
+function modal(html) {
+  closeModal();
+  const m = document.createElement("div");
+  m.className = "modal"; m.id = "modal";
+  m.innerHTML = `<div class="box">${html}</div>`;
+  document.body.appendChild(m);
+  return m;
+}
+function closeModal() { const m = $("#modal"); if (m && !m.dataset.busy) m.remove(); }
+
+function deleteAccount(u) {
+  const m = modal(`<h3 style="margin-top:0">Delete @${esc(u.username)}?</h3>
+    <p class="muted">Removes their posts, clips, moments, messages, likes, comments, follows, files and the sign-in account. Chats with them show "User not available". This cannot be undone.</p>
+    <p>Type <b>${esc(u.username || u.uid)}</b> to confirm:</p>
+    <input class="f" id="confirmName" autocomplete="off">
+    <div id="delProg" class="hide"><div class="bar"><i id="delBar"></i></div><div class="small" id="delText"></div></div>
+    <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" id="delCancel">Cancel</button><button class="btn red" id="delGo" disabled>Delete for good</button></div>`);
+  const want = u.username || u.uid;
+  $("#confirmName", m).oninput = (e) => ($("#delGo", m).disabled = e.target.value.trim() !== want);
+  $("#delCancel", m).onclick = () => { if (!m.dataset.busy) m.remove(); };
+  $("#delGo", m).onclick = async () => {
+    m.dataset.busy = "1";
+    $("#delGo", m).disabled = true; $("#delCancel", m).disabled = true; $("#confirmName", m).disabled = true;
+    $("#delProg", m).classList.remove("hide");
+    let stage = "files", cursor = "", removed = 0, tries = 0;
+    for (;;) {
+      $("#delBar", m).style.width = `${Math.round(100 * STAGES.indexOf(stage) / STAGES.length)}%`;
+      $("#delText", m).innerHTML = `<span class="spin"></span> ${STAGE_NAMES[stage]}… (${removed} removed)`;
+      try {
+        const r = await api("deleteAccount", { uid: u.uid, stage, cursor });
+        tries = 0;
+        removed += r.removed || 0;
+        if (r.done) break;
+        stage = r.stage; cursor = r.cursor || "";
+      } catch (e) {
+        if (++tries >= 4) {
+          delete m.dataset.busy; $("#delCancel", m).disabled = false;
+          $("#delText", m).innerHTML = `<span style="color:var(--red)">Stopped at "${STAGE_NAMES[stage]}": ${esc(e.message)}</span><br>Press Delete again to carry on.`;
+          $("#delGo", m).disabled = false;
+          return;
+        }
+        await new Promise((ok) => setTimeout(ok, 2000 * tries));
+      }
+    }
+    $("#delBar", m).style.width = "100%";
+    $("#delText", m).textContent = `Deleted. ${removed} records and files removed.`;
+    delete m.dataset.busy;
+    $("#delCancel", m).disabled = false; $("#delCancel", m).textContent = "Close";
+    closeDrawer(); loaded.users = false; loaded.posts = false;
+    toast(`@${u.username} deleted.`);
+  };
+}
+
+// -------------------------------------------------------------------- posts
+let postKind = "", postsNext = null;
+const postCard = (p) => `<div class="pc" data-post="${esc(p.id)}">
+  <div class="media">${media(p)}<span class="kind">${kindName(p.type)}</span></div>
+  <div class="body">
+    <div class="row"><span class="who" data-user="${esc(p.authorId)}">@${esc(p.author)}</span><span class="grow"></span><span class="small muted">${ago(p.createdAt)}</span></div>
+    <div class="cap">${esc(p.caption) || '<i>no caption</i>'}</div>
+    <div class="small muted">♥ ${p.likes} · 💬 ${p.comments}${p.views ? ` · ▶ ${p.views}` : ""}</div>
+    <div class="acts"><button class="btn sm" data-comments="${esc(p.id)}">Comments</button><span class="grow"></span><button class="btn sm red" data-delpost="${esc(p.id)}">Delete</button></div>
+  </div></div>`;
+async function loadPosts(fresh) {
+  const box = $("#posts");
+  if (fresh) { box.innerHTML = `<div class="muted"><span class="spin"></span> Loading…</div>`; postsNext = null; }
+  try {
+    const j = await api("posts", { kind: postKind, after: fresh ? undefined : postsNext });
+    if (fresh) box.innerHTML = j.posts.length ? "" : `<div class="empty">Nothing here.</div>`;
+    box.insertAdjacentHTML("beforeend", j.posts.map(postCard).join(""));
+    postsNext = j.next;
+    $("#postsMore").classList.toggle("hide", !postsNext);
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+$("#postKinds").onclick = (e) => {
+  const c = e.target.closest(".chip"); if (!c) return;
+  $$(".chip", $("#postKinds")).forEach((x) => x.classList.toggle("on", x === c));
+  postKind = c.dataset.k; loadPosts(true);
+};
+$("#postsMore").onclick = () => loadPosts(false);
+
+async function deletePost(id, quiet = false) {
+  if (!quiet && !confirm("Delete this post for good (with its likes, comments and files)?")) return false;
+  try {
+    for (let i = 0; i < 20; i++) { const r = await api("deletePost", { id }); if (!r.more) break; }
+    $$(`[data-post="${CSS.escape(id)}"]`).forEach((el) => el.remove());
+    toast("Post deleted.");
+    return true;
+  } catch (e) { toast(e.message, true); return false; }
+}
+
+async function showComments(postId) {
+  const m = modal(`<div class="row"><h3 class="grow" style="margin:0">Comments</h3><button class="btn sm" id="cmClose">Close</button></div><div id="cmList"><div class="empty"><span class="spin"></span></div></div>`);
+  $("#cmClose", m).onclick = () => m.remove();
+  try {
+    const j = await api("comments", { postId });
+    $("#cmList", m).innerHTML = j.comments.map((c) => `<div class="comment" data-cm="${esc(c.id)}"><div class="grow">
+      <span class="who" data-user="${esc(c.authorId)}">@${esc(c.author)}</span> <span class="small muted">${ago(c.createdAt)}</span>
+      <div style="white-space:pre-wrap;word-break:break-word">${esc(c.text) || (c.hasMedia ? "<i>(gif / clip)</i>" : "")}</div></div>
+      <button class="btn sm red" data-delcm="${esc(c.id)}">Delete</button></div>`).join("") || `<div class="empty">No comments.</div>`;
+    $("#cmList", m).onclick = async (e) => {
+      const b = e.target.closest("[data-delcm]");
+      if (b) {
+        if (!confirm("Delete this comment?")) return;
+        try { await api("deleteComment", { postId, id: b.dataset.delcm }); b.closest(".comment").remove(); toast("Comment deleted."); } catch (er) { toast(er.message, true); }
+        return;
+      }
+      const w = e.target.closest("[data-user]"); if (w) { m.remove(); openUser(w.dataset.user); }
+    };
+  } catch (e) { $("#cmList", m).innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// shared clicks inside cards (in any tab or the drawer)
+document.addEventListener("click", async (e) => {
+  const t = e.target;
+  const w = t.closest(".pc [data-user], .rep [data-user]");
+  if (w) return openUser(w.dataset.user);
+  const dp = t.closest("[data-delpost]");
+  if (dp) return deletePost(dp.dataset.delpost);
+  const cm = t.closest("[data-comments]");
+  if (cm) return showComments(cm.dataset.comments);
+  const dm = t.closest("[data-delmom]");
+  if (dm) {
+    if (!confirm("Delete this moment?")) return;
+    try {
+      for (let i = 0; i < 20; i++) { const r = await api("deleteMoment", { id: dm.dataset.delmom, col: dm.dataset.col }); if (!r.more) break; }
+      dm.closest(".pc").remove(); toast("Moment deleted.");
+    } catch (er) { toast(er.message, true); }
+  }
+});
+
+// ------------------------------------------------------------------ moments
+const momentCard = (s) => `<div class="pc"><div class="media">${media(s)}<span class="kind">${s.col === "privateStories" ? "Private moment" : "Moment"}</span></div>
+  <div class="body"><div class="row"><span class="who" data-user="${esc(s.authorId)}">@${esc(s.author)}</span><span class="grow"></span><span class="small muted">${ago(s.createdAt)}</span></div>
+  <div class="small muted">ends ${s.expiresAt ? new Date(s.expiresAt).toLocaleString() : "—"}</div>
+  <div class="acts"><span class="grow"></span><button class="btn sm red" data-delmom="${esc(s.id)}" data-col="${esc(s.col)}">Delete</button></div></div></div>`;
+async function loadMoments() {
+  const box = $("#moments");
+  box.innerHTML = `<div class="muted"><span class="spin"></span> Loading…</div>`;
+  try {
+    const j = await api("moments");
+    box.innerHTML = j.moments.map(momentCard).join("") || `<div class="empty">No live moments.</div>`;
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+$("#momRefresh").onclick = loadMoments;
+
+// ------------------------------------------------------------------ reports
+let repStatus = "open";
+async function loadReports() {
+  const box = $("#reports");
+  box.innerHTML = `<div class="muted"><span class="spin"></span> Loading…</div>`;
+  try {
+    const j = await api("reports", { status: repStatus });
+    if (repStatus === "open") setBadge(j.reports.length);
+    box.innerHTML = j.reports.map((r) => {
+      const p = r.postId ? j.posts[r.postId] : null;
+      return `<div class="rep" data-rep="${esc(r.id)}">
+        <div class="thumb">${p ? media(p) : ""}</div>
+        <div class="grow" style="min-width:0">
+          <div class="row wrap"><b>${esc(r.kind || "post")}</b><span class="reason">${esc(r.reason || "—")}</span><span class="grow"></span><span class="small muted">${date(r.createdAt)}</span></div>
+          <div class="small" style="margin:6px 0">by <span class="who" data-user="${esc(r.by)}">@${esc(r.byUsername || r.by)}</span> about <span class="who" data-user="${esc(r.ownerId)}">@${esc(r.ownerUsername || r.ownerId)}</span></div>
+          ${r.text ? `<div style="white-space:pre-wrap;word-break:break-word">${esc(r.text)}</div>` : ""}
+          ${r.comment ? `<div class="small muted" style="margin-top:6px">Comment: ${esc(r.comment)}</div>` : ""}
+          ${p ? `<div class="small muted" style="margin-top:6px">${kindName(p.type)} · ${esc(p.caption).slice(0, 120)}</div>` : r.postId ? `<div class="small muted" style="margin-top:6px">The post is already gone.</div>` : ""}
+          ${repStatus === "open" ? `<div class="row wrap" style="margin-top:10px">
+            ${(p || r.commentId) ? `<button class="btn sm red" data-ract="remove">Remove ${r.commentId ? "comment" : esc(kindName(p ? p.type : "post")).toLowerCase()}</button>` : ""}
+            ${r.ownerId ? `<button class="btn sm red" data-ract="ban">Ban @${esc(r.ownerUsername || "owner")}</button>` : ""}
+            <button class="btn sm" data-ract="dismiss">Dismiss</button></div>` : `<div class="small muted" style="margin-top:8px">Handled: ${esc(r.action || "")} · ${date(r.doneAt)}</div>`}
+        </div></div>`;
+    }).join("") || `<div class="empty">${repStatus === "open" ? "No open reports 🎉" : "Nothing handled yet."}</div>`;
+    box._data = j;
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+$("#repKinds").onclick = (e) => {
+  const c = e.target.closest(".chip"); if (!c) return;
+  $$(".chip", $("#repKinds")).forEach((x) => x.classList.toggle("on", x === c));
+  repStatus = c.dataset.s; loadReports();
+};
+$("#reports").onclick = async (e) => {
+  const b = e.target.closest("[data-ract]"); if (!b) return;
+  const card = b.closest("[data-rep]");
+  const r = $("#reports")._data.reports.find((x) => x.id === card.dataset.rep);
+  try {
+    if (b.dataset.ract === "remove") {
+      if (r.commentId) {
+        if (!confirm("Delete this comment?")) return;
+        await api("deleteComment", { postId: r.postId, id: r.commentId });
+      } else if (!(await deletePost(r.postId))) return;
+      await api("resolveReport", { id: r.id, action: "removed" });
+    } else if (b.dataset.ract === "ban") {
+      const reason = prompt(`Ban @${r.ownerUsername || r.ownerId}? Reason (optional):`, r.reason || "");
+      if (reason === null) return;
+      await api("ban", { uid: r.ownerId, on: true, reason });
+      await api("resolveReport", { id: r.id, action: "banned" });
+    } else {
+      await api("resolveReport", { id: r.id, action: "dismissed" });
+    }
+    toast("Done."); loadReports();
+  } catch (er) { toast(er.message, true); }
+};
+
+// ---------------------------------------------------------------- broadcast
+const syncPreview = () => {
+  $("#pTitle").textContent = $("#bTitle").value.trim() || "InstantGram";
+  $("#pBody").textContent = $("#bBody").value.trim() || "What's new…";
+  $("#bCount").textContent = $("#bBody").value.length;
+};
+$("#bTitle").oninput = syncPreview; $("#bBody").oninput = syncPreview;
+$("#bSend").onclick = async () => {
+  const title = $("#bTitle").value.trim(), body = $("#bBody").value.trim();
+  if (!body) return toast("Write the message first.", true);
+  if (!confirm(`Send this to EVERY user?\n\n${title || "InstantGram"}\n${body}`)) return;
+  $("#bSend").disabled = true; $("#bProg").classList.remove("hide");
+  let cursor = null, sent = 0, failed = 0, pages = 0, tries = 0;
+  for (;;) {
+    $("#bText").innerHTML = `<span class="spin"></span> Sending… ${sent} delivered, ${failed} failed`;
+    $("#bBar").style.width = `${Math.min(95, 10 + pages * 8)}%`;
+    try {
+      const r = await api("broadcast", { title, body, cursor });
+      tries = 0; sent += r.sent; failed += r.failed; pages++;
+      if (!r.more) break;
+      cursor = r.cursor;
+    } catch (e) {
+      if (++tries >= 4) { $("#bText").textContent = `Stopped: ${e.message} (${sent} delivered so far)`; $("#bSend").disabled = false; return; }
+      await new Promise((ok) => setTimeout(ok, 2000 * tries));
+    }
+  }
+  $("#bBar").style.width = "100%";
+  $("#bText").textContent = `Done: ${sent} phones reached${failed ? `, ${failed} failed (old phones are forgotten automatically)` : ""}.`;
+  $("#bSend").disabled = false;
+};
+
+// ---------------------------------------------------------------- go
+if (KEY) start().catch(() => logout());
+</script>
+</body>
+</html>

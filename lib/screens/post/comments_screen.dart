@@ -344,6 +344,10 @@ class _CommentsPanelState extends State<CommentsPanel> {
           context,
           widget.post,
           about: '${c.id} by @${c.authorUsername}: ${c.summary}',
+          commentId: c.id,
+          commentText: c.summary,
+          commentAuthorId: c.authorId,
+          commentAuthorUsername: c.authorUsername,
         );
       case CommentAction.edit:
         setState(() {
@@ -514,7 +518,12 @@ class _CommentsPanelState extends State<CommentsPanel> {
     );
   }
 
-  Widget _chip(BuildContext context, String label, VoidCallback onClose, {Widget? lead}) {
+  Widget _chip(
+    BuildContext context,
+    String label,
+    VoidCallback onClose, {
+    Widget? lead,
+  }) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 6),
       padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),

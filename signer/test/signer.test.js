@@ -349,7 +349,7 @@ test("admin: switched off without ADMIN_KEY, refuses a wrong key", async () => {
   assert.equal((await admin({ op: "check" }, "x".repeat(40), env)).status, 403);
   const ok = await admin({ op: "check" }, ADMIN, env);
   assert.equal(ok.status, 200);
-  assert.deepEqual(await ok.json(), { ok: true });
+  assert.equal((await ok.json()).ok, true);
   assert.equal((await admin({ op: "wipe", uid: "../etc" }, ADMIN, env)).status, 400);
   assert.equal((await admin({ op: "nope" }, ADMIN, env)).status, 400);
 });

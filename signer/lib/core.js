@@ -11,7 +11,8 @@
 //   POST /api/notify   {kind:"message"|"call"|"activity", ...}      -> push to the other phone (lib/push.js)
 //   POST /api/music    {op:"search", term, offset, limit}             -> Epidemic Sound tracks
 //   POST /api/music    {op:"url", id}                                 -> short-lived mp3 link
-//   POST /api/admin    {op:"check"|"wipe", uid}  header x-admin-key   -> developer only
+//   POST /api/admin    {op:"check"|"wipe"|panel ops}  header x-admin-key -> developer only (lib/admin.js)
+//   GET  /admin                                                       -> the admin panel page (lib/panel.js)
 //   GET  /api/health
 //
 // Settings (Vercel environment variables):
@@ -23,6 +24,7 @@
 
 const MB = 1024 * 1024;
 import { notify, serviceAccount } from "./push.js";
+import { runPanelOp, restDb, restAuth, fcmSender, AdminError, PANEL_OPS } from "./admin.js";
 export const LIMITS = { image: 30 * MB, video: 300 * MB, thumb: 2 * MB };
 const TYPES = {
   jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif",
@@ -323,15 +325,39 @@ const UID = /^[A-Za-z0-9]{1,128}$/;
 // the tool calls again while `more` is true.
 const WIPE_BATCH = 150;
 
-async function handleAdmin(request, env, store) {
+async function handleAdmin(request, env, store, deps = null) {
   const key = env.ADMIN_KEY || "";
   if (key.length < 32) return fail(404, "Not found");
   if (!sameSecret(request.headers.get("x-admin-key") || "", key)) return fail(403, "Wrong admin key.");
   const body = await readJson(request);
-  if (body.op === "check") return json({ ok: true });
-  if (body.op !== "wipe") return fail(400, "Unknown op.");
-  const uid = String(body.uid || "");
-  if (!UID.test(uid)) return fail(400, "Bad user id.");
+  if (body.op === "check") {
+    const media = (env.MEDIA_PUBLIC_URL || `https://${env.TIGRIS_BUCKET}.t3.tigrisfiles.io`).replace(/\/+$/, "");
+    return json({ ok: true, panel: Boolean(serviceAccount(env)), media, bucket: env.TIGRIS_BUCKET || "" });
+  }
+  if (body.op === "wipe") {
+    const uid = String(body.uid || "");
+    if (!UID.test(uid)) return fail(400, "Bad user id.");
+    return json(await wipeFiles(store, uid));
+  }
+  if (!Object.hasOwn(PANEL_OPS, body.op || "")) return fail(400, "Unknown op.");
+  // the admin panel: Firestore and sign-in through the service account
+  let ctx = deps && deps.panel;
+  if (!ctx) {
+    const sa = serviceAccount(env);
+    if (!sa) return fail(503, "Set FIREBASE_SERVICE_ACCOUNT in Vercel first (the same key push notifications use).");
+    const project = env.FIREBASE_PROJECT_ID || sa.project;
+    ctx = { db: restDb(sa, project), auth: restAuth(sa, project), push: fcmSender(sa, project) };
+  }
+  try {
+    return json(await runPanelOp(body, { store, wipeFiles: (uid) => wipeFiles(store, uid), ...ctx }));
+  } catch (e) {
+    if (e instanceof AdminError) return fail(e.status, e.message);
+    throw e;
+  }
+}
+
+/** Removes up to WIPE_BATCH files of one user; {deleted, more}. */
+async function wipeFiles(store, uid) {
   // First the whole list, then the deletes: deleting while paging could skip files.
   const keys = [];
   for (const kind of ["image", "video", "thumb"]) {
@@ -347,7 +373,7 @@ async function handleAdmin(request, env, store) {
   }
   const now = keys.slice(0, WIPE_BATCH);
   for (const k of now) await store.delete(k);
-  return json({ ok: true, deleted: now.length, more: keys.length > now.length });
+  return { ok: true, deleted: now.length, more: keys.length > now.length };
 }
 
 // ------------------------------------------------------- Openverse (free music)
@@ -493,7 +519,7 @@ async function handleNotify(request, env, uid, deps) {
 const ROUTES = { sign: handleSign, confirm: handleConfirm, delete: handleDelete, music: handleMusic, notify: handleNotify };
 
 /** One entry point for every function in api/. `store` is only replaced in tests. */
-export async function handle(request, env, route, store = null) {
+export async function handle(request, env, route, store = null, deps = null) {
   if (route === "health") {
     return request.method === "GET" ? json({ ok: true, ready: configured(env), push: Boolean(serviceAccount(env)), music: true, musicKey: Boolean(env.OPENVERSE_CLIENT_ID && env.OPENVERSE_CLIENT_SECRET) }) : fail(404, "Not found");
   }
@@ -501,7 +527,7 @@ export async function handle(request, env, route, store = null) {
     if (request.method !== "POST") return fail(404, "Not found");
     if (!store && !configured(env)) return fail(500, "The media service is not fully set up (missing settings).");
     try {
-      return await handleAdmin(request, env, store || s3Store(env));
+      return await handleAdmin(request, env, store || s3Store(env), deps);
     } catch (e) {
       console.error("media signer admin error", e && e.stack ? e.stack : e);
       return fail(500, "The media service had a problem. Try again.");

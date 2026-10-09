@@ -41,7 +41,8 @@ async function importKey(pem) {
   return crypto.subtle.importKey("pkcs8", der, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
 }
 
-const SCOPES = "https://www.googleapis.com/auth/firebase.messaging https://www.googleapis.com/auth/datastore";
+// identitytoolkit + cloud-platform: the admin panel bans and deletes sign-in accounts
+const SCOPES = "https://www.googleapis.com/auth/firebase.messaging https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/identitytoolkit https://www.googleapis.com/auth/cloud-platform";
 let tokenCache = null; // {email, value, until}
 
 /** An OAuth access token for the service account (kept until shortly before it expires). */

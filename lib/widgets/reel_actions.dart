@@ -6,6 +6,7 @@ import '../core/l10n.dart';
 import '../core/theme.dart';
 import '../core/ui.dart';
 import '../models/post.dart';
+import '../services/report_service.dart';
 import '../services/user_service.dart';
 
 /// Where reports are sent.
@@ -47,12 +48,16 @@ const List<String> kReportReasons = [
   'Something else',
 ];
 
-/// Report a clip: pick a reason, write what is wrong, then the email to the team opens with
-/// the text already in it.
+/// Report a post, clip or comment: pick a reason, write what is wrong. It is saved for the
+/// admin panel (Reports), then the email to the team opens with the text already in it.
 Future<void> showReportSheet(
   BuildContext context,
   Post post, {
   String about = '',
+  String commentId = '',
+  String commentText = '',
+  String commentAuthorId = '',
+  String commentAuthorUsername = '',
 }) async {
   final result = await showModalBottomSheet<({String reason, String text})>(
     context: context,
@@ -61,6 +66,16 @@ Future<void> showReportSheet(
     builder: (ctx) => _ReportForm(ctx: ctx),
   );
   if (result == null || !context.mounted) return;
+  final saved = await sendReport(
+    post,
+    reason: result.reason,
+    text: result.text,
+    commentId: commentId,
+    comment: commentText,
+    commentAuthorId: commentAuthorId,
+    commentAuthorUsername: commentAuthorUsername,
+  );
+  if (!context.mounted) return;
   var opened = false;
   try {
     opened = await launchUrl(
@@ -77,9 +92,13 @@ Future<void> showReportSheet(
   if (!context.mounted) return;
   showToast(
     context,
-    opened
-        ? 'Press send in your email app to report it.'
-        : 'No email app found. Write to $kReportEmail',
+    saved
+        ? (opened
+              ? 'Report sent. You can also press send in your email app.'
+              : 'Report sent. Thanks, we will look at it.')
+        : (opened
+              ? 'Press send in your email app to report it.'
+              : 'No email app found. Write to $kReportEmail'),
   );
 }
 
@@ -122,7 +141,7 @@ class _ReportFormState extends State<_ReportForm> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Tell us what is wrong. It goes to $kReportEmail.',
+              'Tell us what is wrong. The team checks every report.',
               style: TextStyle(color: context.muted),
             ),
             const SizedBox(height: 12),

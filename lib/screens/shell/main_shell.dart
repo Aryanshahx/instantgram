@@ -92,6 +92,10 @@ class _MainShellState extends State<MainShell> {
     try {
       final me = await UserService.instance.getUser(UserService.instance.myUid);
       if (me == null) return;
+      if (me.banned) {
+        await _suspended();
+        return;
+      }
       AppPrefs.instance.rememberAccount(
         SavedAccount(
           uid: me.uid,
@@ -106,6 +110,31 @@ class _MainShellState extends State<MainShell> {
     } catch (_) {
       // best effort
     }
+  }
+
+  /// The admin panel banned this account: say so, then log out.
+  Future<void> _suspended() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        key: const ValueKey('suspendedDialog'),
+        title: Text(context.tr('Account suspended')),
+        content: Text(
+          context.tr(
+            'This account was suspended for breaking the rules. Write to techlabs.hyper@gmail.com if you think this is a mistake.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(context.tr('OK')),
+          ),
+        ],
+      ),
+    );
+    await AuthService.instance.signOut();
   }
 
   /// Today's time in the app passed the daily limit (Settings > Manage time).

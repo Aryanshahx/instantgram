@@ -1,3 +1,8 @@
 {
-  "regions": ["bom1"]
+  "regions": ["bom1"],
+  "functions": {
+    "api/panel.js": { "includeFiles": "lib/panel.html" },
+    "api/admin.js": { "maxDuration": 30 }
+  },
+  "rewrites": [{ "source": "/admin", "destination": "/api/panel" }]
 }

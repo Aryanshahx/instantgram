@@ -25,6 +25,7 @@ class AppUser {
     this.birthDate,
     this.lastActive,
     this.online = true,
+    this.banned = false,
   });
 
   final String uid;
@@ -70,6 +71,9 @@ class AppUser {
   /// False once the app went to the background (missing on old app versions: true).
   final bool online;
 
+  /// Set by the admin panel: the account is suspended (sign-in is blocked as well).
+  final bool banned;
+
   factory AppUser.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? const <String, dynamic>{};
     return AppUser(
@@ -99,6 +103,7 @@ class AppUser {
       language: _str(m['language']),
       country: _str(m['country']),
       online: m['online'] is bool ? m['online'] as bool : true,
+      banned: m['banned'] == true,
       lastActive: m['lastActive'] is Timestamp
           ? (m['lastActive'] as Timestamp).toDate()
           : null,
