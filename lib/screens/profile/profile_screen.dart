@@ -14,6 +14,7 @@ import '../../core/ui.dart';
 import '../../models/app_user.dart';
 import '../../models/post.dart';
 import '../../services/safety_service.dart';
+import '../../services/feed_signals.dart';
 import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
 import '../../services/user_service.dart';
@@ -90,6 +91,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.initState();
     _pager.loadMore();
     _loadPinned();
+    Closeness.instance.bump(widget.uid, Signal.profileVisit);
     _scroll.addListener(() {
       if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 500) {
         _pager.loadMore();

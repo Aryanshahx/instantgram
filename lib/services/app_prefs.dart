@@ -130,6 +130,25 @@ class AppPrefs {
     _p?.setString('rateLog', v);
   }
 
+  /// Per account (so switching accounts keeps each one's feed): how close I am to each
+  /// account (`closeness`, uid -> [score, ms]) and what I have seen (`seenLog`,
+  /// id -> [ms, percent watched]). JSON.
+  final Map<String, String> _feedMem = {};
+  String feedData(String name, String uid) =>
+      _p?.getString('${name}_$uid') ?? _feedMem['${name}_$uid'] ?? '';
+  void setFeedData(String name, String uid, String v) {
+    _feedMem['${name}_$uid'] = v;
+    _p?.setString('${name}_$uid', v);
+  }
+
+  /// Home: 'foryou' (ranked) or 'following' (newest first, only people I follow).
+  String _modeMem = '';
+  String get feedMode => _p?.getString('feedMode') ?? _modeMem;
+  set feedMode(String v) {
+    _modeMem = v;
+    _p?.setString('feedMode', v);
+  }
+
   /// The day the daily-limit reminder was last shown.
   String get limitShownDay => _p?.getString('limitShown') ?? '';
   set limitShownDay(String v) => _p?.setString('limitShown', v);

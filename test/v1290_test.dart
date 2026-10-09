@@ -160,6 +160,15 @@ const _png = <int>[
 double _alpha(List<double> m, int r, int g, int b) =>
     (m[15] * r + m[16] * g + m[17] * b + m[19]).clamp(0, 255).toDouble();
 
+/// Scrolls the control into view first (slower phones and newer Flutter lay out lists
+/// a little differently), then taps it.
+Future<void> _tapKey(WidgetTester t, String key) async {
+  final f = find.byKey(ValueKey(key));
+  await t.ensureVisible(f);
+  await t.pump();
+  await t.tap(f);
+}
+
 Future<void> _scrollTo(WidgetTester t, String key) async {
   final scroll = find
       .ancestor(
@@ -486,37 +495,39 @@ void main() {
       expect(find.byKey(const ValueKey('splitTools')), findsOneWidget);
       expect(find.byKey(const ValueKey('seg_2')), findsOneWidget);
       // put the middle part back, then take it out again
-      await t.tap(find.byKey(const ValueKey('seg_1')));
+      await _tapKey(t, 'seg_1');
       await t.pump();
       expect(find.text('0:00 / 0:20'), findsOneWidget);
-      await t.tap(find.byKey(const ValueKey('seg_1')));
+      await _tapKey(t, 'seg_1');
       await t.pump();
       expect(find.text('0:00 / 0:17'), findsOneWidget);
       // a photo on top: blend, key, mask
       await _scrollTo(t, 'tool_layer');
       await t.tap(find.byKey(const ValueKey('tool_layer')));
       await t.pump();
-      await t.tap(find.byKey(const ValueKey('layerAddPhoto')));
-      await t.pump();
-      await t.pump();
+      await _tapKey(t, 'layerAddPhoto');
+      await _settle(
+        t,
+        () => find.byKey(const ValueKey('layerChip0')).evaluate().isNotEmpty,
+      );
       expect(find.byKey(const ValueKey('layerChip0')), findsOneWidget);
       expect(find.byKey(const ValueKey('layerHandle')), findsOneWidget);
       expect(find.byKey(const ValueKey('layer0')), findsOneWidget);
-      await t.tap(find.byKey(const ValueKey('blend_multiply')));
+      await _tapKey(t, 'blend_multiply');
       await t.pump();
       await t.drag(
         find.byKey(const ValueKey('layerHandle')),
         const Offset(40, 0),
       );
       await t.pump();
-      await t.tap(find.byKey(const ValueKey('layerTab1')));
+      await _tapKey(t, 'layerTab1');
       await t.pump();
-      await t.tap(find.byKey(const ValueKey('key_green')));
+      await _tapKey(t, 'key_green');
       await t.pump();
       expect(find.byKey(const ValueKey('keyStrength')), findsOneWidget);
-      await t.tap(find.byKey(const ValueKey('layerTab2')));
+      await _tapKey(t, 'layerTab2');
       await t.pump();
-      await t.tap(find.byKey(const ValueKey('lm_circle')));
+      await _tapKey(t, 'lm_circle');
       await t.pump();
       expect(find.byKey(const ValueKey('lm_size')), findsOneWidget);
 
@@ -524,13 +535,13 @@ void main() {
       await _scrollTo(t, 'tool_mask');
       await t.tap(find.byKey(const ValueKey('tool_mask')));
       await t.pump();
-      await t.tap(find.byKey(const ValueKey('mask_heart')));
+      await _tapKey(t, 'mask_heart');
       await t.pump();
       expect(find.byKey(const ValueKey('maskDrag')), findsOneWidget);
 
       await t.tap(find.byKey(const ValueKey('editorDone')));
       await t.pump(const Duration(milliseconds: 500));
-      await t.pump(const Duration(milliseconds: 500));
+      await _settle(t, () => result != null);
       expect(result, isNotNull);
       final ve = result!.videoEdits!;
       expect(ve.parts, const [(0, 5), (8, 20)]);

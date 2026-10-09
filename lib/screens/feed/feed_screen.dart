@@ -4,10 +4,15 @@ import '../../core/app_events.dart';
 import '../../core/responsive.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import '../../services/app_prefs.dart';
+import '../../services/feed_ranker.dart';
+import '../../services/feed_signals.dart';
+import '../../services/notification_service.dart';
 import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
-import '../../services/notification_service.dart';
+import '../../services/safety_service.dart';
 import '../../widgets/brand_logo.dart';
+import '../../widgets/pill_tabs.dart';
 import '../../widgets/post_card.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/stories_bar.dart';
@@ -20,28 +25,88 @@ class FeedScreen extends StatefulWidget {
   State<FeedScreen> createState() => _FeedScreenState();
 }
 
+/// Tests replace the Home queries (For you, then Following with the chosen accounts).
+PostPager Function(bool following, List<String> ids)? debugFeedPager;
+
 class _FeedScreenState extends State<FeedScreen> {
-  late final PostPager _pager = PostPager(
-    PostService.instance.latestQuery,
-    pageSize: 8,
-    feed: true,
-  );
+  /// For you: ranked (people I am close to, trending, some new accounts).
+  /// Following: only people I follow, newest first.
+  bool _following = AppPrefs.instance.feedMode == 'following';
+
+  late final PostPager _forYou =
+      debugFeedPager?.call(false, const []) ??
+      PostPager(
+        PostService.instance.latestQuery,
+        pageSize: 24,
+        feed: true,
+        seed: () => TrendingService.instance.load(clips: false),
+        arrange: (page, seeded) =>
+            FeedRanker.instance.arrangeHome(page, trending: seeded),
+      );
+  PostPager? _followingPager;
+  List<String> _followIds = const [];
+
+  PostPager _makeFollowing() {
+    // Firestore takes 30 accounts per query: the 30 I am closest to
+    final ids = Closeness.instance.closest(SafetyService.instance.following);
+    _followIds = ids;
+    final hook = debugFeedPager;
+    if (hook != null) return hook(true, ids);
+    final me = SafetyService.instance.me;
+    return PostPager(
+      () => PostService.instance.followingQuery(ids.isEmpty ? [me] : ids),
+      pageSize: 10,
+      feed: true,
+    );
+  }
+
+  PostPager get _pager =>
+      _following ? (_followingPager ??= _start(_makeFollowing())) : _forYou;
+
+  PostPager _start(PostPager p) {
+    p.loadMore();
+    return p;
+  }
+
+  void _setMode(bool following) {
+    if (following == _following) return;
+    AppPrefs.instance.feedMode = following ? 'following' : 'foryou';
+    setState(() => _following = following);
+  }
 
   @override
   void initState() {
     super.initState();
-    _pager.loadMore();
+    if (_following) {
+      _pager; // starts loading
+    } else {
+      _forYou.loadMore();
+    }
     AppEvents.feedRefresh.addListener(_onRefresh);
   }
 
   @override
   void dispose() {
     AppEvents.feedRefresh.removeListener(_onRefresh);
-    _pager.dispose();
+    WatchLog.instance.flush();
+    _forYou.dispose();
+    _followingPager?.dispose();
     super.dispose();
   }
 
-  void _onRefresh() => _pager.refresh();
+  void _onRefresh() {
+    if (_following) {
+      // somebody followed or unfollowed since: ask with the new list
+      final ids = Closeness.instance.closest(SafetyService.instance.following);
+      if (ids.join(',') != _followIds.join(',')) {
+        final old = _followingPager;
+        setState(() => _followingPager = _start(_makeFollowing()));
+        old?.dispose();
+        return;
+      }
+    }
+    _pager.refresh();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,20 +115,30 @@ class _FeedScreenState extends State<FeedScreen> {
       child: ContentWidth(
         maxWidth: 680,
         child: PagedPostList(
+          key: ValueKey(_following ? 'following' : 'foryou'),
           pager: _pager,
-          header: const _FeedHeader(),
+          header: _FeedHeader(following: _following, onMode: _setMode),
           onRefresh: () async {
             // Reloads posts and moments together.
             AppEvents.refreshFeed();
+            await Future<void>.delayed(Duration.zero);
             while (_pager.loading) {
               await Future<void>.delayed(const Duration(milliseconds: 100));
             }
           },
-          empty: const EmptyState(
-            icon: Icons.bolt_rounded,
-            title: 'Nothing here yet',
-            subtitle: 'Tap the + button to share the first photo or clip.',
-          ),
+          empty: _following && SafetyService.instance.following.isEmpty
+              ? const EmptyState(
+                  icon: Icons.group_outlined,
+                  title: 'Nobody followed yet',
+                  subtitle:
+                      'Follow people to see their posts here, newest first.',
+                )
+              : const EmptyState(
+                  icon: Icons.bolt_rounded,
+                  title: 'Nothing here yet',
+                  subtitle:
+                      'Tap the + button to share the first photo or clip.',
+                ),
         ),
       ),
     );
@@ -71,7 +146,10 @@ class _FeedScreenState extends State<FeedScreen> {
 }
 
 class _FeedHeader extends StatelessWidget {
-  const _FeedHeader();
+  const _FeedHeader({required this.following, required this.onMode});
+
+  final bool following;
+  final ValueChanged<bool> onMode;
 
   @override
   Widget build(BuildContext context) {
@@ -124,7 +202,20 @@ class _FeedHeader extends StatelessWidget {
           ),
         ),
         const StoriesBar(),
-        const SizedBox(height: 4),
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 300),
+              child: PillTabs(
+                key: const ValueKey('feedSwitch'),
+                labels: const ['For you', 'Following'],
+                index: following ? 1 : 0,
+                onChanged: (i) => onMode(i == 1),
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -223,6 +314,7 @@ class _PagedPostListState extends State<PagedPostList> {
               final idx = i - headerCount;
               if (idx < posts.length) {
                 final post = posts[idx];
+                WatchLog.instance.markSeen(post.id); // sinks next time
                 return PostCard(
                   key: ValueKey(post.id),
                   post: post,

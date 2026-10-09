@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../core/media_url.dart';
+import '../core/post_authors.dart';
 import 'finish.dart';
 import 'music.dart';
 
@@ -300,6 +301,7 @@ class Post {
       _str(m['musicTitle']),
       _str(m['musicArtist']),
     );
+    rememberAuthor(d.id, _str(m['authorId']));
     return Post(
       id: d.id,
       authorId: _str(m['authorId']),

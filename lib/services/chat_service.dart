@@ -9,6 +9,7 @@ import '../models/vanish.dart';
 import 'media_server.dart';
 import 'user_service.dart';
 import 'push_service.dart';
+import 'feed_signals.dart';
 import 'moderation.dart';
 
 /// Direct messages between any two people.
@@ -155,6 +156,7 @@ class ChatService {
     ReplyRef? replyTo,
     String font = '',
   }) async {
+    Closeness.instance.bump(otherUid, Signal.message);
     // chats are private: only blocked words are starred
     final body = Moderation.instance.chatText(text.trim());
     if (body.isEmpty) return;

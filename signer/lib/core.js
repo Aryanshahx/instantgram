@@ -25,6 +25,7 @@
 const MB = 1024 * 1024;
 import { notify, serviceAccount } from "./push.js";
 import { runPanelOp, restDb, restAuth, fcmSender, AdminError, PANEL_OPS } from "./admin.js";
+import { trending } from "./trending.js";
 export const LIMITS = { image: 30 * MB, video: 300 * MB, thumb: 2 * MB };
 const TYPES = {
   jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif",
@@ -536,6 +537,24 @@ export async function handle(request, env, route, store = null, deps = null) {
     } catch (e) {
       console.error("media signer admin error", e && e.stack ? e.stack : e);
       return fail(500, "The media service had a problem. Try again.");
+    }
+  }
+  if (route === "trending") {
+    // a signed-in phone found the trending list older than an hour
+    if (request.method !== "POST") return fail(404, "Not found");
+    try {
+      await authenticate(request, env);
+    } catch (e) {
+      return fail(401, "Please log in again.");
+    }
+    const sa = serviceAccount(env);
+    if (!sa) return fail(503, "The signer has no service account (FIREBASE_SERVICE_ACCOUNT).");
+    try {
+      const db = (deps && deps.db) || restDb(sa, env.FIREBASE_PROJECT_ID || sa.project, (deps && deps.fetch) || fetch);
+      return json(await trending(db, (deps && deps.now) || Date.now()));
+    } catch (e) {
+      console.error("trending error", e && e.stack ? e.stack : e);
+      return fail(500, "Could not work out trending posts.");
     }
   }
   const fn = ROUTES[route];

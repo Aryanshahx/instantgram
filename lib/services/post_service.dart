@@ -14,6 +14,7 @@ import 'media_server.dart';
 import 'notification_service.dart';
 import 'safety_service.dart';
 import 'user_service.dart';
+import 'feed_signals.dart';
 import 'moderation.dart';
 import 'rate_limits.dart';
 
@@ -272,6 +273,7 @@ class PostService {
 
   /// Counts one share (best effort: a failed count never blocks sharing).
   Future<void> registerShare(String postId) async {
+    Closeness.instance.bumpPost(postId, Signal.share);
     try {
       await _posts.doc(postId).update({'shareCount': FieldValue.increment(1)});
     } catch (_) {}
@@ -378,6 +380,7 @@ class PostService {
       (await _saved.doc(postId).get()).exists;
 
   Future<void> setSaved(String postId, bool saved) async {
+    if (saved) Closeness.instance.bumpPost(postId, Signal.save);
     if (saved) {
       await _saved.doc(postId).set({'savedAt': FieldValue.serverTimestamp()});
     } else {
@@ -439,6 +442,7 @@ class PostService {
     bool like, {
     bool wasSuper = false,
   }) async {
+    if (like) Closeness.instance.bumpPost(postId, Signal.like);
     final postRef = _posts.doc(postId);
     final likeRef = postRef.collection('likes').doc(_uid);
     final batch = _db.batch();
@@ -461,6 +465,7 @@ class PostService {
     String postId, {
     required bool alreadyLiked,
   }) async {
+    Closeness.instance.bumpPost(postId, Signal.superHeart);
     final postRef = _posts.doc(postId);
     final batch = _db.batch();
     batch.set(postRef.collection('likes').doc(_uid), {
@@ -526,6 +531,7 @@ class PostService {
     String clipId = '',
     String clipThumbRef = '',
   }) async {
+    Closeness.instance.bumpPost(postId, Signal.comment);
     // swear words starred, blocked words and spam stopped
     final clean = Moderation.instance.publicText(text.trim(), what: 'comment');
     final me = await _me();

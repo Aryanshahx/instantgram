@@ -11,6 +11,8 @@ import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/post.dart';
 import '../../services/clip_cache.dart';
+import '../../services/feed_ranker.dart';
+import '../../services/feed_signals.dart';
 import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
 import '../../services/safety_service.dart';
@@ -86,10 +88,51 @@ class ReelsScreen extends StatefulWidget {
 class _ReelsScreenState extends State<ReelsScreen> {
   late final PostPager _pager = PostPager(
     PostService.instance.videoQuery,
-    pageSize: 8,
+    pageSize: 12,
     feed: true,
     first: widget.initialPost,
+    seed: () => TrendingService.instance.load(clips: true),
+    arrange: (page, seeded) =>
+        FeedRanker.instance.arrangeClips(page, trending: seeded),
   );
+
+  // how long the clip on screen has been watched (for the Clips ranking)
+  final Stopwatch _watch = Stopwatch();
+  String _watchId = '';
+
+  void _trackWatch() {
+    final posts = _pager.posts;
+    final cur = _canPlay && _page < posts.length ? posts[_page] : null;
+    if (cur?.id == _watchId) {
+      if (cur != null && !_watch.isRunning) _watch.start();
+      return;
+    }
+    _logWatch();
+    if (cur != null) {
+      _watchId = cur.id;
+      _watch
+        ..reset()
+        ..start();
+    }
+  }
+
+  void _logWatch() {
+    if (_watchId.isEmpty) return;
+    _watch.stop();
+    final p = _pager.posts.where((x) => x.id == _watchId).firstOrNull;
+    if (p != null && p.authorId != SafetyService.instance.me) {
+      final secs = p.isVideo ? p.videoDuration : kPhotoClipSeconds;
+      WatchLog.instance.watched(
+        p.id,
+        p.authorId,
+        _watch.elapsed,
+        Duration(seconds: secs <= 0 ? 15 : secs),
+      );
+    }
+    _watchId = '';
+    _watch.reset();
+  }
+
   final PageController _pages = PageController();
   int _page = 0;
   bool _front = false;
@@ -100,6 +143,9 @@ class _ReelsScreenState extends State<ReelsScreen> {
   void _onFocus() {
     final now = ClipFocus.instance.canPlay(widget.focusToken);
     if (now != _front && mounted) setState(() => _front = now);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _trackWatch();
+    });
   }
 
   bool _headerShown = true;
@@ -111,6 +157,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
     super.initState();
     AppEvents.feedRefresh.addListener(_refresh);
     _pager.addListener(_preload);
+    _pager.addListener(_trackWatch);
     ClipFocus.instance.version.addListener(_onFocus);
     _onFocus();
     // Warm-up: shortly after the app opens, the first clips are fetched quietly so the Clips
@@ -127,7 +174,12 @@ class _ReelsScreenState extends State<ReelsScreen> {
   @override
   void didUpdateWidget(ReelsScreen old) {
     super.didUpdateWidget(old);
-    if (old.active != widget.active) _preload();
+    if (old.active != widget.active) {
+      _preload();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _trackWatch();
+      });
+    }
   }
 
   /// Background preloading: while a clip plays, the next three are downloaded to the phone
@@ -165,10 +217,12 @@ class _ReelsScreenState extends State<ReelsScreen> {
   @override
   void dispose() {
     _warm?.cancel();
+    _logWatch();
     AppEvents.feedRefresh.removeListener(_refresh);
     ClipFocus.instance.version.removeListener(_onFocus);
     _sheetOpen.dispose();
     _pager.removeListener(_preload);
+    _pager.removeListener(_trackWatch);
     if (_wanting) ClipCache.instance.want(const []);
     _pager.dispose();
     _pages.dispose();
@@ -263,6 +317,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
                               _page = i;
                             });
                             _preload();
+                            _trackWatch();
                             if (i >= _pager.posts.length - 3) _pager.loadMore();
                           },
                           itemBuilder: (context, i) {
