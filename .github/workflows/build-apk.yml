@@ -42,6 +42,21 @@ jobs:
         run: flutter test
         continue-on-error: true      # remove once you have real tests
 
+      - name: Install Android NDK (with retries)
+        # instantgram: ndk with retries
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          NDK=$(grep -rhoP --exclude-dir=test --exclude-dir=tests 'ndkVersion\s*(:\s*String)?\s*=\s*"\K[0-9.]+' "$FLUTTER_ROOT/packages/flutter_tools/gradle" 2>/dev/null | head -1 || true)
+          NDK="${NDK:-28.2.13676358}"
+          echo "NDK $NDK"
+          for i in 1 2 3 4 5; do
+            if [ -f "$SDK/ndk/$NDK/source.properties" ]; then echo "NDK ready"; exit 0; fi
+            rm -rf "$SDK/ndk/$NDK" "$SDK/.temp" "$SDK/.downloadIntermediates"
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK" > /tmp/ndk.log 2>&1 || tail -5 /tmp/ndk.log
+            [ -f "$SDK/ndk/$NDK/source.properties" ] && { echo "NDK ready"; exit 0; }
+            echo "NDK download broken, try $i again in 15 s"; sleep 15
+          done
+          exit 1
       - name: Build release APK (split per ABI)
         run: flutter build apk --release --split-per-abi
 
