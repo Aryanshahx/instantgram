@@ -99,8 +99,9 @@ class WordFilter {
       }
       if (w.endsWith('*')) {
         final stem = normalizeToken(w.substring(0, w.length - 1));
-        if (stem.length >= 3)
+        if (stem.length >= 3) {
           _stems[stem] = isBlocked || (_stems[stem] ?? false);
+        }
         return;
       }
       final n = normalizeToken(w);

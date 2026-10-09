@@ -12,6 +12,7 @@ import '../../core/ui.dart';
 import '../../models/audience.dart';
 import '../../models/music.dart';
 import '../../models/story.dart';
+import '../../services/image_check.dart';
 import '../../services/push_service.dart';
 import '../../services/device_audio.dart';
 import '../../services/media_service.dart';
@@ -248,6 +249,7 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
   void initState() {
     super.initState();
     if (_isVideo) _initVideo();
+    ImageCheck.instance.warmUp(); // the photo check model, downloaded once
   }
 
   Future<void> _initVideo() async {
@@ -397,8 +399,18 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
     try {
       // a sound from the phone goes up together with the moment
       final track = _track;
+      // the photo check runs on the phone (the model is downloaded once)
+      final media = widget.image ?? widget.video!;
+      final safety = (await ImageCheck.instance.check([
+        CheckItem(
+          media,
+          video: widget.image == null,
+          durationMs: widget.seconds * 1000,
+        ),
+      ])).toFields();
       final sent = track == null ? null : await DeviceAudio.upload(track);
       await StoryService.instance.addStory(
+        safety: safety,
         image: widget.image,
         video: widget.video,
         thumb: widget.thumb,

@@ -5,6 +5,7 @@ import '../core/theme.dart';
 import '../models/post.dart';
 import 'inline_video.dart';
 import 'post_carousel.dart';
+import 'sensitive_gate.dart';
 import 'video_thumb.dart';
 
 /// Photos and clips in their real proportions (no fixed crop). Square corners.
@@ -110,11 +111,13 @@ class _PostMediaState extends State<PostMedia> {
     super.dispose();
   }
 
-  Widget _content(BuildContext context) {
+  Widget _content(BuildContext context, {bool shown = true}) {
+    // a blurred clip does not play until "Tap to view"
+    final inline = widget.inline && shown;
     if (post.isCarousel) {
       return PostCarousel(
         post: post,
-        inline: widget.inline,
+        inline: inline,
         showSound: widget.showSound,
       );
     }
@@ -129,10 +132,10 @@ class _PostMediaState extends State<PostMedia> {
               post: post,
               playSize: widget.playSize,
               fit: BoxFit.contain,
-              showPlay: !widget.inline,
+              showPlay: !inline,
             ),
             // in the feed the clip plays by itself while it is on screen
-            if (widget.inline)
+            if (inline)
               InlineVideoLayer(post: post, showSound: widget.showSound),
           ],
         ),
@@ -152,7 +155,7 @@ class _PostMediaState extends State<PostMedia> {
       ),
     );
     // a photo with music: the music plays while it is on screen, with a speaker button
-    if (widget.inline && post.hasMusic) {
+    if (inline && post.hasMusic) {
       return Stack(
         fit: StackFit.expand,
         children: [
@@ -187,7 +190,17 @@ class _PostMediaState extends State<PostMedia> {
           }
           return Center(
             heightFactor: 1,
-            child: SizedBox(width: w, height: h, child: _content(context)),
+            child: SizedBox(
+              width: w,
+              height: h,
+              child: SensitiveGate(
+                id: post.id,
+                authorId: post.authorId,
+                sensitive: post.sensitive,
+                compact: widget.playSize < 64,
+                builder: (context, shown) => _content(context, shown: shown),
+              ),
+            ),
           );
         },
       ),

@@ -193,6 +193,7 @@ function userRow(d) {
     online: u.online === true, banned: u.banned === true, posts: num(u.postsCount),
     followers: num(u.followersCount), following: num(u.followingCount), bio: str(u.bio), private: u.isPrivate === true,
     verified: u.verified === true, bannedUntil: when(u.bannedUntil), warnings: num(u.warnings),
+    trust: typeof u.trust === "number" ? u.trust : null, strikes: num(u.strikes), flags: num(u.flags),
   };
 }
 
@@ -203,7 +204,8 @@ function postRow(d) {
     caption: str(p.caption).slice(0, 300), createdAt: when(p.createdAt),
     image: str(p.thumbnailUrl) || str(p.imageUrl) || (Array.isArray(p.media) && p.media[0] ? str(p.media[0].th) || str(p.media[0].u) : ""),
     video: str(p.videoUrl), likes: num(p.likeCount), comments: num(p.commentCount), views: num(p.viewCount),
-    reports: num(p.reportCount), hidden: p.hidden === true,
+    reports: num(p.reportCount), weight: num(p.reportWeight), hidden: p.hidden === true,
+    sensitive: p.sensitive === true, nsfw: num(p.nsfw), imgCheck: str(p.imgCheck),
   };
 }
 
@@ -322,6 +324,7 @@ async function ban(ctx, body) {
   const until = days > 0 ? new Date(ctx.nowMs + days * 86400_000) : null;
   await ctx.auth.setDisabled(uid, on && !until);
   await ctx.db.write([{ set: `users/${uid}`, data: { banned: on, bannedReason: on ? str(body.reason).slice(0, 200) : "", bannedUntil: until } }]);
+  await refreshTrust(ctx, uid).catch(() => {});
   return { ok: true, banned: on, until: when(until) };
 }
 
@@ -705,6 +708,7 @@ async function verify(ctx, body) {
   const uid = needUid(body.uid);
   const on = body.on !== false;
   await ctx.db.write([{ set: `users/${uid}`, data: { verified: on } }]);
+  await refreshTrust(ctx, uid).catch(() => {});
   return { ok: true, verified: on };
 }
 
@@ -727,7 +731,10 @@ async function notifyUser(ctx, body) {
     type: warn ? "warning" : "admin", actorId: "", actorName: "InstantGram", actorPhoto: "",
     postId: "", thumb: image, text, title, at: new Date(ctx.nowMs), read: false,
   } }]);
-  if (warn) await ctx.db.write([{ set: `users/${uid}`, data: {}, add: { warnings: 1 } }]);
+  if (warn) {
+    await ctx.db.write([{ set: `users/${uid}`, data: {}, add: { warnings: 1 } }]);
+    await refreshTrust(ctx, uid).catch(() => {});
+  }
   let sent = 0;
   const reg = await ctx.db.get(`pushTokens/${uid}`);
   const tokens = reg && reg.data.off !== true && Array.isArray(reg.data.tokens) ? reg.data.tokens.filter((t) => typeof t === "string").slice(-5) : [];
@@ -857,7 +864,7 @@ async function uploadImage(ctx, body) {
 async function hidePost(ctx, body) {
   const id = needId(body.id);
   const on = body.on !== false;
-  await ctx.db.write([{ set: `posts/${id}`, data: on ? { hidden: true } : { hidden: false, reportCount: 0 } }]);
+  await ctx.db.write([{ set: `posts/${id}`, data: on ? { hidden: true } : { hidden: false, reportCount: 0, reportWeight: 0 } }]);
   return { ok: true, hidden: on };
 }
 
@@ -892,6 +899,61 @@ async function blockedEmails(ctx, body) {
 const SCAN_PAGE = 200;
 const cleanList = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === "string").map((x) => x.trim().toLowerCase()).filter((x) => x && x.length <= 60))].slice(0, 2000) : []);
 
+/** What the phone's photo check left on a post that needs a look (null = nothing). */
+export function imageFlag(p) {
+  const n = num(p.nsfw);
+  if (p.sensitive === true && n >= 0.85) return { severity: "image", words: [`nudity ${Math.round(n * 100)}%`] };
+  if (p.imgCheck === "skipped") return { severity: "unchecked", words: ["photo not checked"] };
+  return null;
+}
+
+/** 0-100: how much an account is trusted. New accounts start near 40; age, followers and
+ *  posts add, warnings, removed posts (strikes) and blocked words (flags) take away.
+ *  Under 25 a report counts half, from 75 one and a half (see the Firestore rules). */
+export function trustOf(u, nowMs) {
+  if (!u || u.banned === true) return 0;
+  const created = u.createdAt instanceof Date ? u.createdAt.getTime() : nowMs;
+  const days = Math.max(0, (nowMs - created) / DAY);
+  let t = 40
+    + Math.min(20, days / 3)
+    + Math.min(10, 4 * Math.log10(1 + num(u.followersCount)))
+    + Math.min(10, 2 * num(u.postsCount))
+    + (u.verified === true ? 15 : 0)
+    - 15 * num(u.strikes) - 10 * num(u.warnings) - 5 * num(u.flags);
+  return Math.round(Math.max(0, Math.min(100, t)));
+}
+
+const TRUST_PAGE = 300;
+
+/** Works out the trust of one page of accounts; only changed numbers are written. */
+async function trustSweep(ctx, pageToken = "") {
+  const page = await ctx.db.list("users", TRUST_PAGE, pageToken);
+  const writes = [];
+  for (const d of page.docs) {
+    const t = trustOf(d.data, ctx.nowMs);
+    if (d.data.trust !== t) writes.push({ set: `users/${d.id}`, data: { trust: t } });
+  }
+  for (let i = 0; i < writes.length; i += 200) await ctx.db.write(writes.slice(i, i + 200));
+  return { changed: writes.length, next: page.next || "" };
+}
+
+/** Trust of one account again (after a warning, a removed post, a ban...). */
+async function refreshTrust(ctx, uid) {
+  if (!UIDRE.test(String(uid || ""))) return null;
+  const d = await ctx.db.get(`users/${uid}`);
+  if (!d) return null;
+  const t = trustOf(d.data, ctx.nowMs);
+  if (d.data.trust !== t) await ctx.db.write([{ set: `users/${uid}`, data: { trust: t } }]);
+  return t;
+}
+
+/** Panel: work out everybody's trust now (a page at a time). */
+async function trust(ctx, body) {
+  if (body.uid) return { ok: true, trust: await refreshTrust(ctx, needUid(body.uid)) };
+  const r = await trustSweep(ctx, str(body.next));
+  return { ok: true, changed: r.changed, next: r.next || null };
+}
+
 /** Checks what was posted since the last scan with the word rules (also old or changed apps).
  *  Blocked words: the post is hidden at once. Anything found goes to the review queue. */
 async function modScan(ctx) {
@@ -908,10 +970,19 @@ async function modScan(ctx) {
   const posts = await ctx.db.query("posts", { where: [["createdAt", ">", postsAt]], orderBy: [["createdAt", "asc"]], limit: SCAN_PAGE });
   for (const d of posts) {
     const r = f.scan(str(d.data.caption));
-    if (r.clean) continue;
-    const words = [...r.phrases, ...r.hits.map((h) => h.word)].slice(0, 10);
-    await flag(`post_${d.id}`, { kind: "post", postId: d.id, uid: str(d.data.authorId), author: str(d.data.authorUsername), text: str(d.data.caption).slice(0, 500), words, severity: r.blocked ? "blocked" : "mild" });
-    if (r.blocked) await ctx.db.write([{ set: `posts/${d.id}`, data: { hidden: true } }]);
+    const base = { kind: "post", postId: d.id, uid: str(d.data.authorId), author: str(d.data.authorUsername), text: str(d.data.caption).slice(0, 500) };
+    if (!r.clean) {
+      const words = [...r.phrases, ...r.hits.map((h) => h.word)].slice(0, 10);
+      await flag(`post_${d.id}`, { ...base, words, severity: r.blocked ? "blocked" : "mild" });
+      if (r.blocked) {
+        await ctx.db.write([{ set: `posts/${d.id}`, data: { hidden: true } }]);
+        await ctx.db.write([{ set: `users/${base.uid}`, data: {}, add: { flags: 1 } }]).catch(() => {});
+      }
+      continue;
+    }
+    // the phone's photo check: likely nudity (blurred for others) or not checked at all
+    const img = imageFlag(d.data);
+    if (img) await flag(`post_${d.id}`, { ...base, words: img.words, severity: img.severity });
   }
   const users = await ctx.db.query("users", { where: [["createdAt", ">", usersAt]], orderBy: [["createdAt", "asc"]], limit: SCAN_PAGE });
   for (const d of users) {
@@ -924,8 +995,19 @@ async function modScan(ctx) {
     await flag(`user_${d.id}`, { kind: "user", uid: d.id, author: name, text: `${full}${bio ? " · " + bio : ""}`.slice(0, 500), words, severity: "name" });
   }
   const last = (rows, f2, old) => (rows.length && rows[rows.length - 1].data[f2] instanceof Date ? rows[rows.length - 1].data[f2] : old);
-  await ctx.db.write([{ put: "config/modscan", data: { postsAt: last(posts, "createdAt", postsAt), usersAt: last(users, "createdAt", usersAt), at: new Date(ctx.nowMs) } }]);
-  return { ok: true, scanned: posts.length + users.length, flagged, more: posts.length === SCAN_PAGE || users.length === SCAN_PAGE };
+  // trust scores: worked out again for everybody once a day (a page per scan)
+  const trustAt = state && state.data.trustAt instanceof Date ? state.data.trustAt.getTime() : 0;
+  let cursor = state ? str(state.data.trustCursor) : "";
+  let trusted = 0;
+  let newTrustAt = state && state.data.trustAt instanceof Date ? state.data.trustAt : null;
+  if (cursor || ctx.nowMs - trustAt > DAY) {
+    const r = await trustSweep(ctx, cursor);
+    trusted = r.changed;
+    cursor = r.next;
+    if (!cursor) newTrustAt = new Date(ctx.nowMs);
+  }
+  await ctx.db.write([{ put: "config/modscan", data: { postsAt: last(posts, "createdAt", postsAt), usersAt: last(users, "createdAt", usersAt), at: new Date(ctx.nowMs), trustAt: newTrustAt, trustCursor: cursor } }]);
+  return { ok: true, scanned: posts.length + users.length, flagged, trusted, more: posts.length === SCAN_PAGE || users.length === SCAN_PAGE };
 }
 
 async function modQueue(ctx, body) {
@@ -943,13 +1025,21 @@ async function modQueue(ctx, body) {
 
 async function modResolve(ctx, body) {
   const id = needId(body.id);
-  const action = ["approved", "removed", "warned", "hidden", "renamed"].includes(body.action) ? body.action : "approved";
+  const action = ["approved", "removed", "warned", "hidden", "renamed", "unblurred", "blurred"].includes(body.action) ? body.action : "approved";
   const d = await ctx.db.get(`modQueue/${id}`);
   if (!d) throw new AdminError("Already gone.", 404);
   const writes = [{ set: `modQueue/${id}`, data: { status: "done", action, doneAt: new Date(ctx.nowMs) } }];
-  if (action === "approved" && d.data.kind === "post" && ID.test(str(d.data.postId))) writes.push({ set: `posts/${d.data.postId}`, data: { hidden: false } });
+  const postId = d.data.kind === "post" && ID.test(str(d.data.postId)) ? d.data.postId : "";
+  if (postId && action === "approved") writes.push({ set: `posts/${postId}`, data: { hidden: false } });
+  // "Not nudity": the blur comes off; "Blur it": a photo the phone missed gets the blur
+  if (postId && action === "unblurred") writes.push({ set: `posts/${postId}`, data: { hidden: false, sensitive: false } });
+  if (postId && action === "blurred") writes.push({ set: `posts/${postId}`, data: { hidden: false, sensitive: true } });
+  // a removed or hidden post, or a rude username, is a strike on the account
+  const uid = str(d.data.uid);
+  if (UIDRE.test(uid) && ["removed", "hidden", "renamed"].includes(action)) writes.push({ set: `users/${uid}`, data: {}, add: { strikes: 1 } });
   await ctx.db.write(writes);
-  return { ok: true };
+  const t = UIDRE.test(uid) ? await refreshTrust(ctx, uid).catch(() => null) : null;
+  return { ok: true, trust: t };
 }
 
 /** The panel's word lists (added to the built-in ones) and words that are fine after all. */
@@ -985,7 +1075,7 @@ export const PANEL_OPS = {
   reports, resolveReport, broadcast, deleteAccount,
   charts, verify, notifyUser, resetUsername, resetPhoto, devices, searchPosts, chat, deleteMessage,
   uploadImage, hidePost, config, blockedEmails,
-  modScan, modQueue, modResolve, modWords, modTest,
+  modScan, modQueue, modResolve, modWords, modTest, trust,
 };
 
 /** ctx = {db, auth, store, push, wipeFiles, nowMs, budgetMs, publicBase} */

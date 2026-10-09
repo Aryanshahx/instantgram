@@ -60,6 +60,7 @@ dependencies:
   image: ^4.10.1
   firebase_messaging: ^16.7.0
   flutter_secure_storage: ^10.3.4
+  tflite_flutter: ^0.12.1
 
 dev_dependencies:
   flutter_test:

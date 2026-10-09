@@ -31,11 +31,12 @@ class RateLimits {
       final m = jsonDecode(AppPrefs.instance.rateLog);
       if (m is Map) {
         m.forEach((k, v) {
-          if (k is String && v is List)
+          if (k is String && v is List) {
             out[k] = [
               for (final x in v)
                 if (x is int) x,
             ];
+          }
         });
       }
     } catch (_) {}

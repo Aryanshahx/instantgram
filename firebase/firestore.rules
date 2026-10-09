@@ -5,6 +5,12 @@ service cloud.firestore {
     function signedIn() {
       return request.auth != null;
     }
+    // a report's weight matches the reporter's trust (set by the admin panel, 50 until then):
+    // under 25 = 1, under 75 = 2, else 3 (the app's reportPoints() does the same)
+    function reportPointsOk(points) {
+      let t = get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('trust', 50);
+      return (t < 25 && points == 1) || (t >= 25 && t < 75 && points == 2) || (t >= 75 && points == 3);
+    }
     // true if the write only touches the listed fields
     function onlyChanges(keys) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
@@ -26,7 +32,7 @@ service cloud.firestore {
       allow read: if signedIn();
       // emails blocked in the admin panel cannot make a new profile
       allow create: if signedIn() && request.auth.uid == uid && !('banned' in request.resource.data)
-        && !request.resource.data.keys().hasAny(['verified', 'bannedUntil', 'warnings'])
+        && !request.resource.data.keys().hasAny(['verified', 'bannedUntil', 'warnings', 'trust', 'strikes', 'flags'])
         && !(request.auth.token.email is string
              && exists(/databases/$(database)/documents/blockedEmails/$(request.auth.token.email.lower())));
       // owner edits anything except the ban (only the admin panel sets it);
@@ -34,7 +40,7 @@ service cloud.firestore {
       allow update: if signedIn() && (
         (request.auth.uid == uid &&
           !request.resource.data.diff(resource.data).affectedKeys().hasAny(['banned', 'bannedReason'])
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['verified', 'bannedUntil', 'warnings'])) ||
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['verified', 'bannedUntil', 'warnings', 'trust', 'strikes', 'flags'])) ||
         onlyChanges(['followersCount']));
       allow delete: if false;
 
@@ -150,15 +156,21 @@ service cloud.firestore {
     match /posts/{postId} {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.authorId == request.auth.uid
-        && !request.resource.data.keys().hasAny(['hidden', 'reportCount']);
-      // author edits anything but the report fields; anyone may change like/comment counters;
-      // a report adds exactly 1 to reportCount, once per person (the reporters/{uid} doc)
+        && !request.resource.data.keys().hasAny(['hidden', 'reportCount', 'reportWeight']);
+      // author edits anything but the report fields and the photo check result; anyone may
+      // change like/comment counters; a report adds exactly 1 to reportCount and the
+      // reporter's weight (1, 2 or 3 by their trust) to reportWeight, once per person
       allow update: if signedIn() && (
         (resource.data.authorId == request.auth.uid
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['hidden', 'reportCount']))
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['hidden', 'reportCount', 'reportWeight', 'sensitive', 'nsfw', 'imgCheck']))
         || onlyChanges(['likeCount', 'superCount', 'commentCount', 'viewCount', 'shareCount', 'repostCount'])
         || (onlyChanges(['reportCount'])
             && request.resource.data.reportCount == resource.data.get('reportCount', 0) + 1
+            && !exists(/databases/$(database)/documents/posts/$(postId)/reporters/$(request.auth.uid))
+            && existsAfter(/databases/$(database)/documents/posts/$(postId)/reporters/$(request.auth.uid)))
+        || (onlyChanges(['reportCount', 'reportWeight'])
+            && request.resource.data.reportCount == resource.data.get('reportCount', 0) + 1
+            && reportPointsOk(request.resource.data.reportWeight - resource.data.get('reportWeight', 0))
             && !exists(/databases/$(database)/documents/posts/$(postId)/reporters/$(request.auth.uid))
             && existsAfter(/databases/$(database)/documents/posts/$(postId)/reporters/$(request.auth.uid))));
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;

@@ -20,6 +20,7 @@ import '../../widgets/highlights.dart';
 import '../../widgets/like_button.dart'
     show kSuperHeartColor, showSuperHeartBurst;
 import '../../widgets/music_widgets.dart';
+import '../../widgets/sensitive_gate.dart';
 import '../../widgets/story_overlays.dart';
 import '../../widgets/story_viewers_sheet.dart';
 
@@ -152,6 +153,14 @@ class _GroupPlayerState extends State<_GroupPlayer>
     _anim.addStatusListener((s) {
       if (s == AnimationStatus.completed) _next();
     });
+    sensitiveTick.addListener(_onReveal);
+  }
+
+  /// Flagged by the photo check: blurred and paused until "Tap to view".
+  bool get _blurred => isBlurred(_story.id, _story.authorId, _story.sensitive);
+
+  void _onReveal() {
+    if (!_blurred) _resume();
   }
 
   @override
@@ -235,7 +244,7 @@ class _GroupPlayerState extends State<_GroupPlayer>
       StoryViews.instance.record(story);
       _loadLike(story, gen);
     }
-    if (!_holding) {
+    if (!_holding && !_blurred) {
       _anim.forward(from: 0);
       _vc?.play();
       _music?.play();
@@ -253,6 +262,7 @@ class _GroupPlayerState extends State<_GroupPlayer>
 
   @override
   void dispose() {
+    sensitiveTick.removeListener(_onReveal);
     _gen++;
     _anim.dispose();
     _vc?.dispose();
@@ -306,7 +316,7 @@ class _GroupPlayerState extends State<_GroupPlayer>
   }
 
   void _resume() {
-    if (mounted && _loaded && !_holding) {
+    if (mounted && _loaded && !_holding && !_blurred) {
       _anim.forward();
       _vc?.play();
       _music?.play();
@@ -529,7 +539,15 @@ class _GroupPlayerState extends State<_GroupPlayer>
               ),
             )
           else
-            StoryCanvas(media: _media(story), overlays: story.overlays),
+            SensitiveGate(
+              id: story.id,
+              authorId: story.authorId,
+              sensitive: story.sensitive,
+              child: StoryCanvas(
+                media: _media(story),
+                overlays: story.overlays,
+              ),
+            ),
           if (!_mine && _hl == null && _loaded && !_failed) _heart(),
           if (_mine && _hl == null)
             Positioned(

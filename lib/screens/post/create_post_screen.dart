@@ -21,6 +21,7 @@ import '../../models/finish.dart';
 import '../../models/music.dart';
 import '../../models/post.dart';
 import '../../models/story.dart' show StoryOverlay, kMaxStorySeconds;
+import '../../services/image_check.dart';
 import '../../services/push_service.dart';
 import '../../services/video_frames.dart';
 import '../../services/audio_merger.dart';
@@ -205,6 +206,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   @override
   void initState() {
     super.initState();
+    ImageCheck.instance.warmUp(); // the photo check model, downloaded once
     final dbgs = <File>[?widget.debugImage, ...?widget.debugImages];
     for (final f in dbgs) {
       _items.add(_Item.photo(f, f.lengthSync()));
@@ -804,6 +806,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   bool _willShrink(_Item it) =>
       it.bytes > kMaxVideoMb * 1024 * 1024 || it.videoEdits != null;
 
+  /// The photo check result of the post being shared (also used for its moment).
+  Map<String, Object> _safety = const {};
+
   Future<void> _share() async {
     FocusScope.of(context).unfocus();
     final chosen = _chosen;
@@ -832,6 +837,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _sentMusic = null;
     var music = _music;
     try {
+      // the photo check runs on the phone (the model is downloaded once)
+      if (mounted) setState(() => _stage = 'Checking photos...');
+      final safety = (await ImageCheck.instance.check([
+        for (final it in chosen)
+          CheckItem(
+            it.file,
+            video: it.video,
+            durationMs: it.secondsFull * 1000,
+          ),
+      ])).toFields();
+      _safety = safety;
       // what a moment made from this post would show
       String storyImage = '';
       String storyVideo = '';
@@ -872,6 +888,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           musicStart: _audio.songStart,
           clip: _photoClip,
           clipSeconds: kPhotoClipSeconds,
+          safety: safety,
         );
       } else {
         final up = await _uploadAll(chosen);
@@ -894,6 +911,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             musicBaked: _baked,
             finish: chosen.first.finish,
             options: _options,
+            safety: safety,
           );
           storyVideo = r.ref;
           storyThumb = r.thumbRef;
@@ -917,6 +935,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             musicVolume: kMusicVolume * _audio.songVolume,
             musicStart: _audio.songStart,
             keepSound: _keepSound,
+            safety: safety,
           );
         }
       }
@@ -969,6 +988,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         musicArtist: (m?.remote ?? false) && !_baked ? m!.artist : '',
         musicVolume: kMusicVolume,
         keepSound: _keepSound,
+        safety: _safety,
       );
     } catch (e) {
       if (mounted) {

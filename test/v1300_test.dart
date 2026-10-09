@@ -260,7 +260,7 @@ void main() {
       expect(r, contains('match /reporters/{uid}'));
       expect(r, contains('match /dailyStats/{day}'));
       expect(r, contains('match /config/{doc}'));
-      expect(r, contains("hasAny(['verified', 'bannedUntil', 'warnings'])"));
+      expect(r, contains("hasAny(['verified', 'bannedUntil', 'warnings'"));
       expect(r, contains("'chatId'"));
     });
 

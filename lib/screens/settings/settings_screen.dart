@@ -108,6 +108,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           (c, _) => openScreen(c, const BlockedScreen()),
         ),
         _Item(
+          'sensitive',
+          Icons.visibility_off_outlined,
+          'Sensitive content',
+          'nudity blur tap to view photo check',
+          (c, _) => openScreen(c, const SensitiveContentScreen()),
+        ),
+        _Item(
           'delete',
           Icons.delete_forever_rounded,
           'Delete account',

@@ -72,7 +72,7 @@ class SafetyService {
   bool canSee(Post p) {
     if (p.authorId == me) return true;
     if (p.hidden) return false;
-    if (autoHide > 0 && p.reportCount >= autoHide) return false;
+    if (autoHide > 0 && p.effectiveReports >= autoHide) return false;
     if (blocked.value.contains(p.authorId)) return false;
     if (p.audience == kAudienceMe) return false;
     if (p.audience == kAudienceFollowers || p.authorPrivate) {

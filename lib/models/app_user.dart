@@ -5,6 +5,12 @@ import '../core/fonts.dart';
 int _int(Object? v) => v is num ? v.toInt() : 0;
 String _str(Object? v) => v is String ? v : '';
 
+/// Trust of an account the admin panel has not looked at yet (the rules use the same).
+const int kDefaultTrust = 50;
+
+/// How much one report counts (the Firestore rules check the same steps).
+int reportPoints(int trust) => trust < 25 ? 1 : (trust < 75 ? 2 : 3);
+
 class AppUser {
   const AppUser({
     required this.uid,
@@ -28,6 +34,7 @@ class AppUser {
     this.banned = false,
     this.bannedUntil,
     this.verified = false,
+    this.trust = kDefaultTrust,
   });
 
   /// Set by the admin panel: a suspension for some days ends at this time (null = for good).
@@ -86,6 +93,10 @@ class AppUser {
   /// Set by the admin panel: the account is suspended (sign-in is blocked as well).
   final bool banned;
 
+  /// 0-100, worked out by the admin panel (account age, followers, posts, warnings,
+  /// removed posts). It decides how much this person's reports count.
+  final int trust;
+
   factory AppUser.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
     final m = d.data() ?? const <String, dynamic>{};
     return AppUser(
@@ -120,6 +131,9 @@ class AppUser {
           ? (m['bannedUntil'] as Timestamp).toDate()
           : null,
       verified: m['verified'] == true,
+      trust: m['trust'] is num
+          ? (m['trust'] as num).round().clamp(0, 100)
+          : kDefaultTrust,
       lastActive: m['lastActive'] is Timestamp
           ? (m['lastActive'] as Timestamp).toDate()
           : null,

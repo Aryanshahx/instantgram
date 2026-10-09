@@ -11,6 +11,7 @@ import '../../core/responsive.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/app_user.dart';
+import '../../services/image_check.dart';
 import '../../services/media_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
@@ -79,12 +80,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Future<void> _pickPhoto() async {
     try {
       final f = await MediaService.pickAvatar(ImageSource.gallery);
-      if (f != null && mounted) {
-        setState(() {
-          _photo = f;
-          _removePhoto = false;
-        });
-      }
+      if (f == null || !mounted) return;
+      // nudity is not allowed here (checked on the phone)
+      await ImageCheck.instance.checkAvatar(f, what: 'profile photo');
+      if (!mounted) return;
+      setState(() {
+        _photo = f;
+        _removePhoto = false;
+      });
+    } on ModerationException catch (e) {
+      if (mounted) showToast(context, e.message);
     } catch (_) {
       if (mounted) showToast(context, 'Could not open the gallery.');
     }
@@ -93,12 +98,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Future<void> _pickBanner() async {
     try {
       final f = await MediaService.pickBanner(ImageSource.gallery);
-      if (f != null && mounted) {
-        setState(() {
-          _banner = f;
-          _removeBanner = false;
-        });
-      }
+      if (f == null || !mounted) return;
+      // nudity is not allowed here (checked on the phone)
+      await ImageCheck.instance.checkAvatar(f, what: 'cover photo');
+      if (!mounted) return;
+      setState(() {
+        _banner = f;
+        _removeBanner = false;
+      });
+    } on ModerationException catch (e) {
+      if (mounted) showToast(context, e.message);
     } catch (_) {
       if (mounted) showToast(context, 'Could not open the gallery.');
     }

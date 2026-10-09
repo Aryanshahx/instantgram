@@ -119,6 +119,7 @@ class StoryService {
     bool longer = false,
     StoryAudience audience = const StoryAudience.everyone(),
     bool spotlight = false,
+    Map<String, Object> safety = const {},
     void Function(double progress)? onProgress,
   }) async {
     if ((image == null) == (video == null)) {
@@ -134,6 +135,7 @@ class StoryService {
       'authorPhotoUrl': me.photoUrl,
       'createdAt': FieldValue.serverTimestamp(),
       'expiresAt': Timestamp.fromDate(storyExpiry(DateTime.now(), longer)),
+      ...safety,
       if (overlays.isNotEmpty)
         'overlays': [for (final o in overlays.take(20)) o.toMap()],
       if (musicId.isNotEmpty) ...{
@@ -224,10 +226,12 @@ class StoryService {
     bool longer = false,
     StoryAudience audience = const StoryAudience.everyone(),
     bool spotlight = false,
+    Map<String, Object> safety = const {},
   }) async {
     final me = await UserService.instance.getUser(_uid);
     if (me == null) throw StateError('Profile not found');
     await _colFor(audience).doc().set({
+      ...safety,
       ..._audienceFields(audience, spotlight),
       'authorId': _uid,
       'authorUsername': me.username,

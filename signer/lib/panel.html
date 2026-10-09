@@ -399,8 +399,9 @@ async function loadUsers(fresh) {
     $("#usersMore").classList.toggle("hide", !usersNext);
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
+const trustTag = (t) => (t === null || t === undefined ? "" : `<span class="tag ${t < 25 ? "ban" : t >= 75 ? "ver" : ""}" title="Trust: how much this account's reports count">trust ${t}</span>`);
 const userRow = (u) => `<div class="urow" data-uid="${esc(u.uid)}">${avatar(u)}<div class="grow" style="min-width:0">
-  <div><b>@${esc(u.username || "?")}</b>${u.online && u.lastActive && Date.now() - new Date(u.lastActive) < 240000 ? '<span class="tag on">online</span>' : ""}${u.verified ? '<span class="tag ver">verified</span>' : ""}${u.banned ? `<span class="tag ban">${u.bannedUntil ? "suspended" : "banned"}</span>` : ""}${u.warnings ? `<span class="tag warnt">${u.warnings} warning${u.warnings > 1 ? "s" : ""}</span>` : ""}${u.private ? '<span class="tag">private</span>' : ""}</div>
+  <div><b>@${esc(u.username || "?")}</b>${u.online && u.lastActive && Date.now() - new Date(u.lastActive) < 240000 ? '<span class="tag on">online</span>' : ""}${u.verified ? '<span class="tag ver">verified</span>' : ""}${u.banned ? `<span class="tag ban">${u.bannedUntil ? "suspended" : "banned"}</span>` : ""}${u.warnings ? `<span class="tag warnt">${u.warnings} warning${u.warnings > 1 ? "s" : ""}</span>` : ""}${u.private ? '<span class="tag">private</span>' : ""}${trustTag(u.trust)}</div>
   <div class="muted small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.fullName)} ${u.email ? "· " + esc(u.email) : ""}</div></div>
   <div class="small muted" style="text-align:right">${u.posts} posts · ${u.followers} followers<br>joined ${ago(u.createdAt)} · seen ${ago(u.lastActive)}</div></div>`;
 $("#users").onclick = (e) => { const r = e.target.closest(".urow"); if (r) openUser(r.dataset.uid); };
@@ -433,6 +434,7 @@ async function openUser(uid) {
         <div>Last active</div><div>${ago(u.lastActive)}</div>
         <div>Counts</div><div>${u.posts || 0} posts · ${u.followers || 0} followers · ${u.following || 0} following</div>
         <div>Reports</div><div>${j.reports} about this account's content</div>
+        <div>Trust</div><div>${u.trust === null || u.trust === undefined ? "not worked out yet (counts as 50)" : `<b>${u.trust}</b> / 100`} · ${u.strikes || 0} strike${u.strikes === 1 ? "" : "s"} · ${u.flags || 0} blocked-word post${u.flags === 1 ? "" : "s"} <button class="btn sm" data-trust>Recalculate</button><div class="small muted">Under 25 their reports count half, from 75 one and a half.</div></div>
         ${u.banned && u.bannedReason ? `<div>Ban reason</div><div>${esc(u.bannedReason)}</div>` : ""}
       </div>
       <div class="row wrap">
@@ -459,6 +461,7 @@ async function openUser(uid) {
     const sus = $("[data-suspend]", pane); if (sus) sus.onclick = () => suspendUser(u);
     $("[data-msg]", pane).onclick = () => composeTo(u, false);
     $("[data-warn]", pane).onclick = () => composeTo(u, true);
+    $("[data-trust]", pane).onclick = async () => { try { const r = await api("trust", { uid: u.uid }); toast(`Trust: ${r.trust}`); openUser(u.uid); } catch (er) { toast(er.message, true); } };
     $("[data-verify]", pane).onclick = async () => {
       try { await api("verify", { uid: u.uid, on: $("[data-verify]", pane).dataset.verify === "1" }); toast("Saved."); openUser(u.uid); } catch (e) { toast(e.message, true); }
     };
@@ -606,11 +609,11 @@ function deleteAccount(u) {
 // -------------------------------------------------------------------- posts
 let postKind = "", postsNext = null;
 const postCard = (p) => `<div class="pc" data-post="${esc(p.id)}">
-  <div class="media">${media(p)}<span class="kind">${kindName(p.type)}${p.hidden ? " · hidden" : ""}</span><input type="checkbox" class="sel" data-pick="${esc(p.id)}" title="Select"></div>
+  <div class="media">${media(p)}<span class="kind">${kindName(p.type)}${p.hidden ? " · hidden" : ""}${p.sensitive ? " · blurred" : ""}</span><input type="checkbox" class="sel" data-pick="${esc(p.id)}" title="Select"></div>
   <div class="body">
     <div class="row"><span class="who" data-user="${esc(p.authorId)}">@${esc(p.author)}</span><span class="grow"></span><span class="small muted">${ago(p.createdAt)}</span></div>
     <div class="cap">${esc(p.caption) || '<i>no caption</i>'}</div>
-    <div class="small muted">♥ ${p.likes} · 💬 ${p.comments}${p.views ? ` · ▶ ${p.views}` : ""}${p.reports ? ` · <span style="color:var(--amber)">⚑ ${p.reports}</span>` : ""}</div>
+    <div class="small muted">♥ ${p.likes} · 💬 ${p.comments}${p.views ? ` · ▶ ${p.views}` : ""}${p.reports ? ` · <span style="color:var(--amber)" title="reports (weighted by the reporters' trust: ${p.weight / 2 || p.reports})">⚑ ${p.reports}</span>` : ""}</div>
     <div class="acts"><button class="btn sm" data-comments="${esc(p.id)}">Comments</button><button class="btn sm" data-hide="${esc(p.id)}" data-on="${p.hidden ? 0 : 1}">${p.hidden ? "Unhide" : "Hide"}</button><span class="grow"></span><button class="btn sm red" data-delpost="${esc(p.id)}">Delete</button></div>
   </div></div>`;
 async function loadPosts(fresh) {
@@ -894,7 +897,8 @@ async function loadReview() {
     box._data = j;
     box.innerHTML = j.items.map((r) => {
       const p = r.postId ? j.posts[r.postId] : null;
-      const sev = r.severity === "blocked" ? '<span class="tag ban">blocked words · hidden</span>' : r.severity === "name" ? '<span class="tag warnt">name / bio</span>' : '<span class="tag warnt">swear words</span>';
+      const sev = r.severity === "blocked" ? '<span class="tag ban">blocked words · hidden</span>' : r.severity === "name" ? '<span class="tag warnt">name / bio</span>' : r.severity === "image" ? '<span class="tag ban">nudity? · blurred</span>' : r.severity === "unchecked" ? '<span class="tag">photo not checked</span>' : '<span class="tag warnt">swear words</span>';
+      const img = r.severity === "image" || r.severity === "unchecked";
       return `<div class="rep" data-rev="${esc(r.id)}">
         <div class="thumb">${p ? media(p) : r.kind === "user" ? '<div class="empty">👤</div>' : ""}</div>
         <div class="grow" style="min-width:0">
@@ -904,7 +908,9 @@ async function loadReview() {
           <div class="small" style="margin-top:6px">Found: ${(r.words || []).map((w) => `<span class="reason">${esc(w)}</span>`).join(" ")}</div>
           ${r.postId && !p ? '<div class="small muted">The post is already gone.</div>' : ""}
           ${revStatus === "open" ? `<div class="row wrap" style="margin-top:10px">
-            <button class="btn sm lime" data-rv="approved">Approve</button>
+            <button class="btn sm lime" data-rv="approved">${r.severity === "image" ? "Keep blurred" : "Approve"}</button>
+            ${img && p && r.severity === "image" ? '<button class="btn sm" data-rv="unblurred">Not nudity (unblur)</button>' : ""}
+            ${img && p && r.severity === "unchecked" ? '<button class="btn sm" data-rv="blurred">Blur it</button>' : ""}
             ${p ? '<button class="btn sm red" data-rv="removed">Remove post</button>' : ""}
             ${p && !p.hidden ? '<button class="btn sm" data-rv="hidden">Hide</button>' : ""}
             ${r.kind === "user" ? '<button class="btn sm" data-rv="renamed">Reset username</button>' : ""}
@@ -928,6 +934,7 @@ $("#review").onclick = async (e) => {
     if (a === "removed") { if (await deletePost(r.postId)) await done(a); }
     else if (a === "hidden") { await api("hidePost", { id: r.postId, on: true }); await done(a); }
     else if (a === "renamed") { if (!confirm(`Give @${r.author} a random new username?`)) return; await api("resetUsername", { uid: r.uid }); await done(a); }
+    else if (a === "unblurred" || a === "blurred") await done(a);
     else if (a === "warned") composeTo({ uid: r.uid, username: r.author || r.uid }, true, () => done(a).catch((er) => toast(er.message, true)));
     else await done("approved");
   } catch (er) { toast(er.message, true); }

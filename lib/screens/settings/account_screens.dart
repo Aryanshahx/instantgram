@@ -11,6 +11,7 @@ import '../../services/auth_service.dart';
 import '../../services/safety_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/sensitive_gate.dart';
 import '../../widgets/state_views.dart';
 import '../auth/login_screen.dart';
 import '../profile/profile_screen.dart';
@@ -394,5 +395,42 @@ Future<void> toggleBlock(BuildContext context, AppUser user) async {
     }
   } catch (e) {
     if (context.mounted) showToast(context, friendlyError(e));
+  }
+}
+
+/// Settings > Sensitive content: blur photos and clips the photo check flagged.
+class SensitiveContentScreen extends StatefulWidget {
+  const SensitiveContentScreen({super.key});
+
+  @override
+  State<SensitiveContentScreen> createState() => _SensitiveContentScreenState();
+}
+
+class _SensitiveContentScreenState extends State<SensitiveContentScreen> {
+  @override
+  Widget build(BuildContext context) {
+    final show = AppPrefs.instance.showSensitive;
+    return SettingsPage(
+      title: 'Sensitive content',
+      children: [
+        SwitchListTile(
+          key: const ValueKey('sensitiveSwitch'),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+          title: const Text(
+            'Blur sensitive content',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          subtitle: const Text(
+            'Photos and clips that may show nudity are blurred with "Tap to view". '
+            'Each phone checks photos before they are shared.',
+          ),
+          value: !show,
+          onChanged: (v) {
+            setState(() => AppPrefs.instance.showSensitive = !v);
+            sensitiveTick.value++;
+          },
+        ),
+      ],
+    );
   }
 }

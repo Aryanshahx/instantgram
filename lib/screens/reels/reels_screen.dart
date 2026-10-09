@@ -27,6 +27,7 @@ import '../../widgets/reel_progress.dart';
 import '../../widgets/reel_video.dart';
 import '../../widgets/repost_controller.dart';
 import '../../widgets/save_controller.dart';
+import '../../widgets/sensitive_gate.dart';
 import '../../widgets/state_views.dart';
 import '../post/comments_screen.dart'
     show commentsSheetHeight, showCommentsSheet;
@@ -413,19 +414,25 @@ class _ReelPageState extends State<_ReelPage> {
       fit: StackFit.expand,
       children: [
         if (live)
-          post.isPhotoClip
-              ? ReelPhoto(
-                  post: post,
-                  play: widget.playing,
-                  progress: _progress,
-                  onDoubleTap: () => _like.setLiked(true),
-                )
-              : ReelVideo(
-                  post: post,
-                  play: widget.playing,
-                  progress: _progress,
-                  onDoubleTap: () => _like.setLiked(true),
-                )
+          // flagged by the photo check: blurred and paused until "Tap to view"
+          SensitiveGate(
+            id: post.id,
+            authorId: post.authorId,
+            sensitive: post.sensitive,
+            builder: (context, shown) => post.isPhotoClip
+                ? ReelPhoto(
+                    post: post,
+                    play: widget.playing && shown,
+                    progress: _progress,
+                    onDoubleTap: () => _like.setLiked(true),
+                  )
+                : ReelVideo(
+                    post: post,
+                    play: widget.playing && shown,
+                    progress: _progress,
+                    onDoubleTap: () => _like.setLiked(true),
+                  ),
+          )
         else
           const ColoredBox(color: Colors.black),
 

@@ -76,6 +76,10 @@ class AppPrefs {
   bool get reduceMotion => _p?.getBool('reduceMotion') ?? false;
   set reduceMotion(bool v) => _p?.setBool('reduceMotion', v);
 
+  /// Settings > Sensitive content: false = photos with nudity are blurred ("Tap to view").
+  bool get showSensitive => _p?.getBool('showSensitive') ?? false;
+  set showSensitive(bool v) => _p?.setBool('showSensitive', v);
+
   /// 'system', 'light' or 'dark'
   String get themeMode => _p?.getString('themeMode') ?? 'system';
   set themeMode(String v) => _p?.setString('themeMode', v);

@@ -1,7 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../models/app_user.dart';
 import '../models/post.dart';
+import 'user_service.dart';
 
 /// Tests replace the Firestore write with this.
 Future<void> Function(Map<String, Object?> data)? debugReportSink;
@@ -76,11 +78,17 @@ Future<bool> sendReport(
       // counts once per person: enough reports hide the post (admin panel setting)
       try {
         final ref = db.collection('posts').doc(post.id);
+        // trusted people's reports count more, new or flagged accounts' less
+        final me = await UserService.instance.getUser(by);
+        final points = reportPoints(me?.trust ?? kDefaultTrust);
         final batch = db.batch()
           ..set(ref.collection('reporters').doc(by), {
             'at': FieldValue.serverTimestamp(),
           })
-          ..update(ref, {'reportCount': FieldValue.increment(1)});
+          ..update(ref, {
+            'reportCount': FieldValue.increment(1),
+            'reportWeight': FieldValue.increment(points),
+          });
         await batch.commit();
       } catch (_) {
         // reported before: the count stays

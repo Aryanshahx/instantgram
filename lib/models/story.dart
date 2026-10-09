@@ -169,6 +169,7 @@ class Story {
     this.spotlight = false,
     this.limited = false,
     this.listName = '',
+    this.sensitive = false,
   });
 
   final String id;
@@ -199,6 +200,9 @@ class Story {
 
   /// The list's name (only the author sees it).
   final String listName;
+
+  /// The phone's photo check found nudity: others see it blurred ("Tap to view").
+  final bool sensitive;
 
   /// Where it is stored.
   String get collection => limited ? kPrivateStories : 'stories';
@@ -247,6 +251,7 @@ class Story {
       spotlight: m['spotlight'] == true,
       limited: limited,
       listName: limited ? s(m['listName']) : '',
+      sensitive: m['sensitive'] == true,
     );
   }
 }

@@ -123,6 +123,8 @@ class Post {
     this.commentCount = 0,
     this.viewCount = 0,
     this.reportCount = 0,
+    this.reportWeight = 0,
+    this.sensitive = false,
     this.hidden = false,
     this.musicId = '',
     this.musicVolume = 0.8,
@@ -175,6 +177,17 @@ class Post {
   /// People who reported it, and hidden by the admin panel.
   final int reportCount;
   final bool hidden;
+
+  /// Reports weighted by how trusted each reporter is (normal = 2, new or flagged = 1,
+  /// long-standing = 3). 0 on posts reported before v1.32.
+  final int reportWeight;
+
+  /// The phone's photo check found nudity: others see it blurred ("Tap to view").
+  final bool sensitive;
+
+  /// Reports as the auto-hide setting counts them (2 weight points = 1 report).
+  double get effectiveReports =>
+      reportWeight > 0 ? reportWeight / 2 : reportCount.toDouble();
 
   /// Music chosen from the app's own library ('' = none), its volume (0-1) and, for videos,
   /// whether the clip's own sound is kept underneath it.
@@ -307,6 +320,8 @@ class Post {
       commentCount: _int(m['commentCount']),
       viewCount: _int(m['viewCount']),
       reportCount: _int(m['reportCount']),
+      reportWeight: _int(m['reportWeight']),
+      sensitive: m['sensitive'] == true,
       hidden: m['hidden'] == true,
       musicId: _str(m['musicId']),
       musicVolume: m['musicVolume'] is num

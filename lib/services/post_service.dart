@@ -102,6 +102,7 @@ class PostService {
     bool clip = false,
     int clipSeconds = kPhotoClipSeconds,
     PostOptions options = const PostOptions(),
+    Map<String, Object> safety = const {},
   }) async {
     // Look up the profile while the photo is uploading (saves a round trip).
     final meFuture = _me();
@@ -135,6 +136,8 @@ class PostService {
       'commentCount': 0,
       ...options.toMap(),
       'authorPrivate': me.isPrivate,
+      // the phone's photo check (sensitive = blurred for others)
+      ...safety,
       'createdAt': FieldValue.serverTimestamp(),
     });
     batch.update(_db.collection('users').doc(me.uid), {
@@ -157,6 +160,7 @@ class PostService {
     double musicStart = 0,
     bool keepSound = true,
     PostOptions options = const PostOptions(),
+    Map<String, Object> safety = const {},
   }) async {
     final photos = items.where((i) => !i.video).toList();
     if (items.length < 2 || items.length > kMaxPostItems || photos.isEmpty) {
@@ -189,6 +193,8 @@ class PostService {
       'commentCount': 0,
       ...options.toMap(),
       'authorPrivate': me.isPrivate,
+      // the phone's photo check (sensitive = blurred for others)
+      ...safety,
       'createdAt': FieldValue.serverTimestamp(),
     });
     batch.update(_db.collection('users').doc(me.uid), {
@@ -213,6 +219,7 @@ class PostService {
     bool musicBaked = false,
     MediaFinish? finish,
     PostOptions options = const PostOptions(),
+    Map<String, Object> safety = const {},
   }) async {
     final me = await _me();
     final ref = _posts.doc();
@@ -241,6 +248,8 @@ class PostService {
       'commentCount': 0,
       ...options.toMap(),
       'authorPrivate': me.isPrivate,
+      // the phone's photo check (sensitive = blurred for others)
+      ...safety,
       'createdAt': FieldValue.serverTimestamp(),
     });
     batch.update(_db.collection('users').doc(me.uid), {

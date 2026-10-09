@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runPanelOp, restDb, mediaKeys, STAGES } from "../lib/admin.js";
+import { runPanelOp, restDb, mediaKeys, STAGES, trustOf, imageFlag } from "../lib/admin.js";
 import { handle } from "../lib/core.js";
 
 // ---- Firestore in memory, with the interface of restDb
@@ -488,4 +488,49 @@ test("modWords saves the panel lists; modTest tries a text", async () => {
   assert.ok(w.defaults.blocked > 0);
   assert.equal((await runPanelOp({ op: "modTest", text: "go to scamlink" }, ctx)).blocked, true);
   assert.equal((await runPanelOp({ op: "modTest", text: "ass" }, ctx)).clean, true);
+});
+
+// ---------------------------------------------------------------- v1.32 photos + trust
+
+test("trustOf: new accounts near 40, age/followers/posts add, strikes take away", () => {
+  const n = Date.now();
+  const day = 86400_000;
+  assert.equal(trustOf({ createdAt: new Date(n) }, n), 40);
+  assert.equal(trustOf({ createdAt: new Date(n - 90 * day), followersCount: 1000, postsCount: 20 }, n), 80);
+  assert.equal(trustOf({ createdAt: new Date(n), verified: true }, n), 55);
+  assert.equal(trustOf({ createdAt: new Date(n), strikes: 1, flags: 1 }, n), 20);
+  assert.equal(trustOf({ createdAt: new Date(n), warnings: 9 }, n), 0);
+  assert.equal(trustOf({ createdAt: new Date(n - 90 * day), banned: true }, n), 0);
+});
+
+test("imageFlag: likely nudity and unchecked photos go to review", () => {
+  assert.equal(imageFlag({ sensitive: true, nsfw: 0.93 }).severity, "image");
+  assert.equal(imageFlag({ sensitive: true, nsfw: 0.7 }), null); // blurred, no review
+  assert.equal(imageFlag({ imgCheck: "skipped" }).severity, "unchecked");
+  assert.equal(imageFlag({ imgCheck: "ok" }), null);
+});
+
+test("modScan queues flagged photos and works out trust; resolving adds strikes", async () => {
+  const db = world();
+  db.docs.get("posts/p1").sensitive = true;
+  db.docs.get("posts/p1").nsfw = 0.91;
+  db.docs.get("posts/p2").imgCheck = "skipped";
+  const { ctx } = ctxFor(db);
+  const r = await runPanelOp({ op: "modScan" }, ctx);
+  assert.equal(db.docs.get("modQueue/post_p1").severity, "image");
+  assert.equal(db.docs.get("modQueue/post_p2").severity, "unchecked");
+  assert.ok(r.trusted > 0);
+  assert.equal(typeof db.docs.get("users/bob2").trust, "number");
+  assert.ok(db.docs.get("config/modscan").trustAt instanceof Date);
+  const author = db.docs.get("modQueue/post_p1").uid;
+  const before = db.docs.get(`users/${author}`).trust;
+  await runPanelOp({ op: "modResolve", id: "post_p1", action: "hidden" }, ctx);
+  assert.equal(db.docs.get(`users/${author}`).strikes, 1);
+  assert.equal(db.docs.get(`users/${author}`).trust, Math.max(0, before - 15));
+  await runPanelOp({ op: "modResolve", id: "post_p2", action: "blurred" }, ctx);
+  assert.equal(db.docs.get("posts/p2").sensitive, true);
+  const t = await runPanelOp({ op: "trust", uid: author }, ctx);
+  assert.equal(t.trust, db.docs.get(`users/${author}`).trust);
+  const again = await runPanelOp({ op: "modScan" }, ctx);
+  assert.equal(again.trusted, 0); // once a day
 });
