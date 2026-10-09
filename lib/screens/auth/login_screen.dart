@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import '../../core/errors.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import '../../services/account_vault.dart';
+import '../../services/app_prefs.dart';
 import '../../services/auth_service.dart';
+import '../../widgets/avatar.dart';
 import '../../widgets/aurora_background.dart';
 import '../../widgets/brand_logo.dart';
 import 'language_step_screen.dart';
@@ -29,6 +32,33 @@ class _LoginScreenState extends State<LoginScreen> {
     super.initState();
     _email.text = LoginScreen.prefill;
     LoginScreen.prefill = '';
+    _loadSaved();
+  }
+
+  /// Accounts with a login saved on this phone: one tap logs in.
+  List<SavedAccount> _saved = const [];
+
+  Future<void> _loadSaved() async {
+    final ok = await AccountVault.instance.uids();
+    if (!mounted || ok.isEmpty) return;
+    setState(() {
+      _saved = [
+        for (final a in AppPrefs.instance.accounts)
+          if (ok.contains(a.uid)) a,
+      ];
+    });
+  }
+
+  Future<void> _continueAs(SavedAccount a) async {
+    setState(() => _loading = true);
+    final ok = await AuthService.instance.switchTo(a.uid);
+    if (!mounted) return;
+    setState(() => _loading = false);
+    if (!ok) {
+      _email.text = a.username;
+      showToast(context, 'Enter the password for @${a.username}.');
+      _loadSaved();
+    }
   }
 
   bool _loading = false;
@@ -95,6 +125,37 @@ class _LoginScreenState extends State<LoginScreen> {
                         'Log in to see what your people are up to.',
                         style: TextStyle(color: context.muted, fontSize: 15),
                       ),
+                      if (_saved.isNotEmpty) ...[
+                        const SizedBox(height: 20),
+                        for (final a in _saved.reversed.take(4))
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: OutlinedButton(
+                              key: ValueKey('continueAs_${a.uid}'),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size(0, 52),
+                                alignment: Alignment.centerLeft,
+                              ),
+                              onPressed: _loading ? null : () => _continueAs(a),
+                              child: Row(
+                                children: [
+                                  UserAvatar(
+                                    url: a.photoUrl,
+                                    name: a.username,
+                                    radius: 16,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      'Continue as @${a.username}',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
                       const SizedBox(height: 28),
                       TextFormField(
                         controller: _email,

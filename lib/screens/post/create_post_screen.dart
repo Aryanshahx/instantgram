@@ -21,6 +21,7 @@ import '../../models/finish.dart';
 import '../../models/music.dart';
 import '../../models/post.dart';
 import '../../models/story.dart' show StoryOverlay, kMaxStorySeconds;
+import '../../services/push_service.dart';
 import '../../services/video_frames.dart';
 import '../../services/audio_merger.dart';
 import '../../services/clip_sound.dart';
@@ -914,6 +915,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           seconds: storySecs,
         );
       }
+      PushService.instance.uploaded(_mode == 1 ? 'clip' : 'post');
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {

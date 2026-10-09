@@ -80,8 +80,9 @@ test("texts", () => {
   assert.equal(messageBody({ type: "system" }), null);
   assert.equal(messageBody({ type: "text", text: "x", deleted: true }), null);
   assert.equal(activityBody({ type: "like", actorName: "zoe" }), "zoe liked your post");
-  assert.equal(activityBody({ type: "super", actorName: "zoe" }), "zoe sent you a super heart 💖");
-  assert.equal(activityBody({ type: "comment", actorName: "zoe", text: "nice" }), "zoe commented: nice");
+  assert.equal(activityBody({ type: "super", actorName: "zoe" }), "zoe sent your post a super heart 💖");
+  assert.equal(activityBody({ type: "like", actorName: "zoe" }, "clip"), "zoe liked your clip");
+  assert.equal(activityBody({ type: "comment", actorName: "zoe", text: "nice" }), "zoe commented on your post: nice");
   assert.equal(activityBody({ type: "follow", actorName: "zoe" }), "zoe started following you");
   assert.deepEqual(decodeValue({ mapValue: { fields: { a: { arrayValue: { values: [{ integerValue: "3" }] } } } } }), { a: [3] });
 });
@@ -146,7 +147,7 @@ test("activity: the actor must be the caller", async () => {
   const g = fakeGoogle(docs);
   const r = await notify({ kind: "activity", to: "b", itemId: "n1" }, ENV, "a", { fetch: g.fetch, now: NOW });
   assert.equal(r.body.sent, 2);
-  assert.equal(g.sent[0].notification.body, "aryan commented: wow");
+  assert.equal(g.sent[0].notification.body, "aryan commented on your post: wow");
   assert.equal(g.sent[0].data.postId, "p1");
   assert.equal((await notify({ kind: "activity", to: "b", itemId: "n1" }, ENV, "c", { fetch: g.fetch, now: NOW })).status, 403);
 });
@@ -247,4 +248,26 @@ test("test kind: to my own phones, and says why it failed", async () => {
 test("moment likes have their own lines", () => {
   assert.equal(activityBody({ type: "story_like", actorName: "a" }), "a liked your moment");
   assert.match(activityBody({ type: "story_super", actorName: "a" }), /super heart/);
+});
+
+test("activity on a clip says clip", async () => {
+  forgetToken();
+  const docs = { ...base(), "posts/p9": { type: "video", authorId: "b" }, "notifications/b/items/n9": { type: "like", actorId: "a", actorName: "aryan", postId: "p9", at: recent } };
+  const g = fakeGoogle(docs);
+  const r = await notify({ kind: "activity", to: "b", itemId: "n9" }, ENV, "a", { fetch: g.fetch, now: NOW });
+  assert.equal(r.body.sent, 2);
+  assert.equal(g.sent[0].notification.body, "aryan liked your clip");
+});
+
+test("upload: only my own phones are told", async () => {
+  forgetToken();
+  const docs = { ...base(), "pushTokens/a": { tokens: ["mine1"] } };
+  const g = fakeGoogle(docs);
+  const r = await notify({ kind: "upload", what: "clip" }, ENV, "a", { fetch: g.fetch, now: NOW });
+  assert.equal(r.body.sent, 1);
+  assert.equal(g.sent[0].token, "mine1");
+  assert.match(g.sent[0].notification.body, /clip is live/);
+  const r2 = await notify({ kind: "upload", what: "<script>" }, ENV, "a", { fetch: g.fetch, now: NOW });
+  assert.equal(r2.body.sent, 1);
+  assert.match(g.sent[1].notification.body, /post is live/);
 });

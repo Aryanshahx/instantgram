@@ -7,6 +7,13 @@ class UsernameTakenException implements Exception {
   String toString() => 'That username is already taken.';
 }
 
+/// The admin panel blocked this email address from making accounts.
+class EmailBlockedException implements Exception {
+  const EmailBlockedException();
+  @override
+  String toString() => 'This email address cannot be used for a new account.';
+}
+
 /// Someone younger than the minimum age tried to make an account.
 class AgeException implements Exception {
   const AgeException();
@@ -32,6 +39,7 @@ class MediaException implements Exception {
 /// Turns any error into a short, user-friendly message.
 String friendlyError(Object e) {
   if (e is UsernameTakenException ||
+      e is EmailBlockedException ||
       e is AgeException ||
       e is MediaException ||
       e is LoginLookupException) {

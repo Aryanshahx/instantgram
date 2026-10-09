@@ -13,6 +13,7 @@ import '../../core/ui.dart';
 import '../../models/app_user.dart';
 import '../../models/chat.dart';
 import '../../models/vanish.dart';
+import '../../services/report_service.dart';
 import '../../services/chat_service.dart';
 import '../../services/location_service.dart';
 import '../../services/media_server.dart';
@@ -338,6 +339,62 @@ class _ChatScreenState extends State<ChatScreen> {
         replyTo: reply,
       ),
     );
+  }
+
+  /// Sends this chat to the InstantGram team (they can read it to check).
+  Future<void> _reportChat() async {
+    final id = _chatId;
+    if (id == null) return;
+    final ctl = TextEditingController();
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Report chat'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'The InstantGram team will be able to read this chat to check it.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const ValueKey('chatReportText'),
+              controller: ctl,
+              maxLines: 3,
+              maxLength: 500,
+              decoration: const InputDecoration(hintText: 'What happened?'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            key: const ValueKey('chatReportSend'),
+            onPressed: () => Navigator.pop(ctx, ctl.text.trim()),
+            child: const Text('Report'),
+          ),
+        ],
+      ),
+    );
+    if (text == null || !mounted) return;
+    final ok = await sendChatReport(
+      chatId: id,
+      otherUid: widget.otherUid,
+      otherUsername: _user?.username ?? '',
+      text: text,
+    );
+    if (mounted) {
+      showToast(
+        context,
+        ok
+            ? 'Report sent. Thanks for telling us.'
+            : 'Could not send the report.',
+      );
+    }
   }
 
   Future<void> _attach() async {
@@ -674,6 +731,21 @@ class _ChatScreenState extends State<ChatScreen> {
               tooltip: 'Video call',
               icon: const Icon(Icons.videocam_rounded),
               onPressed: () => _call(video: true),
+            ),
+            PopupMenuButton<String>(
+              key: const ValueKey('chatMore'),
+              tooltip: 'More',
+              icon: const Icon(Icons.more_vert_rounded),
+              onSelected: (v) {
+                if (v == 'report') _reportChat();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  key: ValueKey('reportChat'),
+                  value: 'report',
+                  child: Text('Report chat'),
+                ),
+              ],
             ),
           ],
           const SizedBox(width: 4),

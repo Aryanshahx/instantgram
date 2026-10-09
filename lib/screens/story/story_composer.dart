@@ -12,6 +12,7 @@ import '../../core/ui.dart';
 import '../../models/audience.dart';
 import '../../models/music.dart';
 import '../../models/story.dart';
+import '../../services/push_service.dart';
 import '../../services/device_audio.dart';
 import '../../services/media_service.dart';
 import '../../services/music_player.dart';
@@ -399,6 +400,7 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
           if (mounted) setState(() => _progress = p);
         },
       );
+      PushService.instance.uploaded('moment');
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {

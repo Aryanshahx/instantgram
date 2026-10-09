@@ -161,13 +161,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'hindi english spanish french',
           (c, _) => openScreen(c, const LanguageScreen()),
         ),
-        _Item(
-          'update',
-          Icons.system_update_rounded,
-          'App update',
-          'version new download',
-          (c, _) => openScreen(c, const AppUpdateScreen()),
-        ),
       ],
     ),
     (

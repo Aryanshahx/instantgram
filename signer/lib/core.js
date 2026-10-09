@@ -226,6 +226,11 @@ export function s3Store(env) {
       const bytes = out.slice(0, got);
       return { arrayBuffer: async () => bytes.buffer };
     },
+    /** Stores small files the admin panel makes (notification pictures). */
+    async put(key, bytes, type) {
+      const res = await fetch(await link("PUT", key), { method: "PUT", body: bytes, headers: { "content-type": type } });
+      if (res.status !== 200) throw new Error(`storage PUT answered ${res.status}`);
+    },
     async delete(key) {
       const res = await fetch(await link("DELETE", key), { method: "DELETE" });
       if (![200, 204, 404].includes(res.status)) throw new Error(`storage DELETE answered ${res.status}`);
@@ -330,8 +335,8 @@ async function handleAdmin(request, env, store, deps = null) {
   if (key.length < 32) return fail(404, "Not found");
   if (!sameSecret(request.headers.get("x-admin-key") || "", key)) return fail(403, "Wrong admin key.");
   const body = await readJson(request);
+  const media = (env.MEDIA_PUBLIC_URL || `https://${env.TIGRIS_BUCKET}.t3.tigrisfiles.io`).replace(/\/+$/, "");
   if (body.op === "check") {
-    const media = (env.MEDIA_PUBLIC_URL || `https://${env.TIGRIS_BUCKET}.t3.tigrisfiles.io`).replace(/\/+$/, "");
     return json({ ok: true, panel: Boolean(serviceAccount(env)), media, bucket: env.TIGRIS_BUCKET || "" });
   }
   if (body.op === "wipe") {
@@ -349,7 +354,7 @@ async function handleAdmin(request, env, store, deps = null) {
     ctx = { db: restDb(sa, project), auth: restAuth(sa, project), push: fcmSender(sa, project) };
   }
   try {
-    return json(await runPanelOp(body, { store, wipeFiles: (uid) => wipeFiles(store, uid), ...ctx }));
+    return json(await runPanelOp(body, { store, publicBase: media, wipeFiles: (uid) => wipeFiles(store, uid), ...ctx }));
   } catch (e) {
     if (e instanceof AdminError) return fail(e.status, e.message);
     throw e;

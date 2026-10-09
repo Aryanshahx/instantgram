@@ -102,6 +102,14 @@ class AppPrefs {
     }
   }
 
+  /// 'uid@day' of the last day this account was counted as active.
+  String _activeMem = '';
+  String get activeCounted => _p?.getString('activeCounted') ?? _activeMem;
+  set activeCounted(String v) {
+    _activeMem = v;
+    _p?.setString('activeCounted', v);
+  }
+
   /// The day the daily-limit reminder was last shown.
   String get limitShownDay => _p?.getString('limitShown') ?? '';
   set limitShownDay(String v) => _p?.setString('limitShown', v);

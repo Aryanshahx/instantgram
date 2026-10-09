@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../core/errors.dart';
+import 'account_vault.dart';
 import 'push_service.dart';
 import 'story_views.dart';
 import 'audience_service.dart';
@@ -10,8 +11,8 @@ class AuthService {
   AuthService._();
   static final AuthService instance = AuthService._();
 
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  FirebaseAuth get _auth => FirebaseAuth.instance;
+  FirebaseFirestore get _db => FirebaseFirestore.instance;
 
   Stream<User?> get authChanges => _auth.authStateChanges();
   User? get currentUser => _auth.currentUser;
@@ -69,7 +70,52 @@ class AuthService {
     required String password,
   }) async {
     final email = await resolveEmail(identifier);
-    await _auth.signInWithEmailAndPassword(email: email, password: password);
+    final cred = await _auth.signInWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+    // kept (encrypted) on this phone: switching back needs no password
+    final u = cred.user;
+    if (u != null) await AccountVault.instance.save(u.uid, email, password);
+  }
+
+  /// Test hook: replaces [switchTo].
+  Future<bool> Function(String uid)? debugSwitch;
+
+  /// Logs out and straight into the saved account [uid]. False when no login is saved
+  /// for it or the saved password stopped working (it is forgotten then); this account is
+  /// already logged out in that case, so the login screen shows.
+  Future<bool> switchTo(String uid) async {
+    final hook = debugSwitch;
+    if (hook != null) return hook(uid);
+    final login = await AccountVault.instance.read(uid);
+    if (login == null) return false;
+    await signOut();
+    try {
+      await _auth.signInWithEmailAndPassword(
+        email: login.$1,
+        password: login.$2,
+      );
+      return true;
+    } on FirebaseAuthException catch (e) {
+      if (e.code != 'network-request-failed' && e.code != 'too-many-requests') {
+        await AccountVault.instance.forget(uid);
+      }
+      return false;
+    }
+  }
+
+  /// The admin panel blocked this email from making accounts.
+  Future<bool> isEmailBlocked(String email) async {
+    try {
+      final d = await _db
+          .collection('blockedEmails')
+          .doc(email.trim().toLowerCase())
+          .get();
+      return d.exists;
+    } catch (_) {
+      return false; // the rules still stop it
+    }
   }
 
   /// Makes sure the signed-in user's username points at their email, so the username can be
@@ -107,6 +153,9 @@ class AuthService {
     }
     final uname = username.trim().toLowerCase();
 
+    if (await isEmailBlocked(email)) {
+      throw const EmailBlockedException();
+    }
     if (!await isUsernameAvailable(uname)) {
       throw const UsernameTakenException();
     }
@@ -144,6 +193,7 @@ class AuthService {
         });
       });
       await user.updateDisplayName(uname);
+      await AccountVault.instance.save(user.uid, email.trim(), password);
     } catch (e) {
       // Roll back the auth account so the user can retry.
       await user.delete();

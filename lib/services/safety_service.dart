@@ -28,6 +28,10 @@ class SafetyService {
   /// People I blocked.
   final ValueNotifier<Set<String>> blocked = ValueNotifier(const {});
 
+  /// Posts reported by this many people are hidden for everybody but the author
+  /// (set in the admin panel, config/app.autoHide; 0 = off).
+  int autoHide = 0;
+
   /// People I follow (the newest 100, like the rest of the app).
   Set<String> following = {};
 
@@ -43,6 +47,13 @@ class SafetyService {
       blocked.value = {for (final d in snap.docs) d.id};
       following = {...(results[1] as List<String>)};
       await completeApproved();
+      try {
+        final c = await _db.collection('config').doc('app').get();
+        final n = c.data()?['autoHide'];
+        autoHide = n is num ? n.toInt() : 0;
+      } catch (_) {
+        autoHide = 0;
+      }
     } catch (_) {
       // the lists are best effort; everything is shown when they cannot be read
     }
@@ -52,6 +63,7 @@ class SafetyService {
     me = '';
     blocked.value = const {};
     following = {};
+    autoHide = 0;
   }
 
   // ------------------------------------------------------------ visibility
@@ -59,6 +71,8 @@ class SafetyService {
   /// Whether the post may be shown to me.
   bool canSee(Post p) {
     if (p.authorId == me) return true;
+    if (p.hidden) return false;
+    if (autoHide > 0 && p.reportCount >= autoHide) return false;
     if (blocked.value.contains(p.authorId)) return false;
     if (p.audience == kAudienceMe) return false;
     if (p.audience == kAudienceFollowers || p.authorPrivate) {

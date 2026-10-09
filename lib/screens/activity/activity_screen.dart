@@ -34,6 +34,10 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Future<void> _open(AppNotification n) async {
+    if (n.isFromTeam) {
+      await showTeamMessage(context, n);
+      return;
+    }
     if (n.isFollow || n.postId.isEmpty) {
       if (n.actorId.isNotEmpty) {
         openScreen(context, ProfileScreen(uid: n.actorId));
@@ -84,9 +88,12 @@ class _ActivityScreenState extends State<ActivityScreen> {
           return ListView.separated(
             padding: const EdgeInsets.symmetric(vertical: 6),
             itemCount: items.length,
-            separatorBuilder: (_, _) =>
-                Divider(height: 1, color: context.hairline.withValues(alpha: 0.6)),
-            itemBuilder: (context, i) => _Row(n: items[i], onTap: () => _open(items[i])),
+            separatorBuilder: (_, _) => Divider(
+              height: 1,
+              color: context.hairline.withValues(alpha: 0.6),
+            ),
+            itemBuilder: (context, i) =>
+                _Row(n: items[i], onTap: () => _open(items[i])),
           );
         },
       ),
@@ -107,11 +114,20 @@ class _Row extends StatelessWidget {
       key: ValueKey('activity_${n.id}'),
       contentPadding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
       onTap: onTap,
-      leading: UserAvatar(
-        url: n.actorPhoto,
-        name: n.actorName,
-        radius: 22,
-      ),
+      leading: n.isFromTeam
+          ? CircleAvatar(
+              radius: 22,
+              backgroundColor: n.type == 'warning'
+                  ? AppTheme.coral
+                  : AppTheme.volt,
+              child: Icon(
+                n.type == 'warning'
+                    ? Icons.warning_amber_rounded
+                    : Icons.campaign_rounded,
+                color: AppTheme.ink,
+              ),
+            )
+          : UserAvatar(url: n.actorPhoto, name: n.actorName, radius: 22),
       title: RichText(
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
@@ -123,10 +139,26 @@ class _Row extends StatelessWidget {
           ),
           children: [
             TextSpan(
-              text: n.actorName.isEmpty ? 'Someone' : n.actorName,
+              text: n.isFromTeam
+                  ? 'InstantGram'
+                  : (n.actorName.isEmpty ? 'Someone' : n.actorName),
               style: const TextStyle(fontWeight: FontWeight.w800),
             ),
-            TextSpan(text: ' ${n.verb}'),
+            if (n.type == 'warning')
+              const TextSpan(
+                text: '  \u26a0\ufe0f Warning',
+                style: TextStyle(
+                  color: AppTheme.coral,
+                  fontWeight: FontWeight.w800,
+                ),
+              )
+            else if (n.verb.isNotEmpty)
+              TextSpan(
+                text: ' ${n.verb}',
+                style: n.isFromTeam
+                    ? const TextStyle(fontWeight: FontWeight.w700)
+                    : null,
+              ),
             if (n.text.isNotEmpty) TextSpan(text: '  ${n.text}'),
           ],
         ),
@@ -156,4 +188,54 @@ class _Row extends StatelessWidget {
             ),
     );
   }
+}
+
+/// A message or warning from the InstantGram team, in full (with its picture).
+Future<void> showTeamMessage(BuildContext context, AppNotification n) {
+  final img = resolveMediaUrl(n.thumb);
+  return showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      key: const ValueKey('teamMessage'),
+      title: Text(
+        n.type == 'warning'
+            ? 'Warning from InstantGram'
+            : (n.title.isEmpty ? 'InstantGram' : n.title),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (img.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: CachedNetworkImage(
+                    imageUrl: img,
+                    fit: BoxFit.cover,
+                    errorWidget: (_, _, _) => const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+            Text(n.text),
+            if (n.type == 'warning') ...[
+              const SizedBox(height: 12),
+              Text(
+                'More warnings can lead to a suspension. Write to techlabs.hyper@gmail.com if you think this is a mistake.',
+                style: TextStyle(color: ctx.muted, fontSize: 12.5),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
+  );
 }

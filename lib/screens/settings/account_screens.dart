@@ -5,6 +5,7 @@ import '../../core/l10n.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../models/app_user.dart';
+import '../../services/account_vault.dart';
 import '../../services/app_prefs.dart';
 import '../../services/auth_service.dart';
 import '../../services/safety_service.dart';
@@ -24,6 +25,36 @@ class AddAccountScreen extends StatefulWidget {
 }
 
 class _AddAccountScreenState extends State<AddAccountScreen> {
+  /// Accounts whose login is saved on this phone (switch without a password).
+  Set<String> _ready = const {};
+  bool _switching = false;
+
+  @override
+  void initState() {
+    super.initState();
+    AccountVault.instance.uids().then((v) {
+      if (mounted) setState(() => _ready = v);
+    });
+  }
+
+  Future<void> _switch(BuildContext context, SavedAccount a) async {
+    if (!_ready.contains(a.uid)) {
+      await _goToLogin(
+        context,
+        prefill: a.username,
+        message: 'Switch to @${a.username}?',
+      );
+      return;
+    }
+    setState(() => _switching = true);
+    final nav = Navigator.of(context);
+    nav.popUntil((r) => r.isFirst);
+    SafetyService.instance.clear();
+    final ok = await AuthService.instance.switchTo(a.uid);
+    if (!ok) LoginScreen.prefill = a.username;
+    if (mounted) setState(() => _switching = false);
+  }
+
   Future<void> _goToLogin(
     BuildContext context, {
     String prefill = '',
@@ -74,20 +105,19 @@ class _AddAccountScreenState extends State<AddAccountScreen> {
               a.username,
               style: const TextStyle(fontWeight: FontWeight.w800),
             ),
-            subtitle: const Text('Tap to log in'),
+            subtitle: Text(
+              _ready.contains(a.uid) ? 'Tap to switch' : 'Tap to log in',
+            ),
             trailing: IconButton(
               tooltip: 'Forget',
               icon: const Icon(Icons.close_rounded),
               onPressed: () async {
                 AppPrefs.instance.forgetAccount(a.uid);
+                await AccountVault.instance.forget(a.uid);
                 if (mounted) setState(() {});
               },
             ),
-            onTap: () => _goToLogin(
-              context,
-              prefill: a.username,
-              message: 'Switch to @${a.username}?',
-            ),
+            onTap: _switching ? null : () => _switch(context, a),
           ),
       ],
     );
@@ -180,9 +210,7 @@ class _AccountPrivacyScreenState extends State<AccountPrivacyScreen> {
             style: const TextStyle(fontWeight: FontWeight.w700),
           ),
           subtitle: Text(
-            context.tr(
-              'Only people you approve can see your posts and clips.',
-            ),
+            context.tr('Only people you approve can see your posts and clips.'),
           ),
           value: _private ?? false,
           onChanged: (_private == null || _busy) ? null : _toggle,

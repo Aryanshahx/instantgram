@@ -24,12 +24,17 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read: if signedIn();
-      allow create: if signedIn() && request.auth.uid == uid && !('banned' in request.resource.data);
+      // emails blocked in the admin panel cannot make a new profile
+      allow create: if signedIn() && request.auth.uid == uid && !('banned' in request.resource.data)
+        && !request.resource.data.keys().hasAny(['verified', 'bannedUntil', 'warnings'])
+        && !(request.auth.token.email is string
+             && exists(/databases/$(database)/documents/blockedEmails/$(request.auth.token.email.lower())));
       // owner edits anything except the ban (only the admin panel sets it);
       // anyone may change followersCount (follow/unfollow)
       allow update: if signedIn() && (
         (request.auth.uid == uid &&
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['banned', 'bannedReason'])) ||
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['banned', 'bannedReason'])
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['verified', 'bannedUntil', 'warnings'])) ||
         onlyChanges(['followersCount']));
       allow delete: if false;
 
@@ -94,9 +99,35 @@ service cloud.firestore {
         && request.resource.data.by == request.auth.uid
         && request.resource.data.status == 'open'
         && request.resource.data.keys().hasOnly(['kind', 'postId', 'commentId', 'comment', 'ownerId',
-             'ownerUsername', 'by', 'byUsername', 'reason', 'text', 'status', 'createdAt'])
+             'ownerUsername', 'by', 'byUsername', 'reason', 'text', 'status', 'createdAt', 'chatId'])
+        // a chat report only for a chat the reporter is in
+        && (!('chatId' in request.resource.data)
+            || (request.resource.data.chatId is string
+                && request.auth.uid in request.resource.data.chatId.split('_')))
         && request.resource.data.text is string && request.resource.data.text.size() <= 2000;
       allow read, update, delete: if false;
+    }
+
+    // emails the admin panel blocked: the app checks one before signing up (no listing)
+    match /blockedEmails/{email} {
+      allow get: if true;
+      allow list, write: if false;
+    }
+
+    // app settings from the admin panel (auto-hide after N reports...)
+    match /config/{doc} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // people active per day (admin panel charts): +1 once a day per person
+    match /dailyStats/{day} {
+      allow read: if false;
+      allow create: if signedIn() && request.resource.data.keys().hasOnly(['active'])
+        && request.resource.data.active == 1;
+      allow update: if signedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active'])
+        && request.resource.data.active == resource.data.active + 1;
+      allow delete: if false;
     }
 
     match /pushTokens/{uid} {
@@ -113,15 +144,29 @@ service cloud.firestore {
 
     match /posts/{postId} {
       allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
-      // author edits anything; anyone may change like/comment counters
-      allow update: if signedIn() && (resource.data.authorId == request.auth.uid
-                                      || onlyChanges(['likeCount', 'superCount', 'commentCount', 'viewCount', 'shareCount', 'repostCount']));
+      allow create: if signedIn() && request.resource.data.authorId == request.auth.uid
+        && !request.resource.data.keys().hasAny(['hidden', 'reportCount']);
+      // author edits anything but the report fields; anyone may change like/comment counters;
+      // a report adds exactly 1 to reportCount, once per person (the reporters/{uid} doc)
+      allow update: if signedIn() && (
+        (resource.data.authorId == request.auth.uid
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['hidden', 'reportCount']))
+        || onlyChanges(['likeCount', 'superCount', 'commentCount', 'viewCount', 'shareCount', 'repostCount'])
+        || (onlyChanges(['reportCount'])
+            && request.resource.data.reportCount == resource.data.get('reportCount', 0) + 1
+            && !exists(/databases/$(database)/documents/posts/$(postId)/reporters/$(request.auth.uid))
+            && existsAfter(/databases/$(database)/documents/posts/$(postId)/reporters/$(request.auth.uid))));
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
 
       match /likes/{uid} {
         allow read: if signedIn();
         allow write: if signedIn() && request.auth.uid == uid;
+      }
+
+      // who reported the post (one each); nobody reads them
+      match /reporters/{uid} {
+        allow create: if signedIn() && request.auth.uid == uid;
+        allow read, update, delete: if false;
       }
 
       // one document per person who viewed the post (so everybody counts once)

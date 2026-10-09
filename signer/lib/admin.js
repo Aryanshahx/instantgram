@@ -62,6 +62,7 @@ export function restDb(sa, project, fetchFn = fetch) {
       s.startAt = { values: [...vals, { referenceValue: `${root}/${q.after[q.after.length - 1]}` }], before: false };
     }
     if (q.limit) s.limit = q.limit;
+    if (q.select) s.select = { fields: q.select.map((f) => ({ fieldPath: f })) };
     return s;
   };
   return {
@@ -95,11 +96,14 @@ export function restDb(sa, project, fetchFn = fetch) {
         const part = writes.slice(i, i + 400).map((w) => {
           if (w.del) return { delete: `${root}/${w.del}` };
           const fields = Object.fromEntries(Object.entries(w.data || {}).map(([k, v]) => [k, encodeValue(v)]));
+          // set = update an existing doc; put = create or update; create = only a new doc
+          const path = w.set || w.put || w.create;
           const out = {
-            update: { name: `${root}/${w.set}`, fields },
-            updateMask: { fieldPaths: Object.keys(w.data || {}) },
-            currentDocument: { exists: true },
+            update: { name: `${root}/${path}`, fields },
+            updateMask: { fieldPaths: Object.keys(w.data || {}).map((k) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : "`" + k + "`")) },
           };
+          if (w.set) out.currentDocument = { exists: true };
+          if (w.create) { out.currentDocument = { exists: false }; delete out.updateMask; }
           if (w.add) {
             out.updateTransforms = Object.entries(w.add).map(([f, n]) => ({ fieldPath: f, increment: encodeValue(n) }));
           }
@@ -109,9 +113,10 @@ export function restDb(sa, project, fetchFn = fetch) {
         try {
           await call(`${base}:commit`, { method: "POST", body: JSON.stringify({ writes: part }) }, "write");
         } catch (e) {
-          if (part.length === 1) { if (part[0].delete) throw e; continue; }
+          const must = (w) => w.delete || !w.currentDocument || w.currentDocument.exists === false;
+          if (part.length === 1) { if (must(part[0])) throw e; continue; }
           for (const w of part) {
-            try { await call(`${base}:commit`, { method: "POST", body: JSON.stringify({ writes: [w] }) }, "write"); } catch (e2) { if (w.delete) throw e2; }
+            try { await call(`${base}:commit`, { method: "POST", body: JSON.stringify({ writes: [w] }) }, "write"); } catch (e2) { if (must(w)) throw e2; }
           }
         }
       }
@@ -186,6 +191,7 @@ function userRow(d) {
     photo: str(u.photoUrl), createdAt: when(u.createdAt), lastActive: when(u.lastActive),
     online: u.online === true, banned: u.banned === true, posts: num(u.postsCount),
     followers: num(u.followersCount), following: num(u.followingCount), bio: str(u.bio), private: u.isPrivate === true,
+    verified: u.verified === true, bannedUntil: when(u.bannedUntil), warnings: num(u.warnings),
   };
 }
 
@@ -196,6 +202,7 @@ function postRow(d) {
     caption: str(p.caption).slice(0, 300), createdAt: when(p.createdAt),
     image: str(p.thumbnailUrl) || str(p.imageUrl) || (Array.isArray(p.media) && p.media[0] ? str(p.media[0].th) || str(p.media[0].u) : ""),
     video: str(p.videoUrl), likes: num(p.likeCount), comments: num(p.commentCount), views: num(p.viewCount),
+    reports: num(p.reportCount), hidden: p.hidden === true,
   };
 }
 
@@ -308,9 +315,12 @@ async function user(ctx, body) {
 async function ban(ctx, body) {
   const uid = needUid(body.uid);
   const on = body.on !== false;
-  await ctx.auth.setDisabled(uid, on);
-  await ctx.db.write([{ set: `users/${uid}`, data: { banned: on, bannedReason: on ? str(body.reason).slice(0, 200) : "" } }]);
-  return { ok: true, banned: on };
+  // days > 0: suspended for a while (login stays on; the app logs them out until then)
+  const days = on ? Math.min(365, Math.max(0, Math.floor(Number(body.days) || 0))) : 0;
+  const until = days > 0 ? new Date(ctx.nowMs + days * 86400_000) : null;
+  await ctx.auth.setDisabled(uid, on && !until);
+  await ctx.db.write([{ set: `users/${uid}`, data: { banned: on, bannedReason: on ? str(body.reason).slice(0, 200) : "", bannedUntil: until } }]);
+  return { ok: true, banned: on, until: when(until) };
 }
 
 async function posts(ctx, body) {
@@ -335,7 +345,7 @@ async function deletePost(ctx, body) {
   const id = needId(body.id);
   const d = await ctx.db.get(`posts/${id}`);
   if (!d) return { ok: true, gone: true };
-  for (const sub of ["likes", "views"]) {
+  for (const sub of ["likes", "views", "reporters"]) {
     if ((await clearCollection(ctx, `posts/${id}/${sub}`)).more) return { ok: true, more: true };
   }
   if ((await clearCollection(ctx, `posts/${id}/comments`, ["likes"])).more) return { ok: true, more: true };
@@ -417,6 +427,7 @@ async function broadcast(ctx, body) {
   const title = str(body.title).trim().slice(0, 60);
   const text = str(body.body).trim().slice(0, 240);
   if (!text) throw new AdminError("Write the message first.");
+  const image = imageUrl(ctx, body.image);
   const page = await ctx.db.list("pushTokens", PUSH_PAGE, str(body.cursor));
   let sent = 0, failed = 0;
   const stale = [];
@@ -428,7 +439,7 @@ async function broadcast(ctx, body) {
   }
   for (let i = 0; i < jobs.length; i += 10) {
     await Promise.all(jobs.slice(i, i + 10).map(async (j) => {
-      const r = await ctx.push(j.token, title || "InstantGram", text);
+      const r = await ctx.push(j.token, title || "InstantGram", text, { image });
       if (r === "ok") sent++;
       else { failed++; if (r === "stale") stale.push(j); }
     }));
@@ -443,15 +454,15 @@ async function broadcast(ctx, body) {
 
 /** Sends one notification; "ok", "stale" (token is old) or "fail". */
 export function fcmSender(sa, project, fetchFn = fetch) {
-  return async (token, title, text) => {
+  return async (token, title, text, extra = {}) => {
     const res = await fetchFn(`https://fcm.googleapis.com/v1/projects/${project}/messages:send`, {
       method: "POST",
       headers: { authorization: `Bearer ${await googleToken(sa, fetchFn)}`, "content-type": "application/json" },
       body: JSON.stringify({ message: {
         token,
-        notification: { title, body: text },
-        data: { type: "broadcast" },
-        android: { priority: "HIGH", notification: { channel_id: "activity", icon: "ic_stat_instantgram", color: "#C6FF3D" } },
+        notification: { title, body: text, ...(extra.image ? { image: extra.image } : {}) },
+        data: extra.data || { type: "broadcast" },
+        android: { priority: "HIGH", notification: { channel_id: "activity", icon: "ic_stat_instantgram", color: "#C6FF3D", ...(extra.image ? { image: extra.image } : {}) } },
       } }),
     });
     if (res.ok) return "ok";
@@ -613,6 +624,17 @@ const time = (v) => (v instanceof Date ? v.getTime() : 0);
 
 async function deleteAccount(ctx, body) {
   const uid = needUid(body.uid);
+  let blocked = "";
+  if (body.blockEmail === true && !body.stage && !body.cursor) {
+    // first call: remember the email before the account is gone
+    let email = "";
+    try { const l = await ctx.auth.lookup(uid); email = (l && l.email) || ""; } catch { /* from the profile */ }
+    if (!email) { const d = await ctx.db.get(`users/${uid}`); email = d ? str(d.data.email) : ""; }
+    if (email) {
+      blocked = email.trim().toLowerCase();
+      await ctx.db.write([{ put: `blockedEmails/${blocked}`, data: { uid, at: new Date(ctx.nowMs) } }]);
+    }
+  }
   let stage = STAGES.includes(body.stage) ? body.stage : STAGES[0];
   let cursor = typeof body.cursor === "string" ? body.cursor : "";
   let removed = 0;
@@ -621,14 +643,245 @@ async function deleteAccount(ctx, body) {
     removed += r.n || 0;
     if (r.done) {
       const i = STAGES.indexOf(stage);
-      if (i === STAGES.length - 1) return { ok: true, done: true, stage, removed };
+      if (i === STAGES.length - 1) return { ok: true, done: true, stage, removed, ...(blocked ? { blocked } : {}) };
       stage = STAGES[i + 1];
       cursor = "";
     } else {
       cursor = r.cursor || "";
     }
-    if (ctx.late()) return { ok: true, done: false, stage, cursor, removed };
+    if (ctx.late()) return { ok: true, done: false, stage, cursor, removed, ...(blocked ? { blocked } : {}) };
   }
+}
+
+
+// ------------------------------------------------------------ v1.30 tools
+
+const DAY = 86400_000;
+const dayKey = (ms) => new Date(ms).toISOString().slice(0, 10);
+
+/** Only pictures the panel uploaded (or any https link) go into notifications. */
+function imageUrl(ctx, v) {
+  const u = str(v).trim();
+  if (!u) return "";
+  if (!/^https:\/\/[^\s"'<>]{4,500}$/.test(u)) throw new AdminError("The picture link must start with https://");
+  return u;
+}
+
+/** Sign-ups, uploads and active people per day, plus the top posts and creators. */
+async function charts(ctx, body) {
+  const days = Math.min(90, Math.max(7, Math.floor(Number(body.days) || 30)));
+  const today = Date.parse(dayKey(ctx.nowMs));
+  const since = new Date(today - (days - 1) * DAY);
+  const keys = Array.from({ length: days }, (_, i) => dayKey(today - (days - 1 - i) * DAY));
+  const zero = () => Object.fromEntries(keys.map((k) => [k, 0]));
+  const signups = zero(), uploads = zero(), clips = zero(), active = zero();
+  const [u, p, top, creators] = await Promise.all([
+    ctx.db.query("users", { where: [["createdAt", ">=", since]], select: ["createdAt"], limit: 5000 }),
+    ctx.db.query("posts", { where: [["createdAt", ">=", since]], select: ["createdAt", "type"], limit: 5000 }),
+    ctx.db.query("posts", { orderBy: [["likeCount", "desc"]], limit: 10 }),
+    ctx.db.query("users", { orderBy: [["followersCount", "desc"]], limit: 10 }),
+  ]);
+  for (const d of u) { const k = d.data.createdAt instanceof Date ? dayKey(d.data.createdAt.getTime()) : ""; if (k in signups) signups[k]++; }
+  for (const d of p) {
+    const k = d.data.createdAt instanceof Date ? dayKey(d.data.createdAt.getTime()) : "";
+    if (!(k in uploads)) continue;
+    uploads[k]++;
+    if (d.data.type === "video" || d.data.type === "photoclip") clips[k]++;
+  }
+  await Promise.all(keys.map(async (k) => {
+    try { const d = await ctx.db.get(`dailyStats/${k}`); if (d) active[k] = num(d.data.active); } catch { /* 0 */ }
+  }));
+  return {
+    ok: true, days: keys,
+    signups: keys.map((k) => signups[k]), uploads: keys.map((k) => uploads[k]),
+    clips: keys.map((k) => clips[k]), active: keys.map((k) => active[k]),
+    topPosts: top.map(postRow), topCreators: creators.map(userRow),
+  };
+}
+
+async function verify(ctx, body) {
+  const uid = needUid(body.uid);
+  const on = body.on !== false;
+  await ctx.db.write([{ set: `users/${uid}`, data: { verified: on } }]);
+  return { ok: true, verified: on };
+}
+
+const randomId = (n = 20) => {
+  const abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const b = crypto.getRandomValues(new Uint8Array(n));
+  return Array.from(b, (x) => abc[x % abc.length]).join("");
+};
+
+/** A message or warning to one person: in their Notifications and as a push (with a picture). */
+async function notifyUser(ctx, body) {
+  const uid = needUid(body.uid);
+  const warn = body.warn === true;
+  const title = str(body.title).trim().slice(0, 60);
+  const text = str(body.body).trim().slice(0, 500);
+  if (!text) throw new AdminError("Write the message first.");
+  const image = imageUrl(ctx, body.image);
+  const id = randomId();
+  await ctx.db.write([{ create: `notifications/${uid}/items/${id}`, data: {
+    type: warn ? "warning" : "admin", actorId: "", actorName: "InstantGram", actorPhoto: "",
+    postId: "", thumb: image, text, title, at: new Date(ctx.nowMs), read: false,
+  } }]);
+  if (warn) await ctx.db.write([{ set: `users/${uid}`, data: {}, add: { warnings: 1 } }]);
+  let sent = 0;
+  const reg = await ctx.db.get(`pushTokens/${uid}`);
+  const tokens = reg && reg.data.off !== true && Array.isArray(reg.data.tokens) ? reg.data.tokens.filter((t) => typeof t === "string").slice(-5) : [];
+  for (const t of tokens) {
+    const r = await ctx.push(t, warn ? "\u26a0\ufe0f Warning from InstantGram" : (title || "InstantGram"), text.slice(0, 240), { image, data: { type: "activity", from: "", postId: "" } });
+    if (r === "ok") sent++;
+  }
+  return { ok: true, id, sent, phones: tokens.length };
+}
+
+/** Gives the account a new random username (for a rude or stolen one). */
+async function resetUsername(ctx, body) {
+  const uid = needUid(body.uid);
+  const d = await ctx.db.get(`users/${uid}`);
+  if (!d) throw new AdminError("No such account.", 404);
+  let name = "";
+  for (let i = 0; i < 6 && !name; i++) {
+    const n = "user_" + Array.from(crypto.getRandomValues(new Uint8Array(6)), (x) => (x % 36).toString(36)).join("");
+    if (!(await ctx.db.get(`usernames/${n}`))) name = n;
+  }
+  if (!name) throw new AdminError("Try again.", 503);
+  const old = await ctx.db.query("usernames", { where: [["uid", "==", uid]], limit: 20 });
+  await ctx.db.write([
+    { create: `usernames/${name}`, data: { uid } },
+    ...old.map((o) => ({ del: o.path })),
+    { set: `users/${uid}`, data: { username: name } },
+  ]);
+  // their posts show the new name too
+  const posts = await ctx.db.query("posts", { where: [["authorId", "==", uid]], select: ["authorId"], limit: 300 });
+  if (posts.length) await ctx.db.write(posts.map((x) => ({ set: x.path, data: { authorUsername: name } })));
+  return { ok: true, username: name, old: str(d.data.username), posts: posts.length };
+}
+
+async function resetPhoto(ctx, body) {
+  const uid = needUid(body.uid);
+  const d = await ctx.db.get(`users/${uid}`);
+  if (!d) throw new AdminError("No such account.", 404);
+  const ref = str(d.data.photoUrl);
+  await ctx.db.write([{ set: `users/${uid}`, data: { photoUrl: "" } }]);
+  let files = 0;
+  if (ref.startsWith("m:") && MEDIA_KEY.test(ref.slice(2))) files = await removeFiles(ctx, [ref.slice(2)]);
+  const posts = await ctx.db.query("posts", { where: [["authorId", "==", uid]], select: ["authorId"], limit: 300 });
+  if (posts.length) await ctx.db.write(posts.map((x) => ({ set: x.path, data: { authorPhotoUrl: "" } })));
+  return { ok: true, files };
+}
+
+/** Phones signed in to the account (for push) and what they run. */
+async function devices(ctx, body) {
+  const uid = needUid(body.uid);
+  const reg = await ctx.db.get(`pushTokens/${uid}`);
+  if (!reg) return { ok: true, devices: [], phones: 0, off: false };
+  const tokens = Array.isArray(reg.data.tokens) ? reg.data.tokens.length : 0;
+  const info = reg.data.devices && typeof reg.data.devices === "object" ? reg.data.devices : {};
+  const list = Object.entries(info).map(([id, v]) => ({
+    id, os: str(v && v.os), osVersion: str(v && v.osVersion).slice(0, 120), app: str(v && v.app), at: when(v && v.at),
+  }));
+  list.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  return { ok: true, devices: list, phones: tokens, off: reg.data.off === true, lastSeen: when(reg.data.at) };
+}
+
+/** Posts by "@username", or with words / #tags in the caption (the newest 400 are searched). */
+async function searchPosts(ctx, body) {
+  const q = str(body.q).trim();
+  if (!q) throw new AdminError("Type something to search.");
+  if (q.startsWith("@")) {
+    const name = q.slice(1).toLowerCase();
+    const names = await ctx.db.query("users", { where: [["username", "==", name]], limit: 1 });
+    if (!names.length) return { ok: true, posts: [] };
+    const docs = await ctx.db.query("posts", { where: [["authorId", "==", names[0].id]], orderBy: [["createdAt", "desc"]], limit: 60 });
+    return { ok: true, posts: docs.map(postRow) };
+  }
+  const want = q.toLowerCase();
+  const docs = await ctx.db.query("posts", { orderBy: [["createdAt", "desc"]], limit: 400 });
+  return { ok: true, posts: docs.filter((d) => str(d.data.caption).toLowerCase().includes(want)).slice(0, 60).map(postRow) };
+}
+
+/** Only chats somebody reported may be read or cleaned. */
+async function reportedChat(ctx, chatId) {
+  const id = needId(chatId);
+  const r = await ctx.db.query("reports", { where: [["chatId", "==", id]], limit: 1 });
+  if (!r.length) throw new AdminError("Only reported chats can be opened.", 403);
+  return id;
+}
+
+async function chat(ctx, body) {
+  const id = await reportedChat(ctx, body.chatId);
+  const docs = await ctx.db.query("messages", { orderBy: [["createdAt", "desc"]], limit: 150 }, `chats/${id}`);
+  const rows = docs.map((d) => ({
+    id: d.id, from: str(d.data.senderId), text: str(d.data.text).slice(0, 1000), type: str(d.data.type) || "text",
+    media: str(d.data.mediaUrl) || str(d.data.imageUrl) || str(d.data.gifUrl), createdAt: when(d.data.createdAt),
+  }));
+  const members = id.split("_");
+  const names = {};
+  await Promise.all(members.map(async (m) => {
+    if (!UIDRE.test(m)) return;
+    const u = await ctx.db.get(`users/${m}`);
+    names[m] = u ? str(u.data.username) : "(deleted)";
+  }));
+  return { ok: true, chatId: id, names, messages: rows.reverse() };
+}
+
+async function deleteMessage(ctx, body) {
+  const id = await reportedChat(ctx, body.chatId);
+  const mid = needId(body.id);
+  await ctx.db.write([{ del: `chats/${id}/messages/${mid}` }]);
+  return { ok: true };
+}
+
+/** A picture for notifications, stored with the app's media: {url}. */
+async function uploadImage(ctx, body) {
+  const b64 = str(body.data).replace(/^data:[^,]*,/, "");
+  if (!b64) throw new AdminError("Pick a picture.");
+  let bytes;
+  try { bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)); } catch { throw new AdminError("That picture could not be read."); }
+  if (bytes.length > 3 * 1024 * 1024) throw new AdminError("The picture is bigger than 3 MB.");
+  const kind = bytes[0] === 0xff && bytes[1] === 0xd8 ? ["jpg", "image/jpeg"]
+    : bytes[0] === 0x89 && bytes[1] === 0x50 ? ["png", "image/png"]
+      : bytes[8] === 0x57 && bytes[9] === 0x45 ? ["webp", "image/webp"] : null;
+  if (!kind) throw new AdminError("Use a JPG, PNG or WebP picture.");
+  if (!ctx.store || !ctx.store.put) throw new AdminError("Storage is not set up.", 503);
+  const hex = Array.from(crypto.getRandomValues(new Uint8Array(16)), (x) => x.toString(16).padStart(2, "0")).join("");
+  const key = `image/admin/${hex}.${kind[0]}`;
+  await ctx.store.put(key, bytes, kind[1]);
+  return { ok: true, key, url: `${str(ctx.publicBase).replace(/\/+$/, "")}/${key}` };
+}
+
+async function hidePost(ctx, body) {
+  const id = needId(body.id);
+  const on = body.on !== false;
+  await ctx.db.write([{ set: `posts/${id}`, data: on ? { hidden: true } : { hidden: false, reportCount: 0 } }]);
+  return { ok: true, hidden: on };
+}
+
+/** App settings: autoHide = hide posts after this many reports (0 = off). */
+async function config(ctx, body) {
+  if (body.set && typeof body.set === "object") {
+    const n = Math.min(1000, Math.max(0, Math.floor(Number(body.set.autoHide) || 0)));
+    await ctx.db.write([{ put: "config/app", data: { autoHide: n } }]);
+  }
+  const d = await ctx.db.get("config/app");
+  return { ok: true, config: { autoHide: d ? num(d.data.autoHide) : 0 } };
+}
+
+async function blockedEmails(ctx, body) {
+  if (body.remove) {
+    const e = str(body.remove).trim().toLowerCase();
+    if (!e || e.includes("/")) throw new AdminError("Bad email.");
+    await ctx.db.write([{ del: `blockedEmails/${e}` }]);
+  }
+  if (body.add) {
+    const e = str(body.add).trim().toLowerCase();
+    if (!/^[^\s/@]+@[^\s/@]+\.[^\s/@]+$/.test(e)) throw new AdminError("Bad email.");
+    await ctx.db.write([{ put: `blockedEmails/${e}`, data: { uid: "", at: new Date(ctx.nowMs) } }]);
+  }
+  const page = await ctx.db.list("blockedEmails", 300);
+  return { ok: true, emails: page.docs.map((d) => ({ email: d.id, uid: str(d.data.uid), at: when(d.data.at) })) };
 }
 
 // ------------------------------------------------------------------- dispatch
@@ -645,6 +898,8 @@ function needId(v) {
 export const PANEL_OPS = {
   stats, users, user, ban, posts, moments, deletePost, deleteMoment, comments, deleteComment,
   reports, resolveReport, broadcast, deleteAccount,
+  charts, verify, notifyUser, resetUsername, resetPhoto, devices, searchPosts, chat, deleteMessage,
+  uploadImage, hidePost, config, blockedEmails,
 };
 
 /** ctx = {db, auth, store, push, wipeFiles, nowMs, budgetMs, publicBase} */

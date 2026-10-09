@@ -16,7 +16,14 @@ class AppNotification {
     this.text = '',
     this.createdAt,
     this.read = false,
+    this.title = '',
   });
+
+  /// Messages from the InstantGram team (admin panel): a heading ('' = none).
+  final String title;
+
+  /// From the InstantGram team: a message ('admin') or a warning ('warning').
+  bool get isFromTeam => type == 'admin' || type == 'warning';
 
   /// 'like', 'super' (super heart), 'comment', 'reply', 'follow' or 'mention'.
   final String type;
@@ -54,6 +61,7 @@ class AppNotification {
       text: m['text'] is String ? m['text'] as String : '',
       createdAt: at,
       read: m['read'] == true,
+      title: m['title'] is String ? m['title'] as String : '',
     );
   }
 
@@ -90,6 +98,10 @@ class AppNotification {
         return 'liked your moment';
       case 'story_super':
         return 'sent your moment a super heart 💖';
+      case 'admin':
+        return title.isEmpty ? '' : title;
+      case 'warning':
+        return 'Warning';
       default:
         return 'interacted with your post';
     }

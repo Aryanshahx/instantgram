@@ -17,6 +17,7 @@ import '../../services/safety_service.dart';
 import '../../services/post_pager.dart';
 import '../../services/post_service.dart';
 import '../../services/user_service.dart';
+import '../../widgets/moment_open.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/follow_button.dart';
 import '../../widgets/glass.dart';
@@ -115,6 +116,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _addStory() async {
     final done = await startStoryFlow(context);
     if (done && mounted) AppEvents.refreshFeed();
+  }
+
+  /// Tapping the picture plays the person's moment; my own picture without a moment
+  /// starts a new one.
+  bool _opening = false;
+
+  Future<void> _tapAvatar(AppUser user) async {
+    if (_opening) return;
+    _opening = true;
+    try {
+      final shown = await openMomentsOf(context, user.uid);
+      if (shown || !mounted) return;
+      if (_isMe) {
+        await _addStory();
+      } else {
+        noMomentNote(context, user.username);
+      }
+    } finally {
+      _opening = false;
+    }
   }
 
   void _openSettings(AppUser me) => openScreen(context, SettingsScreen(me: me));
@@ -451,11 +472,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     color: context.bg,
                     shape: BoxShape.circle,
                   ),
-                  child: UserAvatar(
-                    url: user.photoUrl,
-                    name: user.username,
-                    radius: 42,
-                    uid: user.uid,
+                  child: GestureDetector(
+                    key: const ValueKey('profileAvatar'),
+                    onTap: () => _tapAvatar(user),
+                    child: UserAvatar(
+                      url: user.photoUrl,
+                      name: user.username,
+                      radius: 42,
+                      uid: user.uid,
+                    ),
                   ),
                 ),
               ),
@@ -496,13 +521,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                user.fullName.isNotEmpty ? user.fullName : user.username,
-                style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -1,
-                ),
+              Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      user.fullName.isNotEmpty ? user.fullName : user.username,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -1,
+                      ),
+                    ),
+                  ),
+                  if (user.verified)
+                    const Padding(
+                      padding: EdgeInsets.only(left: 6),
+                      child: Icon(
+                        Icons.verified_rounded,
+                        key: ValueKey('verifiedBadge'),
+                        color: Color(0xFF3D9BFF),
+                        size: 24,
+                      ),
+                    ),
+                ],
               ),
               const SizedBox(height: 2),
               Text('@${user.username}', style: TextStyle(color: context.muted)),
@@ -597,26 +639,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: FollowButton(
-                        uid: user.uid,
-                        isPrivate: user.isPrivate,
-                        compact: true,
+                      child: SizedBox(
+                        height: 38,
+                        child: FollowButton(
+                          uid: user.uid,
+                          isPrivate: user.isPrivate,
+                          style: _smallButton,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: OutlinedButton.icon(
-                        key: const ValueKey('messageButton'),
-                        style: _smallButton,
-                        onPressed: () => openScreen(
-                          context,
-                          ChatScreen(otherUid: user.uid, user: user),
+                      child: SizedBox(
+                        height: 38,
+                        child: OutlinedButton.icon(
+                          key: const ValueKey('messageButton'),
+                          style: _smallButton,
+                          onPressed: () => openScreen(
+                            context,
+                            ChatScreen(otherUid: user.uid, user: user),
+                          ),
+                          icon: const Icon(
+                            Icons.chat_bubble_outline_rounded,
+                            size: 18,
+                          ),
+                          label: const Text('Message'),
                         ),
-                        icon: const Icon(
-                          Icons.chat_bubble_outline_rounded,
-                          size: 18,
-                        ),
-                        label: const Text('Message'),
                       ),
                     ),
                   ],

@@ -156,22 +156,28 @@ export function messageBody(m) {
 }
 
 /** The line of an activity notification ("aryan liked your post"). */
-export function activityBody(item) {
+export function activityBody(item, what = "post") {
   const who = item.actorName || "Someone";
   const text = cut(String(item.text || ""), 100);
   switch (item.type) {
-    case "like": return `${who} liked your post`;
-    case "super": return `${who} sent you a super heart 💖`;
-    case "comment": return text ? `${who} commented: ${text}` : `${who} commented on your post`;
+    case "like": return `${who} liked your ${what}`;
+    case "super": return `${who} sent your ${what} a super heart 💖`;
+    case "comment": return text ? `${who} commented on your ${what}: ${text}` : `${who} commented on your ${what}`;
     case "reply": return text ? `${who} replied: ${text}` : `${who} replied to your comment`;
     case "mention": return `${who} mentioned you`;
     case "follow": return `${who} started following you`;
     case "story_view": return `${who} viewed your moment`;
     case "story_like": return `${who} liked your moment`;
     case "story_super": return `${who} sent your moment a super heart 💖`;
-    default: return `${who} interacted with your post`;
+    default: return `${who} interacted with your ${what}`;
   }
 }
+
+const UPLOADS = {
+  post: "Your post is live \u2705",
+  clip: "Your clip is live \u2705",
+  moment: "Your moment is live \u2705",
+};
 
 const mutedFor = (v, uid) => (v && typeof v === "object" ? v[uid] === true : v === true);
 const fresh = (d, nowMs) => d instanceof Date && nowMs - d.getTime() < RECENT_MS && d.getTime() - nowMs < 60_000;
@@ -265,7 +271,15 @@ export async function notify(body, env, uid, deps = {}) {
     if (!item || item.actorId !== uid || !fresh(item.at, nowMs)) return bad("No such activity.", 403);
     to = target;
     title = "InstantGram";
-    text = activityBody(item);
+    // a clip is called a clip
+    let what = "post";
+    if (item.postId && SAFE_ID.test(String(item.postId))) {
+      try {
+        const p = await db.get(`posts/${item.postId}`);
+        if (p && (p.type === "video" || p.type === "photoclip")) what = "clip";
+      } catch { /* "post" */ }
+    }
+    text = activityBody(item, what);
     data = { type: "activity", from: uid, postId: String(item.postId || "") };
     android = { channel: "activity", tag: `act_${item.type}_${item.postId || uid}` };
   } else if (kind === "storyView") {
@@ -294,13 +308,21 @@ export async function notify(body, env, uid, deps = {}) {
     text = activityBody(item);
     data = { type: "activity", from: uid, postId: "" };
     android = { channel: "activity", tag: `sv_${storyId}_${uid}` };
+  } else if (kind === "upload") {
+    // my own upload is online: only my own phones hear about it
+    const what = UPLOADS[body.what] ? body.what : "post";
+    to = uid;
+    title = "InstantGram";
+    text = UPLOADS[what];
+    data = { type: "upload", what };
+    android = { channel: "activity", tag: `upload_${what}` };
   } else {
     return bad("Unknown kind.");
   }
-  if (!to || to === uid) return ok("nobody");
+  if (!to || (to === uid && kind !== "upload")) return ok("nobody");
 
   // blocked people never reach you
-  if (await db.get(`users/${to}/blocked/${uid}`)) return ok("blocked");
+  if (to !== uid && await db.get(`users/${to}/blocked/${uid}`)) return ok("blocked");
   const reg = await db.get(`pushTokens/${to}`);
   const tokens = reg && Array.isArray(reg.tokens) ? reg.tokens.filter((t) => typeof t === "string").slice(-5) : [];
   if (reg && reg.off === true) return ok("off");

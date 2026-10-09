@@ -26,7 +26,19 @@ class AppUser {
     this.lastActive,
     this.online = true,
     this.banned = false,
+    this.bannedUntil,
+    this.verified = false,
   });
+
+  /// Set by the admin panel: a suspension for some days ends at this time (null = for good).
+  final DateTime? bannedUntil;
+
+  /// Blue tick given in the admin panel.
+  final bool verified;
+
+  /// Suspended right now (a suspension for some days is over once [bannedUntil] passed).
+  bool get suspended =>
+      banned && (bannedUntil == null || bannedUntil!.isAfter(DateTime.now()));
 
   final String uid;
   final String username;
@@ -104,6 +116,10 @@ class AppUser {
       country: _str(m['country']),
       online: m['online'] is bool ? m['online'] as bool : true,
       banned: m['banned'] == true,
+      bannedUntil: m['bannedUntil'] is Timestamp
+          ? (m['bannedUntil'] as Timestamp).toDate()
+          : null,
+      verified: m['verified'] == true,
       lastActive: m['lastActive'] is Timestamp
           ? (m['lastActive'] as Timestamp).toDate()
           : null,

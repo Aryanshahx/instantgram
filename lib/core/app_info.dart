@@ -1,5 +1,5 @@
 /// The version shown in Settings. Keep it in step with pubspec.yaml's version name.
-const String kAppVersion = '1.13.0';
+const String kAppVersion = '1.30.0';
 
 const String kAppName = 'InstantGram';
 const String kCompany = 'Hyper Tech Labs';
@@ -8,7 +8,8 @@ const String kSupportEmail = 'techlabs.hyper@gmail.com';
 /// Where new versions are published (GitHub releases).
 const String kReleasesApi =
     'https://api.github.com/repos/Aryanshahx/instantgram/releases/latest';
-const String kReleasesPage = 'https://github.com/Aryanshahx/instantgram/releases';
+const String kReleasesPage =
+    'https://github.com/Aryanshahx/instantgram/releases';
 
 /// True when [latest] (like "v1.14.0" or "1.14.0") is newer than [current].
 bool isNewerVersion(String latest, String current) {

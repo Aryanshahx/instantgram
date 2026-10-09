@@ -47,6 +47,12 @@ class FakeDb {
   async write(writes) {
     for (const w of writes) {
       if (w.del) { this.docs.delete(w.del); continue; }
+      if (w.create) {
+        if (this.docs.has(w.create)) throw new Error("exists " + w.create);
+        this.docs.set(w.create, { ...(w.data || {}) });
+        continue;
+      }
+      if (w.put) { this.docs.set(w.put, { ...(this.docs.get(w.put) || {}), ...(w.data || {}) }); continue; }
       if (!this.docs.has(w.set)) continue; // currentDocument.exists
       const d = this.docs.get(w.set);
       Object.assign(d, w.data || {});
@@ -316,6 +322,14 @@ test("restDb sends the right Firestore requests", async () => {
   const cq = seen[3].body.structuredQuery;
   assert.equal(cq.orderBy.length, 1);
   assert.deepEqual(cq.startAt.values, [{ referenceValue: "projects/p/databases/(default)/documents/chats/c1" }]);
+  await db.write([{ put: "config/app", data: { autoHide: 3 } }, { create: "notifications/u1/items/x", data: { text: "hi" } }]);
+  const pw = seen[4].body.writes;
+  assert.equal(pw[0].currentDocument, undefined);
+  assert.deepEqual(pw[0].updateMask, { fieldPaths: ["autoHide"] });
+  assert.deepEqual(pw[1].currentDocument, { exists: false });
+  assert.equal(pw[1].updateMask, undefined);
+  await db.query("posts", { select: ["createdAt"], limit: 5 });
+  assert.deepEqual(seen[5].body.structuredQuery.select, { fields: [{ fieldPath: "createdAt" }] });
 });
 
 test("the panel page is served with a strict policy", async () => {
@@ -327,4 +341,114 @@ test("the panel page is served with a strict policy", async () => {
   assert.match(html, /InstantGram Admin/);
   assert.match(html, /\/api\/admin/);
   assert.equal((await panel.fetch(new Request("https://x/admin", { method: "POST" }))).status, 404);
+});
+
+// ---------------------------------------------------------------- v1.30 tools
+
+test("charts: daily sign-ups, uploads, active people and the top lists", async () => {
+  const db = world();
+  db.docs.set("dailyStats/2026-10-09", { active: 7 });
+  const { ctx } = ctxFor(db);
+  const r = await runPanelOp({ op: "charts", days: 7 }, ctx);
+  assert.equal(r.days.length, 7);
+  assert.equal(r.days[6], "2026-10-09");
+  assert.equal(r.signups[6], 1); // alice today; bob two days ago
+  assert.equal(r.signups[4], 1);
+  assert.equal(r.uploads[6], 3);
+  assert.equal(r.clips[6], 1);
+  assert.equal(r.active[6], 7);
+  assert.equal(r.topPosts.length, 3);
+  assert.equal(r.topCreators.length, 2);
+});
+
+test("verify, suspend for some days, warn and message with a picture", async () => {
+  const db = world();
+  const sent = [];
+  const { ctx, authCalls } = ctxFor(db, { push: async (t, title, text, extra) => { sent.push({ t, title, text, extra }); return "ok"; } });
+  await runPanelOp({ op: "verify", uid: "bob2" }, ctx);
+  assert.equal(db.docs.get("users/bob2").verified, true);
+  const b = await runPanelOp({ op: "ban", uid: "bob2", days: 3, reason: "spam" }, ctx);
+  assert.equal(b.until, new Date(now + 3 * 86400_000).toISOString());
+  assert.equal(db.docs.get("users/bob2").banned, true);
+  assert.deepEqual(authCalls[0], ["disable", "bob2", false]); // login stays on for a timed suspension
+  await runPanelOp({ op: "ban", uid: "bob2", on: false }, ctx);
+  assert.equal(db.docs.get("users/bob2").bannedUntil, null);
+  const w = await runPanelOp({ op: "notifyUser", uid: "alice1", warn: true, body: "Stop spamming" }, ctx);
+  assert.equal(w.sent, 2);
+  const item = db.docs.get(`notifications/alice1/items/${w.id}`);
+  assert.equal(item.type, "warning");
+  assert.equal(item.text, "Stop spamming");
+  assert.equal(db.docs.get("users/alice1").warnings, 1);
+  assert.match(sent[0].title, /Warning/);
+  await runPanelOp({ op: "notifyUser", uid: "alice1", title: "Hi", body: "New stickers!", image: "https://cdn.example/x.jpg" }, ctx);
+  assert.equal(sent[2].extra.image, "https://cdn.example/x.jpg");
+  await assert.rejects(runPanelOp({ op: "notifyUser", uid: "alice1", body: "x", image: "javascript:alert(1)" }, ctx), /https/);
+  await assert.rejects(runPanelOp({ op: "notifyUser", uid: "alice1", body: "" }, ctx), /Write/);
+});
+
+test("reset username swaps the name everywhere; reset photo removes the file", async () => {
+  const db = world();
+  db.docs.get("users/alice1").photoUrl = "m:" + KEY("image", "alice1", 9);
+  const { ctx, deleted } = ctxFor(db);
+  const r = await runPanelOp({ op: "resetUsername", uid: "alice1" }, ctx);
+  assert.match(r.username, /^user_[a-z0-9]{6}$/);
+  assert.equal(db.docs.get("users/alice1").username, r.username);
+  assert.equal(db.docs.has("usernames/alice"), false);
+  assert.equal(db.docs.get(`usernames/${r.username}`).uid, "alice1");
+  assert.equal(db.docs.get("posts/p1").authorUsername, r.username);
+  await runPanelOp({ op: "resetPhoto", uid: "alice1" }, ctx);
+  assert.equal(db.docs.get("users/alice1").photoUrl, "");
+  assert.deepEqual(deleted, [KEY("image", "alice1", 9)]);
+});
+
+test("devices, post search, hide and auto-hide setting", async () => {
+  const db = world();
+  db.docs.get("pushTokens/alice1").devices = { d1: { os: "android", osVersion: "14", app: "1.30.0", at: ago(2) } };
+  db.docs.get("posts/p3").caption = "Sunset at the #beach";
+  const { ctx } = ctxFor(db);
+  const d = await runPanelOp({ op: "devices", uid: "alice1" }, ctx);
+  assert.equal(d.phones, 2);
+  assert.equal(d.devices[0].os, "android");
+  assert.deepEqual((await runPanelOp({ op: "searchPosts", q: "#BEACH" }, ctx)).posts.map((p) => p.id), ["p3"]);
+  assert.deepEqual((await runPanelOp({ op: "searchPosts", q: "@alice" }, ctx)).posts.map((p) => p.id), ["p2", "p1"]);
+  await runPanelOp({ op: "hidePost", id: "p3" }, ctx);
+  assert.equal(db.docs.get("posts/p3").hidden, true);
+  assert.equal((await runPanelOp({ op: "config", set: { autoHide: 5 } }, ctx)).config.autoHide, 5);
+  assert.equal(db.docs.get("config/app").autoHide, 5);
+});
+
+test("chats can only be read when reported", async () => {
+  const db = world();
+  const { ctx } = ctxFor(db);
+  await assert.rejects(runPanelOp({ op: "chat", chatId: "alice1_bob2" }, ctx), /reported/);
+  db.docs.set("reports/r2", { kind: "chat", chatId: "alice1_bob2", by: "alice1", status: "open" });
+  const c = await runPanelOp({ op: "chat", chatId: "alice1_bob2" }, ctx);
+  assert.deepEqual(c.messages.map((m) => m.text), ["hi", "bye"]);
+  assert.equal(c.names.bob2, "bob");
+  await runPanelOp({ op: "deleteMessage", chatId: "alice1_bob2", id: "m1" }, ctx);
+  assert.equal(db.docs.has("chats/alice1_bob2/messages/m1"), false);
+});
+
+test("pictures are uploaded for notifications; only real images", async () => {
+  const puts = [];
+  const { ctx } = ctxFor(world(), { publicBase: "https://media.example/", store: { async put(k, b, t) { puts.push([k, b.length, t]); }, async delete() {} } });
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]).toString("base64");
+  const r = await runPanelOp({ op: "uploadImage", data: "data:image/png;base64," + png }, ctx);
+  assert.match(r.key, /^image\/admin\/[a-f0-9]{32}\.png$/);
+  assert.equal(r.url, "https://media.example/" + r.key);
+  assert.equal(puts[0][2], "image/png");
+  await assert.rejects(runPanelOp({ op: "uploadImage", data: Buffer.from("hello world!").toString("base64") }, ctx), /JPG/);
+});
+
+test("deleting an account can block its email; the list can be edited", async () => {
+  const db = world();
+  const { ctx } = ctxFor(db);
+  let r = await runPanelOp({ op: "deleteAccount", uid: "bob2", blockEmail: true }, ctx);
+  assert.equal(r.blocked, "bob2@x.com");
+  assert.equal(db.docs.get("blockedEmails/bob2@x.com").uid, "bob2");
+  const l = await runPanelOp({ op: "blockedEmails", add: "Spam@Mail.com" }, ctx);
+  assert.deepEqual(l.emails.map((e) => e.email).sort(), ["bob2@x.com", "spam@mail.com"]);
+  r = await runPanelOp({ op: "blockedEmails", remove: "bob2@x.com" }, ctx);
+  assert.deepEqual(r.emails.map((e) => e.email), ["spam@mail.com"]);
+  await assert.rejects(runPanelOp({ op: "blockedEmails", add: "nope" }, ctx), /Bad email/);
 });

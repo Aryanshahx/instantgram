@@ -122,6 +122,8 @@ class Post {
     this.likeCount = 0,
     this.commentCount = 0,
     this.viewCount = 0,
+    this.reportCount = 0,
+    this.hidden = false,
     this.musicId = '',
     this.musicVolume = 0.8,
     this.musicStart = 0,
@@ -169,6 +171,10 @@ class Post {
 
   /// People who watched it (counted once per person).
   final int viewCount;
+
+  /// People who reported it, and hidden by the admin panel.
+  final int reportCount;
+  final bool hidden;
 
   /// Music chosen from the app's own library ('' = none), its volume (0-1) and, for videos,
   /// whether the clip's own sound is kept underneath it.
@@ -300,6 +306,8 @@ class Post {
       likeCount: _int(m['likeCount']),
       commentCount: _int(m['commentCount']),
       viewCount: _int(m['viewCount']),
+      reportCount: _int(m['reportCount']),
+      hidden: m['hidden'] == true,
       musicId: _str(m['musicId']),
       musicVolume: m['musicVolume'] is num
           ? (m['musicVolume'] as num).toDouble().clamp(0.0, 1.0)

@@ -13,7 +13,11 @@ class FollowButton extends StatefulWidget {
     this.onChanged,
     this.compact = false,
     this.isPrivate,
+    this.style,
   });
+
+  /// Same look for every state (the profile page uses its own button size).
+  final ButtonStyle? style;
 
   final String uid;
   final VoidCallback? onChanged;
@@ -45,7 +49,8 @@ class _FollowButtonState extends State<FollowButton> {
       var asked = false;
       if (!v) {
         if (widget.isPrivate == null) {
-          priv = (await UserService.instance.getUser(widget.uid))?.isPrivate ??
+          priv =
+              (await UserService.instance.getUser(widget.uid))?.isPrivate ??
               false;
         }
         if (priv) asked = await SafetyService.instance.hasRequested(widget.uid);
@@ -120,13 +125,17 @@ class _FollowButtonState extends State<FollowButton> {
         ? const EdgeInsets.symmetric(horizontal: 10)
         : null;
 
+    final own = widget.style;
     if (following) {
       return OutlinedButton(
-        style: OutlinedButton.styleFrom(
-          minimumSize: size,
-          textStyle: small,
-          padding: pad,
-        ),
+        key: const ValueKey('followingButton'),
+        style:
+            own ??
+            OutlinedButton.styleFrom(
+              minimumSize: size,
+              textStyle: small,
+              padding: pad,
+            ),
         onPressed: _toggle,
         child: Text(context.tr('Following')),
       );
@@ -134,21 +143,26 @@ class _FollowButtonState extends State<FollowButton> {
     if (_private && _requested) {
       return OutlinedButton(
         key: const ValueKey('requestedButton'),
-        style: OutlinedButton.styleFrom(
-          minimumSize: size,
-          textStyle: small,
-          padding: pad,
-        ),
+        style:
+            own ??
+            OutlinedButton.styleFrom(
+              minimumSize: size,
+              textStyle: small,
+              padding: pad,
+            ),
         onPressed: _busy ? null : _toggle,
         child: const Text('Requested'),
       );
     }
     return FilledButton(
-      style: FilledButton.styleFrom(
-        minimumSize: size,
-        textStyle: small,
-        padding: pad,
-      ),
+      key: const ValueKey('followButtonMain'),
+      style:
+          own ??
+          FilledButton.styleFrom(
+            minimumSize: size,
+            textStyle: small,
+            padding: pad,
+          ),
       onPressed: _following == null ? null : _toggle,
       child: Text(context.tr(_private ? 'Request' : 'Follow')),
     );

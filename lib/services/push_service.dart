@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dio/dio.dart';
@@ -7,6 +8,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
+import '../core/app_info.dart';
 import '../core/media_url.dart';
 
 /// Push notifications on the phone (Firebase Cloud Messaging).
@@ -72,6 +74,9 @@ class PushService {
   /// A like / comment / follow line was written into [to]'s Notifications.
   void activity(String to, String itemId) =>
       _send({'kind': 'activity', 'to': to, 'itemId': itemId});
+
+  /// My upload is online ([what]: post, clip or moment): my own phones get a notification.
+  void uploaded(String what) => _send({'kind': 'upload', 'what': what});
 
   /// Never throws and never makes the sender wait: a missing push is not worth an error.
   void _send(Map<String, dynamic> body) {
@@ -145,6 +150,8 @@ class PushService {
       await _doc(_uid).set({
         'tokens': FieldValue.arrayUnion([token]),
         'at': FieldValue.serverTimestamp(),
+        // which phones the account uses (admin panel: devices)
+        'devices': {deviceKey(token): deviceInfo()},
       }, SetOptions(merge: true));
       if (old.isNotEmpty && old != token) {
         await _doc(_uid).update({
@@ -155,6 +162,18 @@ class PushService {
       // next start
     }
   }
+
+  /// A short name for one phone (from its push address; the address itself is not repeated).
+  static String deviceKey(String token) =>
+      'd${(token.hashCode & 0x7fffffff).toRadixString(16)}';
+
+  /// The phone's system and the app version.
+  static Map<String, Object> deviceInfo() => {
+    'os': kIsWeb ? 'web' : Platform.operatingSystem,
+    'osVersion': kIsWeb ? '' : Platform.operatingSystemVersion,
+    'app': kAppVersion,
+    'at': FieldValue.serverTimestamp(),
+  };
 
   void _tapped(RemoteMessage m) {
     opened.value = {for (final e in m.data.entries) e.key: '${e.value}'};

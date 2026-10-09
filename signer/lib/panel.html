@@ -87,6 +87,17 @@ h2{margin:4px 0 14px;font-size:18px}
 .comment{padding:8px 0;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:flex-start}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--mute);border-top-color:transparent;border-radius:50%;animation:s 1s linear infinite;vertical-align:-2px}
 @keyframes s{to{transform:rotate(360deg)}}
+.chart{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px}
+.chart svg{width:100%;height:150px;display:block}
+.chart .t{display:flex;justify-content:space-between;align-items:baseline}
+.charts{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin-bottom:18px}
+.tag.ver{color:var(--blue);border-color:#1f3d63}
+.tag.warnt{color:var(--amber);border-color:#5a4110}
+.pc .sel{position:absolute;top:8px;right:8px;width:20px;height:20px;accent-color:var(--lime)}
+.pc.picked{outline:2px solid var(--lime)}
+.msg{padding:8px 10px;border-radius:12px;background:var(--card2);margin:6px 0;max-width:80%;word-break:break-word}
+.msg.me{margin-left:auto;background:#22301a}
+.phone img.big{width:100%;border-radius:10px;margin-top:8px;display:block}
 @media (max-width:640px){header .in{flex-wrap:wrap}nav{order:3;flex-basis:100%}.urow>.small{display:none}.kv{grid-template-columns:100px 1fr}.rep{flex-direction:column}.rep .thumb{width:100%;max-width:220px}}
 </style>
 </head>
@@ -114,7 +125,9 @@ h2{margin:4px 0 14px;font-size:18px}
       <button data-tab="posts">Posts &amp; clips</button>
       <button data-tab="moments">Moments</button>
       <button data-tab="reports">Reports <span id="repBadge" class="badge hide"></span></button>
+      <button data-tab="charts">Charts</button>
       <button data-tab="broadcast">Broadcast</button>
+      <button data-tab="settings">Settings</button>
     </nav>
     <button class="btn sm" id="logout">Log out</button>
   </div></header>
@@ -138,6 +151,11 @@ h2{margin:4px 0 14px;font-size:18px}
 
     <div data-view="posts" class="hide">
       <h2>Posts &amp; clips</h2>
+      <form id="postSearch" class="row" style="margin-bottom:12px">
+        <input class="f grow" id="pq" placeholder="Search captions, #tags or @username (empty = newest)">
+        <button class="btn lime">Search</button>
+      </form>
+      <div class="row wrap" id="bulkBar" style="margin-bottom:12px"><span class="muted small" id="bulkCount">Tick posts to delete many at once.</span><span class="grow"></span><button class="btn sm" id="bulkClear">Clear</button><button class="btn sm red" id="bulkDelete" disabled>Delete selected</button></div>
       <div class="chips" id="postKinds">
         <span class="chip on" data-k="">All</span><span class="chip" data-k="post">Posts</span><span class="chip" data-k="clip">Clips</span>
       </div>
@@ -156,6 +174,32 @@ h2{margin:4px 0 14px;font-size:18px}
       <div id="reports"></div>
     </div>
 
+    <div data-view="charts" class="hide">
+      <div class="row"><h2 class="grow">Charts</h2>
+        <select class="f" id="chartDays" style="width:auto"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select>
+        <button class="btn sm" id="chartRefresh">Refresh</button></div>
+      <div class="charts" id="charts"></div>
+      <div class="charts">
+        <div class="chart"><div class="t"><b>Top posts (likes)</b></div><div id="topPosts"></div></div>
+        <div class="chart"><div class="t"><b>Top creators (followers)</b></div><div id="topCreators"></div></div>
+      </div>
+    </div>
+
+    <div data-view="settings" class="hide">
+      <h2>Settings</h2>
+      <div class="stat" style="max-width:620px;margin-bottom:14px">
+        <b>Auto-hide reported posts</b>
+        <p class="small muted">Posts reported by this many different people are hidden from everyone except their author until you check them. 0 = off.</p>
+        <div class="row"><input class="f" id="autoHide" type="number" min="0" max="1000" style="width:120px"><button class="btn lime" id="autoHideSave">Save</button></div>
+      </div>
+      <div class="stat" style="max-width:620px">
+        <b>Blocked emails</b>
+        <p class="small muted">These emails cannot make a new account.</p>
+        <form class="row" id="blockForm"><input class="f grow" id="blockEmail" placeholder="email@example.com"><button class="btn">Block</button></form>
+        <div id="blockedList" style="margin-top:10px"></div>
+      </div>
+    </div>
+
     <div data-view="broadcast" class="hide">
       <h2>Push to everyone</h2>
       <div class="stat" style="max-width:620px">
@@ -164,8 +208,10 @@ h2{margin:4px 0 14px;font-size:18px}
         <label class="small muted" style="display:block;margin-top:10px">Message</label>
         <textarea class="f" id="bBody" rows="3" maxlength="240" placeholder="What's new…"></textarea>
         <div class="small muted" style="text-align:right"><span id="bCount">0</span>/240</div>
+        <label class="small muted">Picture (optional)</label>
+        <div class="row"><input class="f grow" id="bImage" placeholder="https://… or upload"><button class="btn sm" id="bUpload">Upload…</button></div>
         <div class="small muted">Preview</div>
-        <div class="phone"><div class="ic"></div><div><b id="pTitle">InstantGram</b><div class="muted" id="pBody">What's new…</div></div></div>
+        <div class="phone"><div class="ic"></div><div><b id="pTitle">InstantGram</b><div class="muted" id="pBody">What's new…</div><img class="big hide" id="pImg" alt=""></div></div>
         <button class="btn lime" id="bSend">Send to everyone</button>
         <div id="bProg" class="hide"><div class="bar"><i id="bBar"></i></div><div class="small" id="bText"></div></div>
         <p class="small muted">Goes to every phone with notifications on. People who turned notifications off get nothing.</p>
@@ -232,6 +278,26 @@ function ago(iso) {
 const date = (iso) => iso ? new Date(iso).toLocaleString() : "—";
 const kindName = (t) => ({ video: "Clip", photoclip: "Photo clip", image: "Post" }[t] || t);
 
+/** Lets the admin pick a picture and uploads it; resolves to its public link ("" = cancelled). */
+function uploadPicture() {
+  return new Promise((done) => {
+    const inp = document.createElement("input");
+    inp.type = "file"; inp.accept = "image/jpeg,image/png,image/webp";
+    inp.onchange = () => {
+      const f = inp.files && inp.files[0];
+      if (!f) return done("");
+      if (f.size > 3 * 1024 * 1024) { toast("The picture is bigger than 3 MB.", true); return done(""); }
+      const rd = new FileReader();
+      rd.onload = async () => {
+        try { toast("Uploading picture…"); const r = await api("uploadImage", { data: rd.result }); toast("Picture uploaded."); done(r.url); }
+        catch (e) { toast(e.message, true); done(""); }
+      };
+      rd.readAsDataURL(f);
+    };
+    inp.click();
+  });
+}
+
 // ------------------------------------------------------------------- login
 $("#loginForm").onsubmit = async (e) => {
   e.preventDefault();
@@ -272,6 +338,8 @@ function show(tab) {
   if (tab === "posts" && !loaded.posts) loadPosts(true);
   if (tab === "moments") loadMoments();
   if (tab === "reports") loadReports();
+  if (tab === "charts" && !loaded.charts) loadCharts();
+  if (tab === "settings") loadSettings();
   loaded[tab] = true;
 }
 $$("#nav button").forEach((b) => (b.onclick = () => show(b.dataset.tab)));
@@ -311,7 +379,7 @@ async function loadUsers(fresh) {
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 const userRow = (u) => `<div class="urow" data-uid="${esc(u.uid)}">${avatar(u)}<div class="grow" style="min-width:0">
-  <div><b>@${esc(u.username || "?")}</b>${u.online && u.lastActive && Date.now() - new Date(u.lastActive) < 240000 ? '<span class="tag on">online</span>' : ""}${u.banned ? '<span class="tag ban">banned</span>' : ""}${u.private ? '<span class="tag">private</span>' : ""}</div>
+  <div><b>@${esc(u.username || "?")}</b>${u.online && u.lastActive && Date.now() - new Date(u.lastActive) < 240000 ? '<span class="tag on">online</span>' : ""}${u.verified ? '<span class="tag ver">verified</span>' : ""}${u.banned ? `<span class="tag ban">${u.bannedUntil ? "suspended" : "banned"}</span>` : ""}${u.warnings ? `<span class="tag warnt">${u.warnings} warning${u.warnings > 1 ? "s" : ""}</span>` : ""}${u.private ? '<span class="tag">private</span>' : ""}</div>
   <div class="muted small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.fullName)} ${u.email ? "· " + esc(u.email) : ""}</div></div>
   <div class="small muted" style="text-align:right">${u.posts} posts · ${u.followers} followers<br>joined ${ago(u.createdAt)} · seen ${ago(u.lastActive)}</div></div>`;
 $("#users").onclick = (e) => { const r = e.target.closest(".urow"); if (r) openUser(r.dataset.uid); };
@@ -333,7 +401,7 @@ async function openUser(uid) {
     pane.innerHTML = `
       <div class="row"><button class="btn sm" data-close>← Back</button><span class="grow"></span></div>
       <div class="row" style="margin-top:14px">${avatar(u, true)}<div class="grow">
-        <div style="font-size:20px;font-weight:700">@${esc(u.username)} ${u.banned ? '<span class="tag ban">banned</span>' : ""}</div>
+        <div style="font-size:20px;font-weight:700">@${esc(u.username)} ${u.verified ? '<span class="tag ver">verified</span>' : ""} ${u.banned ? `<span class="tag ban">${u.bannedUntil ? "suspended until " + esc(date(u.bannedUntil)) : "banned"}</span>` : ""}${u.warnings ? `<span class="tag warnt">${u.warnings} warning${u.warnings > 1 ? "s" : ""}</span>` : ""}</div>
         <div class="muted">${esc(u.fullName || "")}</div><div class="small" style="white-space:pre-wrap">${esc(u.bio || "")}</div></div></div>
       <div class="kv">
         <div>User id</div><div><code>${esc(u.uid)}</code></div>
@@ -347,9 +415,19 @@ async function openUser(uid) {
         ${u.banned && u.bannedReason ? `<div>Ban reason</div><div>${esc(u.bannedReason)}</div>` : ""}
       </div>
       <div class="row wrap">
-        <button class="btn ${u.banned ? "" : "red"}" data-ban="${u.banned ? 0 : 1}">${u.banned ? "Unban" : "Ban"}</button>
+        <button class="btn" data-msg>Send notification…</button>
+        <button class="btn" data-warn>Warn…</button>
+        <button class="btn" data-verify="${u.verified ? 0 : 1}">${u.verified ? "Remove tick" : "Verify ✓"}</button>
+        <button class="btn" data-rename>Reset username</button>
+        <button class="btn" data-rephoto>Reset photo</button>
+      </div>
+      <div class="row wrap" style="margin-top:10px">
+        ${u.banned ? `<button class="btn" data-ban="0">${u.bannedUntil ? "End suspension" : "Unban"}</button>`
+          : `<button class="btn red" data-suspend>Suspend…</button><button class="btn red" data-ban="1">Ban</button>`}
         <button class="btn red" data-delacct>Delete account…</button>
       </div>
+      <h3 style="margin-top:24px">Devices</h3>
+      <div id="devList" class="small muted"><span class="spin"></span></div>
       <h3 style="margin-top:24px">Posts &amp; clips (${j.posts.length})</h3>
       <div class="grid">${j.posts.map(postCard).join("") || '<div class="muted">None.</div>'}</div>
       <h3 style="margin-top:24px">Live moments (${j.moments.length})</h3>
@@ -357,6 +435,27 @@ async function openUser(uid) {
     $("[data-close]", pane).onclick = closeDrawer;
     $("[data-ban]", pane).onclick = () => banUser(u, $("[data-ban]", pane).dataset.ban === "1");
     $("[data-delacct]", pane).onclick = () => deleteAccount(u);
+    const sus = $("[data-suspend]", pane); if (sus) sus.onclick = () => suspendUser(u);
+    $("[data-msg]", pane).onclick = () => composeTo(u, false);
+    $("[data-warn]", pane).onclick = () => composeTo(u, true);
+    $("[data-verify]", pane).onclick = async () => {
+      try { await api("verify", { uid: u.uid, on: $("[data-verify]", pane).dataset.verify === "1" }); toast("Saved."); openUser(u.uid); } catch (e) { toast(e.message, true); }
+    };
+    $("[data-rename]", pane).onclick = async () => {
+      if (!confirm(`Give @${u.username} a random new username?`)) return;
+      try { const r = await api("resetUsername", { uid: u.uid }); toast(`Now @${r.username}.`); openUser(u.uid); } catch (e) { toast(e.message, true); }
+    };
+    $("[data-rephoto]", pane).onclick = async () => {
+      if (!confirm(`Remove @${u.username}'s profile photo?`)) return;
+      try { await api("resetPhoto", { uid: u.uid }); toast("Photo removed."); openUser(u.uid); } catch (e) { toast(e.message, true); }
+    };
+    api("devices", { uid: u.uid }).then((d) => {
+      const box = $("#devList", pane); if (!box) return;
+      box.innerHTML = d.devices.length || d.phones
+        ? `${d.phones} phone(s) registered for notifications${d.off ? " · notifications turned off" : ""}${d.lastSeen ? " · last " + ago(d.lastSeen) : ""}` +
+          d.devices.map((x) => `<div class="comment"><div class="grow"><b>${esc(x.os || "?")}</b> ${esc(x.osVersion)}<div>app ${esc(x.app || "?")} · ${ago(x.at)}</div></div></div>`).join("")
+        : "No phone registered (the app was never opened after v1.21, or notifications were never allowed).";
+    }).catch((e) => { const box = $("#devList", pane); if (box) box.textContent = e.message; });
   } catch (e) { pane.innerHTML = `<button class="btn sm" onclick="closeDrawer()">← Back</button><div class="empty">${esc(e.message)}</div>`; }
 }
 window.closeDrawer = closeDrawer;
@@ -372,6 +471,54 @@ async function banUser(u, on) {
     toast(on ? `@${u.username} is banned.` : `@${u.username} can sign in again.`);
     openUser(u.uid);
   } catch (e) { toast(e.message, true); }
+}
+
+async function suspendUser(u) {
+  const days = prompt(`Suspend @${u.username} for how many days? (1-365)\nThey can log in again on their own afterwards.`, "7");
+  if (days === null) return;
+  const n = Math.floor(Number(days));
+  if (!(n >= 1 && n <= 365)) return toast("Enter 1 to 365 days.", true);
+  const reason = prompt("Reason (optional, only you see it):", "");
+  if (reason === null) return;
+  try {
+    const r = await api("ban", { uid: u.uid, on: true, days: n, reason });
+    toast(`@${u.username} is suspended until ${date(r.until)}.`);
+    openUser(u.uid);
+  } catch (e) { toast(e.message, true); }
+}
+
+/** A message (or warning) to one person, with an optional picture. */
+function composeTo(u, warn) {
+  const m = modal(`<h3 style="margin-top:0">${warn ? "Warn" : "Notify"} @${esc(u.username)}</h3>
+    ${warn ? "" : `<label class="small muted">Title</label><input class="f" id="nTitle" maxlength="60" placeholder="InstantGram">`}
+    <label class="small muted" style="display:block;margin-top:10px">${warn ? "Warning" : "Message"}</label>
+    <textarea class="f" id="nBody" rows="3" maxlength="500" placeholder="${warn ? "Please stop posting spam…" : "Hi!"}"></textarea>
+    <label class="small muted" style="display:block;margin-top:10px">Picture (optional)</label>
+    <div class="row"><input class="f grow" id="nImage" placeholder="https://… or upload"><button class="btn sm" id="nUpload">Upload…</button></div>
+    <div class="phone"><div class="ic"${warn ? ' style="background:var(--amber)"' : ""}></div><div class="grow"><b id="npTitle">${warn ? "⚠️ Warning from InstantGram" : "InstantGram"}</b><div class="muted" id="npBody"></div><img class="big hide" id="npImg" alt=""></div></div>
+    <p class="small muted">Shows in their Notifications and as a push on their phones.${warn ? " Warnings are counted on the account." : ""}</p>
+    <div class="row" style="justify-content:flex-end"><button class="btn" id="nCancel">Cancel</button><button class="btn ${warn ? "red" : "lime"}" id="nSend">Send</button></div>`);
+  const sync = () => {
+    if (!warn) $("#npTitle", m).textContent = $("#nTitle", m).value.trim() || "InstantGram";
+    $("#npBody", m).textContent = $("#nBody", m).value.trim();
+    const im = $("#nImage", m).value.trim();
+    $("#npImg", m).classList.toggle("hide", !/^https:/.test(im));
+    if (/^https:/.test(im)) $("#npImg", m).src = im;
+  };
+  $$("input,textarea", m).forEach((x) => (x.oninput = sync));
+  $("#nUpload", m).onclick = async () => { const link = await uploadPicture(); if (link) { $("#nImage", m).value = link; sync(); } };
+  $("#nCancel", m).onclick = () => m.remove();
+  $("#nSend", m).onclick = async () => {
+    const body = $("#nBody", m).value.trim();
+    if (!body) return toast("Write the message first.", true);
+    $("#nSend", m).disabled = true;
+    try {
+      const r = await api("notifyUser", { uid: u.uid, warn, title: warn ? "" : $("#nTitle", m).value.trim(), body, image: $("#nImage", m).value.trim() });
+      toast(`Sent${r.phones ? ` (push to ${r.sent}/${r.phones} phones)` : " (no phone registered: only in Notifications)"}.`);
+      m.remove();
+      if (warn) openUser(u.uid);
+    } catch (e) { toast(e.message, true); $("#nSend", m).disabled = false; }
+  };
 }
 
 // --------------------------------------------------------- delete account
@@ -392,6 +539,7 @@ function deleteAccount(u) {
     <p class="muted">Removes their posts, clips, moments, messages, likes, comments, follows, files and the sign-in account. Chats with them show "User not available". This cannot be undone.</p>
     <p>Type <b>${esc(u.username || u.uid)}</b> to confirm:</p>
     <input class="f" id="confirmName" autocomplete="off">
+    <label class="row small" style="margin-top:10px"><input type="checkbox" id="blockMail"> Also block this email${u.email ? ` (${esc(u.email)})` : ""} from making a new account</label>
     <div id="delProg" class="hide"><div class="bar"><i id="delBar"></i></div><div class="small" id="delText"></div></div>
     <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" id="delCancel">Cancel</button><button class="btn red" id="delGo" disabled>Delete for good</button></div>`);
   const want = u.username || u.uid;
@@ -400,13 +548,17 @@ function deleteAccount(u) {
   $("#delGo", m).onclick = async () => {
     m.dataset.busy = "1";
     $("#delGo", m).disabled = true; $("#delCancel", m).disabled = true; $("#confirmName", m).disabled = true;
+    const blockEmail = $("#blockMail", m).checked; $("#blockMail", m).disabled = true;
+    let blocked = "";
     $("#delProg", m).classList.remove("hide");
     let stage = "files", cursor = "", removed = 0, tries = 0;
     for (;;) {
       $("#delBar", m).style.width = `${Math.round(100 * STAGES.indexOf(stage) / STAGES.length)}%`;
       $("#delText", m).innerHTML = `<span class="spin"></span> ${STAGE_NAMES[stage]}… (${removed} removed)`;
       try {
-        const r = await api("deleteAccount", { uid: u.uid, stage, cursor });
+        const first = stage === "files" && !cursor && removed === 0;
+        const r = await api("deleteAccount", { uid: u.uid, stage, cursor, ...(first && blockEmail ? { blockEmail: true } : {}) });
+        if (r.blocked) blocked = r.blocked;
         tries = 0;
         removed += r.removed || 0;
         if (r.done) break;
@@ -422,7 +574,7 @@ function deleteAccount(u) {
       }
     }
     $("#delBar", m).style.width = "100%";
-    $("#delText", m).textContent = `Deleted. ${removed} records and files removed.`;
+    $("#delText", m).textContent = `Deleted. ${removed} records and files removed.${blocked ? ` ${blocked} is blocked.` : ""}`;
     delete m.dataset.busy;
     $("#delCancel", m).disabled = false; $("#delCancel", m).textContent = "Close";
     closeDrawer(); loaded.users = false; loaded.posts = false;
@@ -433,18 +585,19 @@ function deleteAccount(u) {
 // -------------------------------------------------------------------- posts
 let postKind = "", postsNext = null;
 const postCard = (p) => `<div class="pc" data-post="${esc(p.id)}">
-  <div class="media">${media(p)}<span class="kind">${kindName(p.type)}</span></div>
+  <div class="media">${media(p)}<span class="kind">${kindName(p.type)}${p.hidden ? " · hidden" : ""}</span><input type="checkbox" class="sel" data-pick="${esc(p.id)}" title="Select"></div>
   <div class="body">
     <div class="row"><span class="who" data-user="${esc(p.authorId)}">@${esc(p.author)}</span><span class="grow"></span><span class="small muted">${ago(p.createdAt)}</span></div>
     <div class="cap">${esc(p.caption) || '<i>no caption</i>'}</div>
-    <div class="small muted">♥ ${p.likes} · 💬 ${p.comments}${p.views ? ` · ▶ ${p.views}` : ""}</div>
-    <div class="acts"><button class="btn sm" data-comments="${esc(p.id)}">Comments</button><span class="grow"></span><button class="btn sm red" data-delpost="${esc(p.id)}">Delete</button></div>
+    <div class="small muted">♥ ${p.likes} · 💬 ${p.comments}${p.views ? ` · ▶ ${p.views}` : ""}${p.reports ? ` · <span style="color:var(--amber)">⚑ ${p.reports}</span>` : ""}</div>
+    <div class="acts"><button class="btn sm" data-comments="${esc(p.id)}">Comments</button><button class="btn sm" data-hide="${esc(p.id)}" data-on="${p.hidden ? 0 : 1}">${p.hidden ? "Unhide" : "Hide"}</button><span class="grow"></span><button class="btn sm red" data-delpost="${esc(p.id)}">Delete</button></div>
   </div></div>`;
 async function loadPosts(fresh) {
   const box = $("#posts");
   if (fresh) { box.innerHTML = `<div class="muted"><span class="spin"></span> Loading…</div>`; postsNext = null; }
   try {
-    const j = await api("posts", { kind: postKind, after: fresh ? undefined : postsNext });
+    const q = $("#pq").value.trim();
+    const j = q ? await api("searchPosts", { q }) : await api("posts", { kind: postKind, after: fresh ? undefined : postsNext });
     if (fresh) box.innerHTML = j.posts.length ? "" : `<div class="empty">Nothing here.</div>`;
     box.insertAdjacentHTML("beforeend", j.posts.map(postCard).join(""));
     postsNext = j.next;
@@ -457,6 +610,31 @@ $("#postKinds").onclick = (e) => {
   postKind = c.dataset.k; loadPosts(true);
 };
 $("#postsMore").onclick = () => loadPosts(false);
+$("#postSearch").onsubmit = (e) => { e.preventDefault(); loadPosts(true); };
+
+// many at once
+const picked = new Set();
+function syncPicked() {
+  $("#bulkCount").textContent = picked.size ? `${picked.size} selected` : "Tick posts to delete many at once.";
+  $("#bulkDelete").disabled = !picked.size;
+  $$("[data-pick]").forEach((c) => { c.checked = picked.has(c.dataset.pick); c.closest(".pc").classList.toggle("picked", c.checked); });
+}
+document.addEventListener("change", (e) => {
+  const c = e.target.closest("[data-pick]"); if (!c) return;
+  if (c.checked) picked.add(c.dataset.pick); else picked.delete(c.dataset.pick);
+  syncPicked();
+});
+$("#bulkClear").onclick = () => { picked.clear(); syncPicked(); };
+$("#bulkDelete").onclick = async () => {
+  if (!confirm(`Delete ${picked.size} posts for good?`)) return;
+  $("#bulkDelete").disabled = true;
+  let n = 0;
+  for (const id of [...picked]) {
+    $("#bulkCount").innerHTML = `<span class="spin"></span> Deleting ${n + 1} of ${picked.size}…`;
+    if (await deletePost(id, true)) { picked.delete(id); n++; }
+  }
+  toast(`${n} deleted.`); syncPicked();
+};
 
 async function deletePost(id, quiet = false) {
   if (!quiet && !confirm("Delete this post for good (with its likes, comments and files)?")) return false;
@@ -496,6 +674,16 @@ document.addEventListener("click", async (e) => {
   if (w) return openUser(w.dataset.user);
   const dp = t.closest("[data-delpost]");
   if (dp) return deletePost(dp.dataset.delpost);
+  const hb = t.closest("[data-hide]");
+  if (hb) {
+    try {
+      const on = hb.dataset.on === "1";
+      await api("hidePost", { id: hb.dataset.hide, on });
+      hb.dataset.on = on ? "0" : "1"; hb.textContent = on ? "Unhide" : "Hide";
+      toast(on ? "Hidden from everyone but the author." : "Visible again (reports reset).");
+    } catch (er) { toast(er.message, true); }
+    return;
+  }
   const cm = t.closest("[data-comments]");
   if (cm) return showComments(cm.dataset.comments);
   const dm = t.closest("[data-delmom]");
@@ -541,6 +729,7 @@ async function loadReports() {
           ${r.text ? `<div style="white-space:pre-wrap;word-break:break-word">${esc(r.text)}</div>` : ""}
           ${r.comment ? `<div class="small muted" style="margin-top:6px">Comment: ${esc(r.comment)}</div>` : ""}
           ${p ? `<div class="small muted" style="margin-top:6px">${kindName(p.type)} · ${esc(p.caption).slice(0, 120)}</div>` : r.postId ? `<div class="small muted" style="margin-top:6px">The post is already gone.</div>` : ""}
+          ${r.chatId ? `<div style="margin-top:8px"><button class="btn sm" data-chat="${esc(r.chatId)}">Open chat</button></div>` : ""}
           ${repStatus === "open" ? `<div class="row wrap" style="margin-top:10px">
             ${(p || r.commentId) ? `<button class="btn sm red" data-ract="remove">Remove ${r.commentId ? "comment" : esc(kindName(p ? p.type : "post")).toLowerCase()}</button>` : ""}
             ${r.ownerId ? `<button class="btn sm red" data-ract="ban">Ban @${esc(r.ownerUsername || "owner")}</button>` : ""}
@@ -556,6 +745,8 @@ $("#repKinds").onclick = (e) => {
   repStatus = c.dataset.s; loadReports();
 };
 $("#reports").onclick = async (e) => {
+  const ch = e.target.closest("[data-chat]");
+  if (ch) return openChat(ch.dataset.chat);
   const b = e.target.closest("[data-ract]"); if (!b) return;
   const card = b.closest("[data-rep]");
   const r = $("#reports")._data.reports.find((x) => x.id === card.dataset.rep);
@@ -578,15 +769,87 @@ $("#reports").onclick = async (e) => {
   } catch (er) { toast(er.message, true); }
 };
 
+async function openChat(chatId) {
+  const m = modal(`<div class="row"><h3 class="grow" style="margin:0">Reported chat</h3><button class="btn sm" id="chClose">Close</button></div><div id="chList"><div class="empty"><span class="spin"></span></div></div>`);
+  $("#chClose", m).onclick = () => m.remove();
+  try {
+    const j = await api("chat", { chatId });
+    const first = chatId.split("_")[0];
+    $("#chList", m).innerHTML = `<p class="small muted">${Object.entries(j.names).map(([k, v]) => `<span class="who" data-user="${esc(k)}">@${esc(v)}</span>`).join(" ↔ ")}</p>` +
+      (j.messages.map((x) => `<div class="msg ${x.from === first ? "" : "me"}" data-mid="${esc(x.id)}">
+        <div class="small muted">@${esc(j.names[x.from] || x.from)} · ${date(x.createdAt)}</div>
+        <div style="white-space:pre-wrap">${esc(x.text) || `<i>(${esc(x.type)})</i>`}</div>
+        ${x.media && x.type === "image" ? img(x.media) : ""}
+        <button class="btn sm red" data-delmsg="${esc(x.id)}" style="margin-top:4px">Delete</button></div>`).join("") || `<div class="empty">No messages.</div>`);
+    $("#chList", m).onclick = async (e) => {
+      const d = e.target.closest("[data-delmsg]");
+      if (d) {
+        if (!confirm("Delete this message?")) return;
+        try { await api("deleteMessage", { chatId, id: d.dataset.delmsg }); d.closest(".msg").remove(); toast("Message deleted."); } catch (er) { toast(er.message, true); }
+        return;
+      }
+      const w = e.target.closest("[data-user]"); if (w) { m.remove(); openUser(w.dataset.user); }
+    };
+  } catch (e) { $("#chList", m).innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// ------------------------------------------------------------------- charts
+function barChart(title, days, vals, color) {
+  const W = 600, H = 150, pad = 18, n = vals.length, max = Math.max(1, ...vals);
+  const bw = (W - pad) / n;
+  const bars = vals.map((v, i) => {
+    const h = Math.round((H - 24) * v / max);
+    return `<rect x="${(pad + i * bw + 1).toFixed(1)}" y="${H - 14 - h}" width="${Math.max(1, bw - 2).toFixed(1)}" height="${h}" rx="2" fill="${color}"><title>${days[i]}: ${v}</title></rect>`;
+  }).join("");
+  const total = vals.reduce((a, b) => a + b, 0);
+  return `<div class="chart"><div class="t"><b>${title}</b><span class="muted small">total ${total.toLocaleString()} · today ${vals[n - 1]}</span></div>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><text x="0" y="10" fill="#8a93a0" font-size="10">${max}</text>${bars}
+    <text x="${pad}" y="${H - 2}" fill="#8a93a0" font-size="10">${days[0].slice(5)}</text><text x="${W}" y="${H - 2}" fill="#8a93a0" font-size="10" text-anchor="end">${days[n - 1].slice(5)}</text></svg></div>`;
+}
+async function loadCharts() {
+  $("#charts").innerHTML = `<div class="muted"><span class="spin"></span> Loading…</div>`;
+  try {
+    const j = await api("charts", { days: Number($("#chartDays").value) });
+    $("#charts").innerHTML = barChart("Sign-ups", j.days, j.signups, "#c6ff3d") + barChart("Active people", j.days, j.active, "#5aa9ff")
+      + barChart("Uploads", j.days, j.uploads, "#ffb547") + barChart("Clips", j.days, j.clips, "#ff5470");
+    $("#topPosts").innerHTML = j.topPosts.map((p, i) => `<div class="comment"><b>${i + 1}</b><div class="grow" style="min-width:0">${kindName(p.type)} by <span class="who" data-user="${esc(p.authorId)}">@${esc(p.author)}</span><div class="small muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.caption) || "<i>no caption</i>"}</div></div><span>♥ ${p.likes}</span></div>`).join("") || `<div class="muted">None.</div>`;
+    $("#topCreators").innerHTML = j.topCreators.map((u, i) => `<div class="comment"><b>${i + 1}</b><div class="grow"><span class="who" data-user="${esc(u.uid)}">@${esc(u.username)}</span>${u.verified ? '<span class="tag ver">✓</span>' : ""}</div><span>${u.followers} followers</span></div>`).join("") || `<div class="muted">None.</div>`;
+  } catch (e) { $("#charts").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+$("#chartRefresh").onclick = loadCharts;
+$("#chartDays").onchange = loadCharts;
+$("[data-view=charts]").addEventListener("click", (e) => { const w = e.target.closest("[data-user]"); if (w) openUser(w.dataset.user); });
+
+// ----------------------------------------------------------------- settings
+async function loadSettings() {
+  try { const c = await api("config"); $("#autoHide").value = c.config.autoHide; } catch (e) { toast(e.message, true); }
+  loadBlocked();
+}
+async function loadBlocked(data = {}) {
+  try {
+    const j = await api("blockedEmails", data);
+    $("#blockedList").innerHTML = j.emails.map((x) => `<div class="comment"><div class="grow">${esc(x.email)} <span class="small muted">${ago(x.at)}</span></div><button class="btn sm" data-unblock="${esc(x.email)}">Unblock</button></div>`).join("") || `<div class="muted small">None.</div>`;
+  } catch (e) { toast(e.message, true); }
+}
+$("#autoHideSave").onclick = async () => {
+  try { const c = await api("config", { set: { autoHide: Number($("#autoHide").value) } }); $("#autoHide").value = c.config.autoHide; toast(c.config.autoHide ? `Posts hide after ${c.config.autoHide} reports.` : "Auto-hide is off."); } catch (e) { toast(e.message, true); }
+};
+$("#blockForm").onsubmit = (e) => { e.preventDefault(); const v = $("#blockEmail").value.trim(); if (v) { loadBlocked({ add: v }); $("#blockEmail").value = ""; } };
+$("#blockedList").onclick = (e) => { const b = e.target.closest("[data-unblock]"); if (b && confirm(`Unblock ${b.dataset.unblock}?`)) loadBlocked({ remove: b.dataset.unblock }); };
+
 // ---------------------------------------------------------------- broadcast
 const syncPreview = () => {
   $("#pTitle").textContent = $("#bTitle").value.trim() || "InstantGram";
   $("#pBody").textContent = $("#bBody").value.trim() || "What's new…";
   $("#bCount").textContent = $("#bBody").value.length;
+  const im = $("#bImage").value.trim();
+  $("#pImg").classList.toggle("hide", !/^https:/.test(im));
+  if (/^https:/.test(im)) $("#pImg").src = im;
 };
-$("#bTitle").oninput = syncPreview; $("#bBody").oninput = syncPreview;
+$("#bTitle").oninput = syncPreview; $("#bBody").oninput = syncPreview; $("#bImage").oninput = syncPreview;
+$("#bUpload").onclick = async () => { const link = await uploadPicture(); if (link) { $("#bImage").value = link; syncPreview(); } };
 $("#bSend").onclick = async () => {
-  const title = $("#bTitle").value.trim(), body = $("#bBody").value.trim();
+  const title = $("#bTitle").value.trim(), body = $("#bBody").value.trim(), image = $("#bImage").value.trim();
   if (!body) return toast("Write the message first.", true);
   if (!confirm(`Send this to EVERY user?\n\n${title || "InstantGram"}\n${body}`)) return;
   $("#bSend").disabled = true; $("#bProg").classList.remove("hide");
@@ -595,7 +858,7 @@ $("#bSend").onclick = async () => {
     $("#bText").innerHTML = `<span class="spin"></span> Sending… ${sent} delivered, ${failed} failed`;
     $("#bBar").style.width = `${Math.min(95, 10 + pages * 8)}%`;
     try {
-      const r = await api("broadcast", { title, body, cursor });
+      const r = await api("broadcast", { title, body, image, cursor });
       tries = 0; sent += r.sent; failed += r.failed; pages++;
       if (!r.more) break;
       cursor = r.cursor;

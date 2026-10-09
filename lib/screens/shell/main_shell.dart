@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/app_events.dart';
 import '../../core/l10n.dart';
 import '../../core/ui.dart';
+import '../../services/daily_stats.dart';
+import '../../services/account_vault.dart';
 import '../../services/app_prefs.dart';
 import '../../services/safety_service.dart';
 import '../../services/presence_service.dart';
@@ -92,8 +95,8 @@ class _MainShellState extends State<MainShell> {
     try {
       final me = await UserService.instance.getUser(UserService.instance.myUid);
       if (me == null) return;
-      if (me.banned) {
-        await _suspended();
+      if (me.suspended) {
+        await _suspended(me.bannedUntil);
         return;
       }
       AppPrefs.instance.rememberAccount(
@@ -104,6 +107,7 @@ class _MainShellState extends State<MainShell> {
           email: AuthService.instance.currentUser?.email ?? '',
         ),
       );
+      unawaited(countActiveToday(me.uid));
       if (me.language.isNotEmpty && me.language != Language.instance.value) {
         Language.instance.choose(me.language);
       }
@@ -113,8 +117,11 @@ class _MainShellState extends State<MainShell> {
   }
 
   /// The admin panel banned this account: say so, then log out.
-  Future<void> _suspended() async {
+  Future<void> _suspended([DateTime? until]) async {
     if (!mounted) return;
+    final when = until == null
+        ? ''
+        : ' until ${until.day}/${until.month}/${until.year} ${until.hour.toString().padLeft(2, '0')}:${until.minute.toString().padLeft(2, '0')}';
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -122,9 +129,11 @@ class _MainShellState extends State<MainShell> {
         key: const ValueKey('suspendedDialog'),
         title: Text(context.tr('Account suspended')),
         content: Text(
-          context.tr(
-            'This account was suspended for breaking the rules. Write to techlabs.hyper@gmail.com if you think this is a mistake.',
-          ),
+          until == null
+              ? context.tr(
+                  'This account was suspended for breaking the rules. Write to techlabs.hyper@gmail.com if you think this is a mistake.',
+                )
+              : 'This account is suspended$when for breaking the rules. Write to techlabs.hyper@gmail.com if you think this is a mistake.',
         ),
         actions: [
           TextButton(
@@ -134,6 +143,12 @@ class _MainShellState extends State<MainShell> {
         ],
       ),
     );
+    if (until != null) {
+      // back after the suspension: the saved login stays
+      await AuthService.instance.signOut();
+      return;
+    }
+    await AccountVault.instance.forget(UserService.instance.myUid);
     await AuthService.instance.signOut();
   }
 

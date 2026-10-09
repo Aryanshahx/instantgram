@@ -67,6 +67,58 @@ Future<bool> sendReport(
       await sink(data);
       return true;
     }
+    final db = FirebaseFirestore.instance;
+    await db.collection('reports').add({
+      ...data,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    if (commentId.isEmpty && post.authorId != by) {
+      // counts once per person: enough reports hide the post (admin panel setting)
+      try {
+        final ref = db.collection('posts').doc(post.id);
+        final batch = db.batch()
+          ..set(ref.collection('reporters').doc(by), {
+            'at': FieldValue.serverTimestamp(),
+          })
+          ..update(ref, {'reportCount': FieldValue.increment(1)});
+        await batch.commit();
+      } catch (_) {
+        // reported before: the count stays
+      }
+    }
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Saves a report about a chat (the admin panel may then read that chat). False on failure.
+Future<bool> sendChatReport({
+  required String chatId,
+  required String otherUid,
+  required String otherUsername,
+  required String text,
+}) async {
+  try {
+    final sink = debugReportSink;
+    final by = sink != null
+        ? 'tester'
+        : (FirebaseAuth.instance.currentUser?.uid ?? '');
+    if (by.isEmpty) return false;
+    final data = <String, Object?>{
+      'kind': 'chat',
+      'chatId': chatId,
+      'ownerId': otherUid,
+      'ownerUsername': otherUsername,
+      'by': by,
+      'reason': 'chat',
+      'text': text.length > 2000 ? text.substring(0, 2000) : text,
+      'status': 'open',
+    };
+    if (sink != null) {
+      await sink(data);
+      return true;
+    }
     await FirebaseFirestore.instance.collection('reports').add({
       ...data,
       'createdAt': FieldValue.serverTimestamp(),
