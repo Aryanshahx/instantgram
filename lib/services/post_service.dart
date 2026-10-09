@@ -14,6 +14,8 @@ import 'media_server.dart';
 import 'notification_service.dart';
 import 'safety_service.dart';
 import 'user_service.dart';
+import 'moderation.dart';
+import 'rate_limits.dart';
 
 typedef PostQuery = Query<Map<String, dynamic>>;
 
@@ -515,14 +517,17 @@ class PostService {
     String clipId = '',
     String clipThumbRef = '',
   }) async {
+    // swear words starred, blocked words and spam stopped
+    final clean = Moderation.instance.publicText(text.trim(), what: 'comment');
     final me = await _me();
+    RateLimits.instance.comment(me.uid, clean);
     final postRef = _posts.doc(postId);
     final batch = _db.batch();
     batch.set(postRef.collection('comments').doc(), {
       'authorId': me.uid,
       'authorUsername': me.username,
       'authorPhotoUrl': me.photoUrl,
-      'text': text.trim(),
+      'text': clean,
       'createdAt': FieldValue.serverTimestamp(),
       'likeCount': 0,
       if (parentId.isNotEmpty) 'parentId': parentId,
@@ -586,8 +591,9 @@ class PostService {
   }
 
   Future<void> editComment(String postId, String commentId, String text) {
+    final clean = Moderation.instance.publicText(text.trim(), what: 'comment');
     return _posts.doc(postId).collection('comments').doc(commentId).update({
-      'text': text.trim(),
+      'text': clean,
       'edited': true,
       'editedAt': FieldValue.serverTimestamp(),
     });

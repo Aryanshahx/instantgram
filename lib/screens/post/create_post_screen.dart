@@ -39,6 +39,8 @@ import '../../widgets/overlay_tools.dart';
 import '../../widgets/post_media.dart';
 import 'editor_screen.dart';
 import 'video_editor_screen.dart' show VideoEdits;
+import '../../services/moderation.dart';
+import '../../services/rate_limits.dart';
 
 /// How loud the chosen music is (it is not a user setting any more).
 const double kMusicVolume = 0.8;
@@ -806,6 +808,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     FocusScope.of(context).unfocus();
     final chosen = _chosen;
     if (chosen.isEmpty) return;
+    // words and the daily limit are checked before anything is uploaded
+    final String caption;
+    try {
+      caption = Moderation.instance.publicText(
+        _caption.text.trim(),
+        what: 'caption',
+      );
+      checkUploadLimit();
+    } catch (e) {
+      showToast(context, friendlyError(e));
+      return;
+    }
     setState(() {
       _busy = true;
       _progress = null;
@@ -816,7 +830,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _syncPreview();
     _baked = false;
     _sentMusic = null;
-    final caption = _caption.text.trim();
     var music = _music;
     try {
       // what a moment made from this post would show

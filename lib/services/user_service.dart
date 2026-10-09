@@ -10,6 +10,8 @@ import 'notification_service.dart';
 import '../core/errors.dart';
 import '../core/fonts.dart';
 import 'media_server.dart';
+import 'moderation.dart';
+import 'rate_limits.dart';
 
 class UserService {
   UserService._();
@@ -87,6 +89,7 @@ class UserService {
   Future<void> follow(String targetUid) async {
     final me = myUid;
     if (me == targetUid) return;
+    RateLimits.instance.follow(me);
     final batch = _db.batch();
     batch.set(_users.doc(me).collection('following').doc(targetUid), {
       'createdAt': FieldValue.serverTimestamp(),
@@ -156,10 +159,19 @@ class UserService {
     List<String>? linkNames,
   }) async {
     final uid = myUid;
+    final mod = Moderation.instance;
+    if (fullName.trim().isNotEmpty) mod.checkName(fullName, what: 'name');
+    if (username != null && username.trim().isNotEmpty) {
+      mod.checkName(username.trim());
+    }
+    final cleanBio = mod.publicText(bio.trim(), what: 'bio');
+    linkNames = linkNames
+        ?.map((n) => mod.publicText(n.trim(), what: 'link name'))
+        .toList();
     final before = await getUser(uid);
     final data = <String, dynamic>{
       'fullName': fullName.trim(),
-      'bio': bio.trim(),
+      'bio': cleanBio,
       if (bioFont != null) 'bioFont': cleanFontId(bioFont),
     };
     if (links != null) {

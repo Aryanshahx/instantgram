@@ -452,3 +452,40 @@ test("deleting an account can block its email; the list can be edited", async ()
   assert.deepEqual(r.emails.map((e) => e.email), ["spam@mail.com"]);
   await assert.rejects(runPanelOp({ op: "blockedEmails", add: "nope" }, ctx), /Bad email/);
 });
+
+// ---------------------------------------------------------------- v1.31 moderation
+
+test("modScan queues bad captions and names, hides blocked ones, and moves on", async () => {
+  const db = world();
+  db.docs.get("posts/p1").caption = "what the fuck";
+  db.docs.get("posts/p2").caption = "madarchod";
+  db.docs.set("users/carl3", { username: "fuck_boi", createdAt: ago(5) });
+  const { ctx } = ctxFor(db);
+  const r = await runPanelOp({ op: "modScan" }, ctx);
+  assert.equal(r.flagged, 3);
+  assert.equal(db.docs.get("modQueue/post_p1").severity, "mild");
+  assert.equal(db.docs.get("posts/p1").hidden, undefined);
+  assert.equal(db.docs.get("modQueue/post_p2").severity, "blocked");
+  assert.equal(db.docs.get("posts/p2").hidden, true);
+  assert.equal(db.docs.get("modQueue/user_carl3").kind, "user");
+  assert.ok(db.docs.get("config/modscan").postsAt instanceof Date);
+  const again = await runPanelOp({ op: "modScan" }, ctx);
+  assert.equal(again.flagged, 0); // nothing new since
+  const q = await runPanelOp({ op: "modQueue" }, ctx);
+  assert.equal(q.items.length, 3);
+  assert.equal(q.posts.p2.hidden, true);
+  await runPanelOp({ op: "modResolve", id: "post_p2", action: "approved" }, ctx);
+  assert.equal(db.docs.get("posts/p2").hidden, false);
+  assert.equal(db.docs.get("modQueue/post_p2").status, "done");
+  assert.equal((await runPanelOp({ op: "stats" }, ctx)).stats.review, 2);
+});
+
+test("modWords saves the panel lists; modTest tries a text", async () => {
+  const db = world();
+  const { ctx } = ctxFor(db);
+  const w = await runPanelOp({ op: "modWords", set: { blocked: ["ScamLink", "", 5], mild: ["meanie"], allow: ["ass"] } }, ctx);
+  assert.deepEqual(w.blocked, ["scamlink"]);
+  assert.ok(w.defaults.blocked > 0);
+  assert.equal((await runPanelOp({ op: "modTest", text: "go to scamlink" }, ctx)).blocked, true);
+  assert.equal((await runPanelOp({ op: "modTest", text: "ass" }, ctx)).clean, true);
+});

@@ -9,6 +9,7 @@ import '../models/vanish.dart';
 import 'media_server.dart';
 import 'user_service.dart';
 import 'push_service.dart';
+import 'moderation.dart';
 
 /// Direct messages between any two people.
 ///
@@ -154,7 +155,8 @@ class ChatService {
     ReplyRef? replyTo,
     String font = '',
   }) async {
-    final body = text.trim();
+    // chats are private: only blocked words are starred
+    final body = Moderation.instance.chatText(text.trim());
     if (body.isEmpty) return;
     if (body.length > maxLength) {
       throw StateError('That message is too long.');

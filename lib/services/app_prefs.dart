@@ -110,6 +110,22 @@ class AppPrefs {
     _p?.setString('activeCounted', v);
   }
 
+  /// Word lists from the admin panel (JSON), kept for the next start.
+  String _modMem = '';
+  String get modWords => _p?.getString('modWords') ?? _modMem;
+  set modWords(String v) {
+    _modMem = v;
+    _p?.setString('modWords', v);
+  }
+
+  /// Spam-limit log (JSON: kind -> times).
+  String _rateMem = '';
+  String get rateLog => _p?.getString('rateLog') ?? _rateMem;
+  set rateLog(String v) {
+    _rateMem = v;
+    _p?.setString('rateLog', v);
+  }
+
   /// The day the daily-limit reminder was last shown.
   String get limitShownDay => _p?.getString('limitShown') ?? '';
   set limitShownDay(String v) => _p?.setString('limitShown', v);

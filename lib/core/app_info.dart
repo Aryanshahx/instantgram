@@ -1,5 +1,5 @@
 /// The version shown in Settings. Keep it in step with pubspec.yaml's version name.
-const String kAppVersion = '1.30.0';
+const String kAppVersion = '1.31.0';
 
 const String kAppName = 'InstantGram';
 const String kCompany = 'Hyper Tech Labs';

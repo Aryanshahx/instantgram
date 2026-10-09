@@ -22,6 +22,8 @@ import '../../widgets/audience_sheet.dart';
 import '../../widgets/music_widgets.dart';
 import '../../widgets/overlay_tools.dart';
 import '../../widgets/story_overlays.dart';
+import '../../services/moderation.dart';
+import '../../services/rate_limits.dart';
 
 /// Saves the kept part of [source] as a new video (a moment can only be so long).
 Future<File?> _cutMoment(
@@ -375,6 +377,19 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
 
   Future<void> _share() async {
     if (_posting) return;
+    // texts on the moment follow the same word rules as captions
+    try {
+      for (var i = 0; i < _overlays.length; i++) {
+        final o = _overlays[i];
+        if (o.emoji || o.image.isNotEmpty || o.text.trim().isEmpty) continue;
+        final t = Moderation.instance.publicText(o.text, what: 'moment text');
+        if (t != o.text) _overlays[i] = o.copyWith(text: t);
+      }
+      checkUploadLimit();
+    } catch (e) {
+      showToast(context, friendlyError(e));
+      return;
+    }
     setState(() {
       _posting = true;
       _progress = 0;

@@ -25,6 +25,7 @@ import '../post/create_post_screen.dart';
 import '../profile/profile_screen.dart';
 import '../reels/reels_screen.dart';
 import '../search/search_screen.dart';
+import '../../services/moderation.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -108,6 +109,7 @@ class _MainShellState extends State<MainShell> {
         ),
       );
       unawaited(countActiveToday(me.uid));
+      unawaited(Moderation.instance.load());
       if (me.language.isNotEmpty && me.language != Language.instance.value) {
         Language.instance.choose(me.language);
       }

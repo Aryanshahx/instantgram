@@ -114,6 +114,11 @@ service cloud.firestore {
       allow list, write: if false;
     }
 
+    // the admin panel's review queue (only the signer reads and writes it)
+    match /modQueue/{id} {
+      allow read, write: if false;
+    }
+
     // app settings from the admin panel (auto-hide after N reports...)
     match /config/{doc} {
       allow read: if signedIn();

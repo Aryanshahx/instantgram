@@ -24,6 +24,7 @@ import '../../widgets/state_views.dart';
 import '../chat/gif_picker.dart';
 import '../profile/profile_screen.dart';
 import '../reels/reels_screen.dart';
+import '../../services/moderation.dart';
 
 /// Opens the comments as a sheet that slides up over the current screen (the photo in
 /// Discover, the video in Clips). The video keeps playing behind it.
@@ -186,6 +187,8 @@ class _CommentsPanelState extends State<CommentsPanel> {
     final t = _text.text.trim();
     setState(() => _sending = true);
     try {
+      // blocked words stop it before a photo is uploaded
+      Moderation.instance.publicText(t, what: 'comment');
       final edit = _editing;
       if (edit != null) {
         await PostService.instance.editComment(widget.post.id, edit.id, t);

@@ -125,6 +125,7 @@ h2{margin:4px 0 14px;font-size:18px}
       <button data-tab="posts">Posts &amp; clips</button>
       <button data-tab="moments">Moments</button>
       <button data-tab="reports">Reports <span id="repBadge" class="badge hide"></span></button>
+      <button data-tab="review">Review <span id="revBadge" class="badge hide"></span></button>
       <button data-tab="charts">Charts</button>
       <button data-tab="broadcast">Broadcast</button>
       <button data-tab="settings">Settings</button>
@@ -174,6 +175,13 @@ h2{margin:4px 0 14px;font-size:18px}
       <div id="reports"></div>
     </div>
 
+    <div data-view="review" class="hide">
+      <div class="row"><h2 class="grow">Review queue</h2><span class="small muted" id="scanInfo"></span><button class="btn sm" id="scanNow">Scan now</button></div>
+      <p class="small muted">New captions, usernames and bios are checked with the word lists. Posts with blocked words are hidden until you approve them.</p>
+      <div class="chips" id="revKinds"><span class="chip on" data-s="open">To review</span><span class="chip" data-s="done">Handled</span></div>
+      <div id="review"></div>
+    </div>
+
     <div data-view="charts" class="hide">
       <div class="row"><h2 class="grow">Charts</h2>
         <select class="f" id="chartDays" style="width:auto"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select>
@@ -191,6 +199,16 @@ h2{margin:4px 0 14px;font-size:18px}
         <b>Auto-hide reported posts</b>
         <p class="small muted">Posts reported by this many different people are hidden from everyone except their author until you check them. 0 = off.</p>
         <div class="row"><input class="f" id="autoHide" type="number" min="0" max="1000" style="width:120px"><button class="btn lime" id="autoHideSave">Save</button></div>
+      </div>
+      <div class="stat" style="max-width:620px;margin-bottom:14px">
+        <b>Word lists</b>
+        <p class="small muted">Added to the built-in lists (<span id="defCount"></span>). One word per line. <code>word*</code> = also inside longer words; two words = a phrase (blocked only). The app picks changes up on its next start.</p>
+        <label class="small muted">Blocked (the post is stopped)</label><textarea class="f" id="wBlocked" rows="4"></textarea>
+        <label class="small muted" style="display:block;margin-top:8px">Swear words (shown as f***)</label><textarea class="f" id="wMild" rows="4"></textarea>
+        <label class="small muted" style="display:block;margin-top:8px">Allowed (never flagged, e.g. a name that looks like a bad word)</label><textarea class="f" id="wAllow" rows="2"></textarea>
+        <div class="row" style="margin-top:10px"><button class="btn lime" id="wSave">Save lists</button></div>
+        <div class="row" style="margin-top:12px"><input class="f grow" id="wTest" placeholder="Test a text…"><button class="btn" id="wTestGo">Test</button></div>
+        <div class="small" id="wTestOut" style="margin-top:6px"></div>
       </div>
       <div class="stat" style="max-width:620px">
         <b>Blocked emails</b>
@@ -340,6 +358,7 @@ function show(tab) {
   if (tab === "reports") loadReports();
   if (tab === "charts" && !loaded.charts) loadCharts();
   if (tab === "settings") loadSettings();
+  if (tab === "review") scanThenReview();
   loaded[tab] = true;
 }
 $$("#nav button").forEach((b) => (b.onclick = () => show(b.dataset.tab)));
@@ -348,7 +367,7 @@ $$("#nav button").forEach((b) => (b.onclick = () => show(b.dataset.tab)));
 const STAT_NAMES = [
   ["users", "Users"], ["activeNow", "Active now", "hot"], ["active24h", "Active 24 h"], ["new24h", "New today"],
   ["new7d", "New this week"], ["posts", "Posts + clips"], ["clips", "Clips"], ["posts24h", "Uploads 24 h"],
-  ["moments", "Live moments"], ["chats", "Chats"], ["phones", "Push devices"], ["reports", "Open reports", "warn"], ["banned", "Banned"],
+  ["moments", "Live moments"], ["chats", "Chats"], ["phones", "Push devices"], ["reports", "Open reports", "warn"], ["review", "To review", "warn"], ["banned", "Banned"],
 ];
 async function loadStats() {
   $("#stats").innerHTML = `<div class="muted"><span class="spin"></span> Loading…</div>`;
@@ -358,8 +377,10 @@ async function loadStats() {
       `<div class="stat ${c || ""}"><div class="l">${l}</div><div class="n">${j.stats[k] == null ? "—" : Number(j.stats[k]).toLocaleString()}</div></div>`).join("");
     $("#statAt").textContent = "Updated " + new Date(j.at).toLocaleTimeString();
     setBadge(j.stats.reports);
+    setRevBadge(j.stats.review);
   } catch (e) { $("#stats").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
+function setRevBadge(n) { const b = $("#revBadge"); b.textContent = n; b.classList.toggle("hide", !n); }
 function setBadge(n) { const b = $("#repBadge"); b.textContent = n; b.classList.toggle("hide", !n); }
 $("#statRefresh").onclick = loadStats;
 setInterval(() => { if (KEY && !$("[data-view=overview]").classList.contains("hide") && document.visibilityState === "visible") loadStats(); }, 60000);
@@ -488,7 +509,7 @@ async function suspendUser(u) {
 }
 
 /** A message (or warning) to one person, with an optional picture. */
-function composeTo(u, warn) {
+function composeTo(u, warn, onSent = null) {
   const m = modal(`<h3 style="margin-top:0">${warn ? "Warn" : "Notify"} @${esc(u.username)}</h3>
     ${warn ? "" : `<label class="small muted">Title</label><input class="f" id="nTitle" maxlength="60" placeholder="InstantGram">`}
     <label class="small muted" style="display:block;margin-top:10px">${warn ? "Warning" : "Message"}</label>
@@ -516,7 +537,7 @@ function composeTo(u, warn) {
       const r = await api("notifyUser", { uid: u.uid, warn, title: warn ? "" : $("#nTitle", m).value.trim(), body, image: $("#nImage", m).value.trim() });
       toast(`Sent${r.phones ? ` (push to ${r.sent}/${r.phones} phones)` : " (no phone registered: only in Notifications)"}.`);
       m.remove();
-      if (warn) openUser(u.uid);
+      if (onSent) onSent(); else if (warn) openUser(u.uid);
     } catch (e) { toast(e.message, true); $("#nSend", m).disabled = false; }
   };
 }
@@ -824,7 +845,22 @@ $("[data-view=charts]").addEventListener("click", (e) => { const w = e.target.cl
 async function loadSettings() {
   try { const c = await api("config"); $("#autoHide").value = c.config.autoHide; } catch (e) { toast(e.message, true); }
   loadBlocked();
+  try {
+    const w = await api("modWords");
+    $("#wBlocked").value = w.blocked.join("\n"); $("#wMild").value = w.mild.join("\n"); $("#wAllow").value = w.allow.join("\n");
+    $("#defCount").textContent = `${w.defaults.blocked} blocked, ${w.defaults.mild} swear words built in`;
+  } catch (e) { toast(e.message, true); }
 }
+const lines = (id) => $(id).value.split("\n").map((x) => x.trim()).filter(Boolean);
+$("#wSave").onclick = async () => {
+  try { await api("modWords", { set: { blocked: lines("#wBlocked"), mild: lines("#wMild"), allow: lines("#wAllow") } }); toast("Word lists saved."); loadSettings(); } catch (e) { toast(e.message, true); }
+};
+$("#wTestGo").onclick = async () => {
+  try {
+    const r = await api("modTest", { text: $("#wTest").value });
+    $("#wTestOut").innerHTML = r.clean ? '<span style="color:var(--lime)">Clean ✓</span>' : `<span style="color:${r.blocked ? "var(--red)" : "var(--amber)"}">${r.blocked ? "Blocked" : "Starred"}:</span> ${esc(r.words.join(", "))}`;
+  } catch (e) { toast(e.message, true); }
+};
 async function loadBlocked(data = {}) {
   try {
     const j = await api("blockedEmails", data);
@@ -836,6 +872,66 @@ $("#autoHideSave").onclick = async () => {
 };
 $("#blockForm").onsubmit = (e) => { e.preventDefault(); const v = $("#blockEmail").value.trim(); if (v) { loadBlocked({ add: v }); $("#blockEmail").value = ""; } };
 $("#blockedList").onclick = (e) => { const b = e.target.closest("[data-unblock]"); if (b && confirm(`Unblock ${b.dataset.unblock}?`)) loadBlocked({ remove: b.dataset.unblock }); };
+
+// ------------------------------------------------------------------- review
+let revStatus = "open";
+async function scanThenReview() {
+  $("#scanInfo").innerHTML = '<span class="spin"></span> Checking new posts…';
+  try {
+    let n = 0, f = 0;
+    for (let i = 0; i < 5; i++) { const r = await api("modScan"); n += r.scanned; f += r.flagged; if (!r.more) break; }
+    $("#scanInfo").textContent = `Checked ${n} new, ${f} flagged · ${new Date().toLocaleTimeString()}`;
+  } catch (e) { $("#scanInfo").textContent = e.message; }
+  loadReview();
+}
+$("#scanNow").onclick = scanThenReview;
+async function loadReview() {
+  const box = $("#review");
+  box.innerHTML = `<div class="muted"><span class="spin"></span> Loading…</div>`;
+  try {
+    const j = await api("modQueue", { status: revStatus });
+    if (revStatus === "open") setRevBadge(j.items.length);
+    box._data = j;
+    box.innerHTML = j.items.map((r) => {
+      const p = r.postId ? j.posts[r.postId] : null;
+      const sev = r.severity === "blocked" ? '<span class="tag ban">blocked words · hidden</span>' : r.severity === "name" ? '<span class="tag warnt">name / bio</span>' : '<span class="tag warnt">swear words</span>';
+      return `<div class="rep" data-rev="${esc(r.id)}">
+        <div class="thumb">${p ? media(p) : r.kind === "user" ? '<div class="empty">👤</div>' : ""}</div>
+        <div class="grow" style="min-width:0">
+          <div class="row wrap"><b>${r.kind === "user" ? "Account" : p ? kindName(p.type) : "Post"}</b>${sev}<span class="grow"></span><span class="small muted">${date(r.at)}</span></div>
+          <div class="small" style="margin:6px 0">by <span class="who" data-user="${esc(r.uid)}">@${esc(r.author || r.uid)}</span></div>
+          <div style="white-space:pre-wrap;word-break:break-word">${esc(r.text)}</div>
+          <div class="small" style="margin-top:6px">Found: ${(r.words || []).map((w) => `<span class="reason">${esc(w)}</span>`).join(" ")}</div>
+          ${r.postId && !p ? '<div class="small muted">The post is already gone.</div>' : ""}
+          ${revStatus === "open" ? `<div class="row wrap" style="margin-top:10px">
+            <button class="btn sm lime" data-rv="approved">Approve</button>
+            ${p ? '<button class="btn sm red" data-rv="removed">Remove post</button>' : ""}
+            ${p && !p.hidden ? '<button class="btn sm" data-rv="hidden">Hide</button>' : ""}
+            ${r.kind === "user" ? '<button class="btn sm" data-rv="renamed">Reset username</button>' : ""}
+            <button class="btn sm" data-rv="warned">Warn…</button></div>` : `<div class="small muted" style="margin-top:8px">Handled: ${esc(r.action || "")} · ${date(r.doneAt)}</div>`}
+        </div></div>`;
+    }).join("") || `<div class="empty">${revStatus === "open" ? "Nothing to review 🎉" : "Nothing handled yet."}</div>`;
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+$("#revKinds").onclick = (e) => {
+  const c = e.target.closest(".chip"); if (!c) return;
+  $$(".chip", $("#revKinds")).forEach((x) => x.classList.toggle("on", x === c));
+  revStatus = c.dataset.s; loadReview();
+};
+$("#review").onclick = async (e) => {
+  const w = e.target.closest("[data-user]"); if (w && !e.target.closest("[data-rv]")) return openUser(w.dataset.user);
+  const b = e.target.closest("[data-rv]"); if (!b) return;
+  const r = $("#review")._data.items.find((x) => x.id === b.closest("[data-rev]").dataset.rev);
+  const done = async (action) => { await api("modResolve", { id: r.id, action }); toast("Done."); loadReview(); };
+  try {
+    const a = b.dataset.rv;
+    if (a === "removed") { if (await deletePost(r.postId)) await done(a); }
+    else if (a === "hidden") { await api("hidePost", { id: r.postId, on: true }); await done(a); }
+    else if (a === "renamed") { if (!confirm(`Give @${r.author} a random new username?`)) return; await api("resetUsername", { uid: r.uid }); await done(a); }
+    else if (a === "warned") composeTo({ uid: r.uid, username: r.author || r.uid }, true, () => done(a).catch((er) => toast(er.message, true)));
+    else await done("approved");
+  } catch (er) { toast(er.message, true); }
+};
 
 // ---------------------------------------------------------------- broadcast
 const syncPreview = () => {

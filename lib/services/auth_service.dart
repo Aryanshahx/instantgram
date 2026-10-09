@@ -6,6 +6,7 @@ import 'account_vault.dart';
 import 'push_service.dart';
 import 'story_views.dart';
 import 'audience_service.dart';
+import 'moderation.dart';
 
 class AuthService {
   AuthService._();
@@ -152,6 +153,10 @@ class AuthService {
       throw const AgeException();
     }
     final uname = username.trim().toLowerCase();
+    Moderation.instance.checkName(uname);
+    if (fullName.trim().isNotEmpty) {
+      Moderation.instance.checkName(fullName, what: 'name');
+    }
 
     if (await isEmailBlocked(email)) {
       throw const EmailBlockedException();

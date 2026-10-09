@@ -36,12 +36,30 @@ class MediaException implements Exception {
   String toString() => message;
 }
 
+/// Text that may not be posted (a blocked word). The message says what to change.
+class ModerationException implements Exception {
+  const ModerationException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+/// Too much too fast (spam protection). The message says when to try again.
+class RateLimitException implements Exception {
+  const RateLimitException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
 /// Turns any error into a short, user-friendly message.
 String friendlyError(Object e) {
   if (e is UsernameTakenException ||
       e is EmailBlockedException ||
       e is AgeException ||
       e is MediaException ||
+      e is ModerationException ||
+      e is RateLimitException ||
       e is LoginLookupException) {
     return e.toString();
   }

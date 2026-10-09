@@ -6,6 +6,7 @@
 // and answer {more:true, cursor}; the panel calls again with that cursor until it is done.
 
 import { googleToken, encodeValue, decodeFields } from "./push.js";
+import { filterFor, DEFAULT_WORDS } from "./moderation.js";
 
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const UIDRE = /^[A-Za-z0-9]{1,128}$/;
@@ -260,6 +261,7 @@ async function stats(ctx) {
     privateMoments: ctx.db.count("privateStories", [["expiresAt", ">", new Date(now)]]),
     chats: ctx.db.count("chats"),
     reports: ctx.db.count("reports", [["status", "==", "open"]]),
+    review: ctx.db.count("modQueue", [["status", "==", "open"]]),
     phones: ctx.db.count("pushTokens"),
   };
   const out = {};
@@ -884,6 +886,89 @@ async function blockedEmails(ctx, body) {
   return { ok: true, emails: page.docs.map((d) => ({ email: d.id, uid: str(d.data.uid), at: when(d.data.at) })) };
 }
 
+
+// ------------------------------------------------------------ v1.31 moderation
+
+const SCAN_PAGE = 200;
+const cleanList = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === "string").map((x) => x.trim().toLowerCase()).filter((x) => x && x.length <= 60))].slice(0, 2000) : []);
+
+/** Checks what was posted since the last scan with the word rules (also old or changed apps).
+ *  Blocked words: the post is hidden at once. Anything found goes to the review queue. */
+async function modScan(ctx) {
+  const state = await ctx.db.get("config/modscan");
+  const start = new Date(ctx.nowMs - 2 * DAY);
+  const postsAt = state && state.data.postsAt instanceof Date ? state.data.postsAt : start;
+  const usersAt = state && state.data.usersAt instanceof Date ? state.data.usersAt : start;
+  const cfg = await ctx.db.get("config/moderation");
+  const f = filterFor(cfg && cfg.data);
+  let flagged = 0;
+  const flag = async (id, item) => {
+    try { await ctx.db.write([{ create: `modQueue/${id}`, data: { ...item, status: "open", at: new Date(ctx.nowMs) } }]); flagged++; } catch { /* already in the queue */ }
+  };
+  const posts = await ctx.db.query("posts", { where: [["createdAt", ">", postsAt]], orderBy: [["createdAt", "asc"]], limit: SCAN_PAGE });
+  for (const d of posts) {
+    const r = f.scan(str(d.data.caption));
+    if (r.clean) continue;
+    const words = [...r.phrases, ...r.hits.map((h) => h.word)].slice(0, 10);
+    await flag(`post_${d.id}`, { kind: "post", postId: d.id, uid: str(d.data.authorId), author: str(d.data.authorUsername), text: str(d.data.caption).slice(0, 500), words, severity: r.blocked ? "blocked" : "mild" });
+    if (r.blocked) await ctx.db.write([{ set: `posts/${d.id}`, data: { hidden: true } }]);
+  }
+  const users = await ctx.db.query("users", { where: [["createdAt", ">", usersAt]], orderBy: [["createdAt", "asc"]], limit: SCAN_PAGE });
+  for (const d of users) {
+    const name = str(d.data.username), full = str(d.data.fullName), bio = str(d.data.bio);
+    const rn = f.scan(`${name.replace(/[._]/g, " ")} ${full}`);
+    const whole = f.matchToken(name);
+    const rb = f.scan(bio);
+    if (rn.clean && !whole && (rb.clean || !rb.blocked)) continue;
+    const words = [...rn.phrases, ...rn.hits.map((h) => h.word), ...(whole ? [whole[0]] : []), ...rb.phrases, ...rb.hits.map((h) => h.word)].slice(0, 10);
+    await flag(`user_${d.id}`, { kind: "user", uid: d.id, author: name, text: `${full}${bio ? " · " + bio : ""}`.slice(0, 500), words, severity: "name" });
+  }
+  const last = (rows, f2, old) => (rows.length && rows[rows.length - 1].data[f2] instanceof Date ? rows[rows.length - 1].data[f2] : old);
+  await ctx.db.write([{ put: "config/modscan", data: { postsAt: last(posts, "createdAt", postsAt), usersAt: last(users, "createdAt", usersAt), at: new Date(ctx.nowMs) } }]);
+  return { ok: true, scanned: posts.length + users.length, flagged, more: posts.length === SCAN_PAGE || users.length === SCAN_PAGE };
+}
+
+async function modQueue(ctx, body) {
+  const status = body.status === "done" ? "done" : "open";
+  const docs = await ctx.db.query("modQueue", { where: [["status", "==", status]], limit: 200 });
+  const rows = docs.map((d) => ({ id: d.id, ...d.data, at: when(d.data.at), doneAt: when(d.data.doneAt) }));
+  rows.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  const found = {};
+  await Promise.all(rows.filter((r) => r.postId && ID.test(r.postId)).slice(0, 80).map(async (r) => {
+    const p = await ctx.db.get(`posts/${r.postId}`);
+    found[r.postId] = p ? postRow(p) : null;
+  }));
+  return { ok: true, items: rows, posts: found };
+}
+
+async function modResolve(ctx, body) {
+  const id = needId(body.id);
+  const action = ["approved", "removed", "warned", "hidden", "renamed"].includes(body.action) ? body.action : "approved";
+  const d = await ctx.db.get(`modQueue/${id}`);
+  if (!d) throw new AdminError("Already gone.", 404);
+  const writes = [{ set: `modQueue/${id}`, data: { status: "done", action, doneAt: new Date(ctx.nowMs) } }];
+  if (action === "approved" && d.data.kind === "post" && ID.test(str(d.data.postId))) writes.push({ set: `posts/${d.data.postId}`, data: { hidden: false } });
+  await ctx.db.write(writes);
+  return { ok: true };
+}
+
+/** The panel's word lists (added to the built-in ones) and words that are fine after all. */
+async function modWords(ctx, body) {
+  if (body.set && typeof body.set === "object") {
+    await ctx.db.write([{ put: "config/moderation", data: { blocked: cleanList(body.set.blocked), mild: cleanList(body.set.mild), allow: cleanList(body.set.allow), at: new Date(ctx.nowMs) } }]);
+  }
+  const d = await ctx.db.get("config/moderation");
+  const v = d ? d.data : {};
+  return { ok: true, blocked: cleanList(v.blocked), mild: cleanList(v.mild), allow: cleanList(v.allow), defaults: { blocked: DEFAULT_WORDS.blocked.length, mild: DEFAULT_WORDS.mild.length } };
+}
+
+/** Tries a text against the current rules (panel: "Test a text"). */
+async function modTest(ctx, body) {
+  const cfg = await ctx.db.get("config/moderation");
+  const r = filterFor(cfg && cfg.data).scan(str(body.text).slice(0, 2000));
+  return { ok: true, blocked: r.blocked, clean: r.clean, words: [...r.phrases, ...r.hits.map((h) => `${h.word}${h.blocked ? " (blocked)" : ""}`)] };
+}
+
 // ------------------------------------------------------------------- dispatch
 
 function needUid(v) {
@@ -900,6 +985,7 @@ export const PANEL_OPS = {
   reports, resolveReport, broadcast, deleteAccount,
   charts, verify, notifyUser, resetUsername, resetPhoto, devices, searchPosts, chat, deleteMessage,
   uploadImage, hidePost, config, blockedEmails,
+  modScan, modQueue, modResolve, modWords, modTest,
 };
 
 /** ctx = {db, auth, store, push, wipeFiles, nowMs, budgetMs, publicBase} */
