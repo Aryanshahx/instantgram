@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.hypertechlabs.instantgram"
-    compileSdk = 36flutter.compileSdkVersion
+    compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
