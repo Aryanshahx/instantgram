@@ -10,3 +10,11 @@ tasks.withType<JavaCompile>().configureEach {
         }
     )
 }
+// Java 17 Toolchain
+tasks.withType<JavaCompile>().configureEach {
+    javaCompiler.set(
+        javaToolchains.compilerFor {
+            languageVersion.set(JavaLanguageVersion.of(17))
+        }
+    )
+}
