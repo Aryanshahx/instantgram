@@ -18,9 +18,12 @@ jobs:
         with:
           flutter-version: '3.47.7'
           channel: 'stable'
-      - name: Set JAVA_HOME
-        run: echo "JAVA_HOME=$JAVA_HOME_17_X64" >> $GITHUB_ENV
-      - name: Get dependencies
-        run: flutter pub get
       - name: Build APK
-        run: flutter build apk --release --split-per-abi
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME_17_X64 }}
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version
+          flutter clean
+          flutter pub get
+          flutter build apk --release --split-per-abi
