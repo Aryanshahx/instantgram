@@ -135,14 +135,35 @@ class MediaService {
         await responseFuture.timeout(const Duration(minutes: 10));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final body = await response.stream.bytesToString();
-      throw ApiException(
-        'Upload failed (${response.statusCode}). ${body.length > 200 ? body.substring(0, 200) : body}',
-      );
+      throw ApiException(_storageError(response.statusCode, body));
     }
     return UploadedMedia(
       url: sign['publicUrl'] as String,
       key: sign['key'] as String,
     );
+  }
+
+  /// Turns a Tigris XML error into a short, readable message.
+  static String _storageError(int status, String body) {
+    final code = RegExp(r'<Code>([^<]+)</Code>').firstMatch(body)?.group(1) ?? '';
+    switch (code) {
+      case 'NoSuchBucket':
+        return 'Upload failed: storage bucket not found. '
+            'Check TIGRIS_BUCKET on Vercel.';
+      case 'InvalidAccessKeyId':
+      case 'SignatureDoesNotMatch':
+        return 'Upload failed: storage keys are wrong. '
+            'Check TIGRIS_ACCESS_KEY_ID / TIGRIS_SECRET_ACCESS_KEY on Vercel.';
+      case 'AccessDenied':
+        return 'Upload failed: access denied by storage. '
+            'Check the Tigris access key permissions.';
+      case 'RequestTimeTooSkewed':
+        return 'Upload failed: your phone clock is wrong. Fix date & time.';
+      case 'EntityTooLarge':
+        return 'Upload failed: file is too big.';
+      default:
+        return 'Upload failed ($status${code.isEmpty ? '' : ' $code'}). Try again.';
+    }
   }
 
   /// Delete a file from Tigris (ignored if it fails).

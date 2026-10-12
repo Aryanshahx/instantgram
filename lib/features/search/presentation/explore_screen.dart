@@ -24,14 +24,24 @@ class ExploreScreen extends StatefulWidget {
   State<ExploreScreen> createState() => _ExploreScreenState();
 }
 
+/// Explore:
+///  * no search  -> grid of the latest posts + clips
+///  * search     -> people + clips (never photo posts)
+///  * "#tag"     -> clips with that hashtag
 class _ExploreScreenState extends State<ExploreScreen> {
   final _searchCtrl = TextEditingController();
   final Stream<List<Post>> _recent =
       PostRepository.instance.recent(limit: 90);
+  final Stream<List<Post>> _recentClips =
+      PostRepository.instance.recent(type: Post.clip, limit: 100);
   Timer? _debounce;
   String _query = '';
   List<UserProfile> _people = const [];
+  List<Post> _tagClips = const [];
   bool _searching = false;
+
+  bool get _isTag => _query.startsWith('#');
+  String get _word => _query.replaceFirst('#', '').trim().toLowerCase();
 
   @override
   void dispose() {
@@ -41,76 +51,121 @@ class _ExploreScreenState extends State<ExploreScreen> {
   }
 
   void _onChanged(String v) {
-    setState(() => _query = v.trim());
-    _debounce?.cancel();
     final q = v.trim();
-    if (q.isEmpty || q.startsWith('#')) {
+    setState(() => _query = q);
+    _debounce?.cancel();
+    if (q.replaceFirst('#', '').isEmpty) {
       setState(() {
         _people = const [];
+        _tagClips = const [];
         _searching = false;
       });
       return;
     }
     setState(() => _searching = true);
     _debounce = Timer(const Duration(milliseconds: 350), () async {
+      final word = q.replaceFirst('#', '').trim().toLowerCase();
+      final isTag = q.startsWith('#');
       try {
-        final res = await UserRepository.instance.search(q);
+        final results = await Future.wait([
+          isTag
+              ? Future.value(<UserProfile>[])
+              : UserRepository.instance.search(word),
+          PostRepository.instance.clipsByTag(word),
+        ]);
         if (mounted && _query == q) {
           setState(() {
-            _people = res;
+            _people = results[0] as List<UserProfile>;
+            _tagClips = results[1] as List<Post>;
             _searching = false;
           });
         }
       } catch (_) {
-        if (mounted) setState(() => _searching = false);
+        if (mounted && _query == q) setState(() => _searching = false);
       }
     });
   }
 
-  List<Post> _filter(List<Post> posts) {
-    final q = _query.toLowerCase().replaceFirst('#', '');
-    if (q.isEmpty) return posts;
-    return posts
-        .where((p) =>
-            p.caption.toLowerCase().contains(q) ||
-            p.authorUsername.toLowerCase().contains(q))
-        .toList();
+  /// Clips that match the search (hashtag field, caption or username).
+  List<Post> _matchClips(List<Post> recentClips) {
+    final w = _word;
+    final byId = <String, Post>{for (final p in _tagClips) p.id: p};
+    for (final p in recentClips) {
+      final caption = p.caption.toLowerCase();
+      final match = _isTag
+          ? caption.contains('#$w')
+          : caption.contains(w) || p.authorUsername.toLowerCase().contains(w);
+      if (match) byId[p.id] = p;
+    }
+    return byId.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
+
+  Widget _grid(List<Post> posts) => SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        sliver: SliverMasonryGrid.count(
+          crossAxisCount: 2,
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childCount: posts.length,
+          itemBuilder: (context, i) => _ExploreTile(
+            post: posts[i],
+            onTap: () => openPost(context, posts, i),
+          ),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
+    final hasQuery = _word.isNotEmpty;
     return SafeArea(
       bottom: false,
       child: StreamBuilder<List<Post>>(
-        stream: _recent,
+        stream: hasQuery ? _recentClips : _recent,
         builder: (context, snap) {
-          final posts = _filter(snap.data ?? const []);
-          final hasQuery = _query.isNotEmpty;
-          return CustomScrollView(
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            slivers: [
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 28, 20, 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Explore', style: AppTheme.screenTitle),
-                      const SizedBox(height: 22),
-                      IgTextField(
-                        hint: 'Search people, clips or #tags',
-                        icon: Icons.search,
-                        controller: _searchCtrl,
-                        textInputAction: TextInputAction.search,
-                        onChanged: _onChanged,
-                      ),
-                    ],
+          final header = SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Explore', style: AppTheme.pageTitle),
+                  const SizedBox(height: 14),
+                  IgTextField(
+                    hint: 'Search people, clips or #tags',
+                    icon: Icons.search,
+                    height: 46,
+                    controller: _searchCtrl,
+                    textInputAction: TextInputAction.search,
+                    onChanged: _onChanged,
                   ),
-                ),
+                ],
               ),
-              if (hasQuery && _searching)
-                const SliverToBoxAdapter(child: LoadingView(padding: 16)),
-              if (hasQuery && _people.isNotEmpty) ...[
+            ),
+          );
+
+          final List<Widget> body;
+          if (snap.hasError) {
+            body = [SliverToBoxAdapter(child: ErrorView(error: snap.error))];
+          } else if (!snap.hasData) {
+            body = [const SliverToBoxAdapter(child: LoadingView())];
+          } else if (!hasQuery) {
+            final posts = snap.data!;
+            body = posts.isEmpty
+                ? [
+                    const SliverToBoxAdapter(
+                      child: EmptyState(
+                        icon: Icons.explore_outlined,
+                        title: 'Nothing to explore yet',
+                        subtitle: 'New posts and clips will show up here.',
+                      ),
+                    ),
+                  ]
+                : [_grid(posts)];
+          } else {
+            final clips = _matchClips(snap.data!);
+            body = [
+              if (_people.isNotEmpty) ...[
                 const SliverToBoxAdapter(child: _SectionTitle('People')),
                 SliverList.builder(
                   itemCount: _people.length,
@@ -119,37 +174,33 @@ class _ExploreScreenState extends State<ExploreScreen> {
                     onTap: () => openProfile(context, _people[i].uid),
                   ),
                 ),
-                if (posts.isNotEmpty)
-                  const SliverToBoxAdapter(child: _SectionTitle('Posts')),
               ],
-              if (snap.hasError)
-                SliverToBoxAdapter(child: ErrorView(error: snap.error))
-              else if (!snap.hasData)
-                const SliverToBoxAdapter(child: LoadingView())
-              else if (posts.isEmpty && !(hasQuery && (_people.isNotEmpty || _searching)))
+              if (clips.isNotEmpty) ...[
+                SliverToBoxAdapter(
+                  child: _SectionTitle(_isTag ? 'Clips with #$_word' : 'Clips'),
+                ),
+                _grid(clips),
+              ],
+              if (_searching)
+                const SliverToBoxAdapter(child: LoadingView(padding: 16))
+              else if (_people.isEmpty && clips.isEmpty)
                 SliverToBoxAdapter(
                   child: EmptyState(
-                    icon: hasQuery ? Icons.search_off : Icons.explore_outlined,
-                    title: hasQuery ? 'Nothing found' : 'Nothing to explore yet',
-                    subtitle: hasQuery
-                        ? 'Try another username or word.'
-                        : 'New posts and clips will show up here.',
-                  ),
-                )
-              else
-                SliverPadding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  sliver: SliverMasonryGrid.count(
-                    crossAxisCount: 2,
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 8,
-                    childCount: posts.length,
-                    itemBuilder: (context, i) => _ExploreTile(
-                      post: posts[i],
-                      onTap: () => openPost(context, posts, i),
-                    ),
+                    icon: Icons.search_off,
+                    title: 'Nothing found',
+                    subtitle: _isTag
+                        ? 'No clips with #$_word yet.'
+                        : 'Try another name, word or #tag.',
                   ),
                 ),
+            ];
+          }
+
+          return CustomScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            slivers: [
+              header,
+              ...body,
               const SliverToBoxAdapter(child: SizedBox(height: 110)),
             ],
           );
@@ -168,7 +219,7 @@ class _SectionTitle extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 6),
         child: Text(
           text,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
         ),
       );
 }

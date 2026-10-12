@@ -61,14 +61,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           onTap: () => openProfile(context, o.uid),
           child: Row(
             children: [
-              Avatar(url: o.photoUrl, name: o.username, size: 38),
+              Avatar(url: o.photoUrl, name: o.username, size: 32),
               const SizedBox(width: 12),
               Flexible(
                 child: Text(
                   o.username,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.w700),
+                      fontSize: 16, fontWeight: FontWeight.w700),
                 ),
               ),
             ],
@@ -117,7 +117,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         ),
                         margin: const EdgeInsets.symmetric(vertical: 3),
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 10),
+                            horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
                           color: mine ? AppColors.lime : AppColors.surface,
                           borderRadius: BorderRadius.only(
@@ -136,7 +136,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             Text(
                               m.text,
                               style: TextStyle(
-                                fontSize: 15.5,
+                                fontSize: 14.5,
                                 color: mine
                                     ? Colors.black
                                     : AppColors.textPrimary,
@@ -181,7 +181,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         filled: true,
                         fillColor: AppColors.surface,
                         contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 18, vertical: 12),
+                            horizontal: 16, vertical: 10),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(26),
                           borderSide: const BorderSide(color: AppColors.border),
@@ -203,6 +203,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     shape: const CircleBorder(),
                     child: IconButton(
                       onPressed: _sending ? null : _send,
+                      iconSize: 20,
                       icon: const Icon(Icons.send_rounded,
                           color: Colors.black),
                     ),

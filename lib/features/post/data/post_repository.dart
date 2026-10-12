@@ -21,6 +21,27 @@ class PostRepository {
   List<Post> _map(QuerySnapshot<Map<String, dynamic>> s) =>
       s.docs.map(Post.fromDoc).toList();
 
+  /// "#Sunset at #goa" -> ['sunset', 'goa']
+  static List<String> extractTags(String text) {
+    final tags = <String>{};
+    for (final m in RegExp(r'#([\p{L}\p{M}\p{N}_]{1,50})', unicode: true).allMatches(text)) {
+      tags.add(m.group(1)!.toLowerCase());
+      if (tags.length >= 30) break;
+    }
+    return tags.toList();
+  }
+
+  /// Clips with a hashtag (newest first).
+  Future<List<Post>> clipsByTag(String tag) async {
+    final t = tag.replaceFirst('#', '').trim().toLowerCase();
+    if (t.isEmpty) return [];
+    // Single-field query -> no extra Firestore index needed.
+    final s = await _posts.where('tags', arrayContains: t).limit(150).get();
+    final list = _map(s).where((p) => p.isClip).toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return list;
+  }
+
   // ---------------- Create / delete ----------------
 
   Future<void> create({
@@ -45,6 +66,7 @@ class PostRepository {
       'mediaUrl': media.url,
       'mediaKey': media.key,
       'caption': caption.trim(),
+      'tags': extractTags(caption),
       'aspectRatio': aspectRatio,
       'likesCount': 0,
       'commentsCount': 0,

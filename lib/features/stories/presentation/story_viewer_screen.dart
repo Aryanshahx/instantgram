@@ -9,7 +9,7 @@ import '../../../shared/widgets/net_image.dart';
 import '../../profile/data/user_repository.dart';
 import '../data/story_repository.dart';
 
-/// Full-screen story viewer: tap right = next, tap left = back,
+/// Full-screen moment (story) viewer: tap right = next, tap left = back,
 /// hold = pause, swipe down = close.
 class StoryViewerScreen extends StatefulWidget {
   const StoryViewerScreen({
@@ -85,7 +85,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     final ok = await showDialog<bool>(
       context: context,
       builder: (d) => AlertDialog(
-        title: const Text('Delete this story?'),
+        title: const Text('Delete this moment?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(d, false),

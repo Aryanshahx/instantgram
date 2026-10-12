@@ -93,10 +93,12 @@ service cloud.firestore {
         && request.resource.data.likesCount == 0
         && request.resource.data.commentsCount == 0
         && request.resource.data.repostsCount == 0
-        && request.resource.data.viewsCount == 0;
+        && request.resource.data.viewsCount == 0
+        && tagsOk();
       allow update: if signedIn() && (
         (resource.data.authorId == me()
-          && changed().hasOnly(['caption', 'pinned', 'authorPhotoUrl']))
+          && changed().hasOnly(['caption', 'tags', 'pinned', 'authorPhotoUrl'])
+          && tagsOk())
         ||
         (changed().hasOnly(['likesCount', 'commentsCount', 'repostsCount', 'viewsCount'])
           && stepOk('likesCount') && stepOk('commentsCount')
@@ -106,6 +108,13 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.authorId == me();
 
       // likesCount must match your like doc
+      // optional hashtag list: max 30 items
+      function tagsOk() {
+        return !('tags' in request.resource.data)
+          || (request.resource.data.tags is list
+              && request.resource.data.tags.size() <= 30);
+      }
+
       function likeOk() {
         let l = /databases/$(database)/documents/posts/$(pid)/likes/$(request.auth.uid);
         return !changed().hasAny(['likesCount'])

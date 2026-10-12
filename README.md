@@ -19,17 +19,18 @@ An Instagram-like app built with **Flutter**.
 ## Features (v0.3)
 - Sign up / log in (email or username)
 - Feed of people you follow (everyone's latest posts when you follow nobody yet)
-- Photo posts, Clips (short videos), Stories (24h)
+- Photo posts and Clips (short videos) stay forever; Moments disappear after 24h
 - Likes (double-tap too), comments, reposts, saves, share
 - Pin / delete your posts, clip insights, dashboard with real stats
-- Follow / unfollow, followers & following lists, user search
+- Follow / unfollow, followers & following lists
+- Search: people, clips and #hashtags
 - Direct messages
 - Notifications (likes, comments, follows, reposts)
 - Edit profile, profile photo and cover
 
 ## Download the APK
 - **Every push to `main`** → Actions tab → latest run → *Artifacts* → `InstantGram-apk-N`
-- **Releases** → push a tag like `v0.3.0` → APK appears under *Releases*
+- **Releases** → push a tag like `v0.3.1` → APK appears under *Releases*
 
 ## Setup
 ### Firebase

@@ -38,7 +38,7 @@ class AppTheme {
         scrolledUnderElevation: 0,
         titleTextStyle: TextStyle(
           fontFamily: fontFamily,
-          fontSize: 22,
+          fontSize: 18,
           fontWeight: FontWeight.w800,
           color: AppColors.textPrimary,
         ),
@@ -67,7 +67,17 @@ class AppTheme {
     );
   }
 
-  /// Big bold headline used on Explore / Chats / Login.
+  /// Compact page title (Explore / Chats).
+  static const TextStyle pageTitle = TextStyle(
+    fontFamily: fontFamily,
+    fontSize: 28,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -0.8,
+    color: AppColors.textPrimary,
+    height: 1.1,
+  );
+
+  /// Big bold headline used on Login.
   static const TextStyle screenTitle = TextStyle(
     fontFamily: fontFamily,
     fontSize: 38,

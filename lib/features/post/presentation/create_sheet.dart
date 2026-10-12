@@ -31,7 +31,7 @@ Future<void> showCreateSheet(BuildContext context) {
               _CreateOption(
                 icon: Icons.grid_view_rounded,
                 title: 'Post',
-                subtitle: 'Share a photo',
+                subtitle: 'Share a photo on your profile',
                 onTap: () => start(ComposeMode.photo),
               ),
               _CreateOption(
@@ -42,8 +42,8 @@ Future<void> showCreateSheet(BuildContext context) {
               ),
               _CreateOption(
                 icon: Icons.add_circle_outline,
-                title: 'Story',
-                subtitle: 'Disappears after 24 hours',
+                title: 'Moment',
+                subtitle: 'A photo that disappears after 24 hours',
                 onTap: () => start(ComposeMode.story),
               ),
             ],

@@ -15,17 +15,18 @@ class UserTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       onTap: onTap,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: Avatar(url: user.photoUrl, name: user.displayName, size: 48),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      visualDensity: VisualDensity.compact,
+      leading: Avatar(url: user.photoUrl, name: user.displayName, size: 42),
       title: Text(
         user.username,
-        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
       ),
       subtitle: Text(
         user.name,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: AppColors.textSecondary),
+        style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
       ),
       trailing: trailing,
     );

@@ -77,19 +77,20 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
           return ListView(
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            padding: const EdgeInsets.fromLTRB(18, 28, 18, 110),
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 110),
             children: [
               const Padding(
                 padding: EdgeInsets.only(left: 2),
-                child: Text('Chats', style: AppTheme.screenTitle),
+                child: Text('Chats', style: AppTheme.pageTitle),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 14),
               IgTextField(
                 hint: 'Find someone to message',
                 icon: Icons.search,
+                height: 46,
                 onChanged: _onChanged,
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
               if (snap.hasError)
                 ErrorView(error: snap.error)
               else if (!snap.hasData)
@@ -97,7 +98,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
               else ...[
                 for (final c in chats)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.only(bottom: 8),
                     child: _ChatTile(
                       chat: c,
                       me: me,
@@ -121,7 +122,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     child: Text(
                       'Start a new chat',
                       style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                          TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
                     ),
                   ),
                   for (final u in _people)
@@ -129,7 +130,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                       user: u,
                       onTap: () => openChat(context, u),
                       trailing: const Icon(Icons.send_rounded,
-                          color: AppColors.lime),
+                          size: 20, color: AppColors.lime),
                     ),
                 ],
                 if (chats.isEmpty && _people.isEmpty)
@@ -170,18 +171,18 @@ class _ChatTile extends StatelessWidget {
     return Material(
       color: AppColors.surface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(20),
         side: const BorderSide(color: AppColors.border),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 14, 18, 14),
+          padding: const EdgeInsets.fromLTRB(10, 10, 14, 10),
           child: Row(
             children: [
-              Avatar(url: chat.photoOf(other), name: name, size: 58),
-              const SizedBox(width: 16),
+              Avatar(url: chat.photoOf(other), name: name, size: 44),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -189,17 +190,17 @@ class _ChatTile extends StatelessWidget {
                     Text(
                       name,
                       style: const TextStyle(
-                        fontSize: 17,
+                        fontSize: 15,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Text(
                       preview,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 15,
+                        fontSize: 13,
                         color: fromMe
                             ? AppColors.textSecondary
                             : AppColors.textPrimary,
@@ -210,7 +211,10 @@ class _ChatTile extends StatelessWidget {
               ),
               Text(
                 timeAgo(chat.updatedAt, approx: true),
-                style: const TextStyle(color: AppColors.textSecondary),
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                ),
               ),
             ],
           ),

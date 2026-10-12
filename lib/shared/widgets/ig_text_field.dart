@@ -43,13 +43,20 @@ class _IgTextFieldState extends State<IgTextField> {
   bool _obscure = true;
 
   OutlineInputBorder _border(Color color) => OutlineInputBorder(
-    borderRadius: BorderRadius.circular(widget.height / 2.2),
+    borderRadius: BorderRadius.circular(
+      widget.maxLines > 1 ? 16 : widget.height / 2.2,
+    ),
     borderSide: BorderSide(color: color, width: 1.2),
   );
 
   @override
   Widget build(BuildContext context) {
-    final verticalPad = widget.maxLines > 1 ? 18.0 : (widget.height - 24) / 2;
+    // Small fields (height < 52) get smaller text + icons.
+    final compact = widget.height < 52;
+    final fontSize = compact ? 15.0 : 17.0;
+    final verticalPad = widget.maxLines > 1
+        ? (compact ? 12.0 : 18.0)
+        : (widget.height - fontSize * 1.4) / 2;
     return TextFormField(
       controller: widget.controller,
       obscureText: widget.isPassword && _obscure,
@@ -62,26 +69,34 @@ class _IgTextFieldState extends State<IgTextField> {
       maxLines: widget.isPassword ? 1 : widget.maxLines,
       minLines: 1,
       textCapitalization: widget.textCapitalization,
-      style: const TextStyle(fontSize: 17, color: AppColors.textPrimary),
+      style: TextStyle(fontSize: fontSize, color: AppColors.textPrimary),
       decoration: InputDecoration(
         hintText: widget.hint,
-        hintStyle: const TextStyle(fontSize: 17, color: AppColors.textHint),
+        hintStyle: TextStyle(fontSize: fontSize, color: AppColors.textHint),
         filled: true,
         fillColor: AppColors.surface.withValues(alpha: 0.85),
         contentPadding: EdgeInsets.symmetric(
-          horizontal: 22,
+          horizontal: compact ? 16 : 22,
           vertical: verticalPad,
         ),
         prefixIcon: widget.icon == null
             ? null
             : Padding(
-                padding: const EdgeInsets.only(left: 18, right: 12),
-                child: Icon(widget.icon, color: const Color(0xFFC9CBB8)),
+                padding: EdgeInsets.only(
+                  left: compact ? 14 : 18,
+                  right: compact ? 8 : 12,
+                ),
+                child: Icon(
+                  widget.icon,
+                  size: compact ? 20 : 24,
+                  color: const Color(0xFFC9CBB8),
+                ),
               ),
-        prefixIconConstraints: const BoxConstraints(minWidth: 56),
+        prefixIconConstraints: BoxConstraints(minWidth: compact ? 42 : 56),
         suffixIcon: widget.isPassword
             ? IconButton(
                 onPressed: () => setState(() => _obscure = !_obscure),
+                iconSize: compact ? 20 : 24,
                 icon: Icon(
                   _obscure
                       ? Icons.visibility_off_outlined

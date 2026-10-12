@@ -91,7 +91,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(_isStory
-              ? 'Story shared ✨'
+              ? 'Moment shared ✨'
               : _isClip
                   ? 'Clip shared 🎬'
                   : 'Post shared 🎉'),
@@ -112,7 +112,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   Widget build(BuildContext context) {
     final uploading = _progress != null;
     final title = _isStory
-        ? 'New story'
+        ? 'New moment'
         : _isClip
             ? 'New clip'
             : 'New post';
@@ -200,7 +200,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               ),
             ] else
               IgPrimaryButton(
-                label: _isStory ? 'Share to story' : 'Share',
+                label: _isStory ? 'Share moment' : 'Share',
                 onPressed: _share,
               ),
           ],

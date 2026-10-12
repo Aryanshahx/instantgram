@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { HttpError, requireEnv } from './http.js';
+import { env, HttpError, requireEnv } from './http.js';
 
 export const KINDS = ['post', 'clip', 'story', 'avatar', 'cover'];
 
@@ -28,7 +28,7 @@ function s3() {
   if (!client) {
     client = new S3Client({
       region: 'auto',
-      endpoint: process.env.TIGRIS_ENDPOINT || 'https://t3.storage.dev',
+      endpoint: env('TIGRIS_ENDPOINT') || 'https://t3.storage.dev',
       credentials: {
         accessKeyId: requireEnv('TIGRIS_ACCESS_KEY_ID'),
         secretAccessKey: requireEnv('TIGRIS_SECRET_ACCESS_KEY'),
@@ -39,7 +39,7 @@ function s3() {
 }
 
 export function publicUrl(key) {
-  const base = process.env.PUBLIC_MEDIA_BASE_URL;
+  const base = env('PUBLIC_MEDIA_BASE_URL');
   if (base) return `${base.replace(/\/$/, '')}/${key}`;
   return `https://${requireEnv('TIGRIS_BUCKET')}.t3.tigrisfiles.io/${key}`;
 }

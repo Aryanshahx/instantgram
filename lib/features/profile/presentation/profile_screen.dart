@@ -271,7 +271,7 @@ class _ProfileViewState extends State<ProfileView>
               labelColor: AppColors.textPrimary,
               unselectedLabelColor: AppColors.textSecondary,
               labelStyle: const TextStyle(
-                fontSize: 15,
+                fontSize: 13.5,
                 fontWeight: FontWeight.w700,
                 fontFamily: 'Inter',
               ),
@@ -310,13 +310,13 @@ class _ProfileViewState extends State<ProfileView>
   Widget _tab(int i, IconData icon, String label) {
     final selected = _tabs.index == i;
     return Tab(
-      height: 56,
+      height: 46, // Flutter's minimum tab height (smaller breaks the layout)
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
             icon,
-            size: 22,
+            size: 18,
             color: selected ? AppColors.lime : AppColors.textSecondary,
           ),
           const SizedBox(width: 6),
@@ -449,8 +449,8 @@ class _Header extends StatelessWidget {
   final VoidCallback onFollowersTap;
   final VoidCallback onFollowingTap;
 
-  static const double _coverHeight = 200;
-  static const double _avatarSize = 104;
+  static const double _coverHeight = 140;
+  static const double _avatarSize = 80;
 
   Widget _circleButton(IconData icon, String tip, VoidCallback onTap) {
     return Material(
@@ -459,6 +459,8 @@ class _Header extends StatelessWidget {
       child: IconButton(
         tooltip: tip,
         onPressed: onTap,
+        iconSize: 20,
+        visualDensity: VisualDensity.compact,
         icon: Icon(icon, color: Colors.white),
       ),
     );
@@ -486,7 +488,7 @@ class _Header extends StatelessWidget {
                   onTap: onCoverTap,
                   child: ClipRRect(
                     borderRadius: const BorderRadius.vertical(
-                      bottom: Radius.circular(36),
+                      bottom: Radius.circular(26),
                     ),
                     child: p.coverUrl.isEmpty
                         ? const DecoratedBox(
@@ -508,21 +510,21 @@ class _Header extends StatelessWidget {
               ),
               if (onBack != null)
                 Positioned(
-                  left: 28,
-                  top: topPad + 12,
+                  left: 24,
+                  top: topPad + 8,
                   child: _circleButton(Icons.arrow_back, 'Back', onBack!),
                 ),
               if (isMe)
                 Positioned(
-                  right: 28,
-                  top: topPad + 12,
+                  right: 24,
+                  top: topPad + 8,
                   child: _circleButton(Icons.settings, 'Settings', onSettings),
                 ),
               Positioned(
-                left: 34,
+                left: 26,
                 bottom: 0,
                 child: Container(
-                  padding: const EdgeInsets.all(4),
+                  padding: const EdgeInsets.all(3),
                   decoration: const BoxDecoration(
                     color: AppColors.background,
                     shape: BoxShape.circle,
@@ -543,32 +545,32 @@ class _Header extends StatelessWidget {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(26, 18, 26, 0),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 p.displayName,
                 style: const TextStyle(
-                  fontSize: 32,
+                  fontSize: 22,
                   fontWeight: FontWeight.w800,
-                  letterSpacing: -1,
+                  letterSpacing: -0.5,
                 ),
               ),
               const SizedBox(height: 2),
               Text(
                 '@${p.username}',
                 style: const TextStyle(
-                  fontSize: 16,
+                  fontSize: 14,
                   color: AppColors.textSecondary,
                 ),
               ),
               if (p.bio.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(p.bio, style: const TextStyle(fontSize: 17, height: 1.35)),
+                const SizedBox(height: 8),
+                Text(p.bio, style: const TextStyle(fontSize: 14.5, height: 1.35)),
               ],
               if (p.website.isNotEmpty) ...[
-                const SizedBox(height: 14),
+                const SizedBox(height: 10),
                 _LinkChip(
                   label: p.website,
                   onTap: () async {
@@ -581,7 +583,7 @@ class _Header extends StatelessWidget {
                   },
                 ),
               ],
-              const SizedBox(height: 24),
+              const SizedBox(height: 14),
               Row(
                 children: [
                   _Stat(value: p.postsCount, label: 'Posts', onTap: onPostsTap),
@@ -597,40 +599,40 @@ class _Header extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 14),
               if (isMe) ...[
                 Row(
                   children: [
                     Expanded(
                       child: IgPrimaryButton(
                         label: 'Edit profile',
-                        height: 48,
+                        height: 36,
                         onPressed: onEdit,
                       ),
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: IgOutlineButton(
                         label: 'Share profile',
-                        height: 48,
+                        height: 36,
                         onPressed: onShare,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 IgOutlineButton(
                   label: 'Dashboard',
                   icon: Icons.auto_graph,
-                  height: 48,
+                  height: 36,
                   onPressed: onDashboard,
                 ),
-                const SizedBox(height: 22),
+                const SizedBox(height: 14),
                 _NewHighlight(onTap: onNewStory),
-                const SizedBox(height: 16),
+                const SizedBox(height: 10),
               ] else ...[
                 _FollowRow(profile: p),
-                const SizedBox(height: 20),
+                const SizedBox(height: 14),
               ],
             ],
           ),
@@ -684,21 +686,21 @@ class _FollowRowState extends State<_FollowRow> {
                   ? IgOutlineButton(
                       label: 'Following',
                       icon: Icons.check,
-                      height: 48,
+                      height: 36,
                       onPressed: _busy ? null : () => _toggle(true),
                     )
                   : IgPrimaryButton(
                       label: 'Follow',
-                      height: 48,
+                      height: 36,
                       loading: _busy || !snap.hasData,
                       onPressed: () => _toggle(false),
                     ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: IgOutlineButton(
                 label: 'Message',
-                height: 48,
+                height: 36,
                 onPressed: () => openChat(context, widget.profile),
               ),
             ),
@@ -727,20 +729,20 @@ class _LinkChip extends StatelessWidget {
         customBorder: const StadiumBorder(),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.link, color: AppColors.lime, size: 22),
-              const SizedBox(width: 10),
+              const Icon(Icons.link, color: AppColors.lime, size: 17),
+              const SizedBox(width: 6),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 240),
                 child: Text(
                   display,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
@@ -770,13 +772,12 @@ class _Stat extends StatelessWidget {
           children: [
             Text(
               compactCount(value < 0 ? 0 : value),
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
             ),
-            const SizedBox(height: 2),
             Text(
               label,
               style: const TextStyle(
-                fontSize: 15,
+                fontSize: 12.5,
                 color: AppColors.textSecondary,
               ),
             ),
@@ -799,19 +800,19 @@ class _NewHighlight extends StatelessWidget {
       child: Column(
         children: [
           Container(
-            width: 74,
-            height: 74,
+            width: 56,
+            height: 56,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: const Color(0xFF2D3035),
-              border: Border.all(color: const Color(0xFF808186), width: 2),
+              border: Border.all(color: const Color(0xFF808186), width: 1.5),
             ),
-            child: const Icon(Icons.add, size: 34),
+            child: const Icon(Icons.add, size: 26),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 5),
           const Text(
             'New',
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           ),
         ],
       ),

@@ -76,19 +76,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         builder: (context, snap) {
           final p = snap.data ?? widget.profile;
           return ListView(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             children: [
               SizedBox(
-                height: 190,
+                height: 150,
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
                     Positioned.fill(
-                      bottom: 40,
+                      bottom: 32,
                       child: GestureDetector(
                         onTap: () => _pick(cover: true),
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(24),
+                          borderRadius: BorderRadius.circular(18),
                           child: Stack(
                             fit: StackFit.expand,
                             children: [
@@ -109,11 +109,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                 child: const Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.photo_camera_outlined),
-                                    SizedBox(width: 8),
+                                    Icon(Icons.photo_camera_outlined, size: 18),
+                                    SizedBox(width: 6),
                                     Text('Change cover',
                                         style: TextStyle(
-                                            fontWeight: FontWeight.w700)),
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600)),
                                   ],
                                 ),
                               ),
@@ -123,12 +124,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       ),
                     ),
                     Positioned(
-                      left: 20,
+                      left: 16,
                       bottom: 0,
                       child: GestureDetector(
                         onTap: () => _pick(cover: false),
                         child: Container(
-                          padding: const EdgeInsets.all(4),
+                          padding: const EdgeInsets.all(3),
                           decoration: const BoxDecoration(
                             color: AppColors.background,
                             shape: BoxShape.circle,
@@ -136,7 +137,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           child: Avatar(
                             url: p.photoUrl,
                             name: p.displayName,
-                            size: 84,
+                            size: 64,
                             showPlus: true,
                             onPlusTap: () => _pick(cover: false),
                           ),
@@ -146,32 +147,40 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
               _label('Name'),
               IgTextField(
+                height: 46,
                 hint: 'Your name',
                 icon: Icons.person_outline,
                 controller: _name,
                 textCapitalization: TextCapitalization.words,
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 12),
               _label('Bio'),
               IgTextField(
+                height: 46,
                 hint: 'Tell people about yourself',
                 controller: _bio,
                 maxLines: 4,
                 textCapitalization: TextCapitalization.sentences,
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 12),
               _label('Website'),
               IgTextField(
+                height: 46,
                 hint: 'https://your-site.com',
                 icon: Icons.link,
                 controller: _website,
                 keyboardType: TextInputType.url,
               ),
-              const SizedBox(height: 28),
-              IgPrimaryButton(label: 'Save', loading: _saving, onPressed: _save),
+              const SizedBox(height: 20),
+              IgPrimaryButton(
+                label: 'Save',
+                height: 44,
+                loading: _saving,
+                onPressed: _save,
+              ),
             ],
           );
         },
@@ -180,10 +189,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Widget _label(String text) => Padding(
-        padding: const EdgeInsets.only(left: 6, bottom: 8),
+        padding: const EdgeInsets.only(left: 4, bottom: 6),
         child: Text(
           text,
-          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+            color: AppColors.textSecondary,
+          ),
         ),
       );
 }

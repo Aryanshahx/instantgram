@@ -35,8 +35,13 @@ export function postHandler(fn) {
   };
 }
 
+/** Reads a setting and removes spaces / newlines (easy to paste by mistake). */
+export function env(name) {
+  return (process.env[name] || '').replace(/\s+/g, '');
+}
+
 export function requireEnv(name) {
-  const v = process.env[name];
+  const v = env(name);
   if (!v) throw new HttpError(500, `Server not configured: ${name} missing`);
   return v;
 }
