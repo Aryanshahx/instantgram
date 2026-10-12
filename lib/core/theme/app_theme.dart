@@ -1,47 +1,79 @@
 import 'package:flutter/material.dart';
 
+import 'app_colors.dart';
+
 class AppTheme {
   AppTheme._();
 
-  static const Color brand = Color(0xFFE1306C);
+  static const String fontFamily = 'Inter';
+  static const String logoFontFamily = 'Pacifico';
 
-  static const LinearGradient brandGradient = LinearGradient(
-    begin: Alignment.bottomLeft,
-    end: Alignment.topRight,
-    colors: [
-      Color(0xFFFEDA75),
-      Color(0xFFFA7E1E),
-      Color(0xFFD62976),
-      Color(0xFF962FBF),
-      Color(0xFF4F5BD5),
-    ],
-  );
-
-  static ThemeData get light => ThemeData(
-    useMaterial3: true,
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: brand,
-      brightness: Brightness.light,
-    ),
-    scaffoldBackgroundColor: Colors.white,
-    appBarTheme: const AppBarTheme(
-      backgroundColor: Colors.white,
-      foregroundColor: Colors.black,
-      elevation: 0,
-    ),
-  );
-
-  static ThemeData get dark => ThemeData(
-    useMaterial3: true,
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: brand,
+  static ThemeData get dark {
+    final base = ThemeData(
+      useMaterial3: true,
       brightness: Brightness.dark,
-    ),
-    scaffoldBackgroundColor: Colors.black,
-    appBarTheme: const AppBarTheme(
-      backgroundColor: Colors.black,
-      foregroundColor: Colors.white,
-      elevation: 0,
-    ),
+      fontFamily: fontFamily,
+    );
+
+    return base.copyWith(
+      scaffoldBackgroundColor: AppColors.background,
+      colorScheme: const ColorScheme.dark(
+        primary: AppColors.lime,
+        onPrimary: Colors.black,
+        secondary: AppColors.mint,
+        onSecondary: Colors.black,
+        surface: AppColors.background,
+        onSurface: AppColors.textPrimary,
+        error: AppColors.like,
+      ),
+      textTheme: base.textTheme.apply(
+        fontFamily: fontFamily,
+        bodyColor: AppColors.textPrimary,
+        displayColor: AppColors.textPrimary,
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: AppColors.background,
+        foregroundColor: AppColors.textPrimary,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        titleTextStyle: TextStyle(
+          fontFamily: fontFamily,
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+          color: AppColors.textPrimary,
+        ),
+      ),
+      snackBarTheme: const SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AppColors.surfaceHigh,
+        contentTextStyle: TextStyle(
+          fontFamily: fontFamily,
+          color: AppColors.textPrimary,
+        ),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: AppColors.surface,
+        showDragHandle: true,
+        dragHandleColor: AppColors.border,
+      ),
+      dividerColor: AppColors.border,
+      textSelectionTheme: const TextSelectionThemeData(
+        cursorColor: AppColors.lime,
+        selectionHandleColor: AppColors.lime,
+      ),
+      progressIndicatorTheme: const ProgressIndicatorThemeData(
+        color: AppColors.lime,
+      ),
+    );
+  }
+
+  /// Big bold headline used on Explore / Chats / Login.
+  static const TextStyle screenTitle = TextStyle(
+    fontFamily: fontFamily,
+    fontSize: 38,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -1.4,
+    color: AppColors.textPrimary,
+    height: 1.05,
   );
 }

@@ -1,0 +1,24 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "instantgram-50b8e",
+          "appId": "1:450075121848:android:0f72dee1e2b7b91c77bc4d",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "instantgram-50b8e",
+          "configurations": {
+            "android": "1:450075121848:android:0f72dee1e2b7b91c77bc4d"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  }
+}

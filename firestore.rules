@@ -1,0 +1,33 @@
+rules_version = '2';
+
+// InstantGram Firestore security rules
+// Paste into: Firebase Console → Firestore Database → Rules → Publish
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // User profiles
+    match /users/{uid} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid;
+      // Owner can edit profile, but not change uid/username/email
+      allow update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.username == resource.data.username
+        && request.resource.data.email == resource.data.email;
+      allow delete: if false;
+    }
+
+    // Username reservations (keeps usernames unique, allows "login with username")
+    match /usernames/{name} {
+      allow get: if true;      // lookup a single username
+      allow list: if false;    // no listing / scraping
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && name.matches('^[a-z0-9._]{3,30}$');
+      allow update, delete: if false;
+    }
+  }
+}
