@@ -32,3 +32,12 @@ String fullDate(DateTime t) {
   final ampm = t.hour < 12 ? 'AM' : 'PM';
   return '${t.day} ${_months[t.month - 1]} ${t.year}, $h:$m $ampm';
 }
+
+/// "13 Oct 2006"
+String shortDate(DateTime t) => '${t.day} ${_months[t.month - 1]} ${t.year}';
+
+/// "1:05" or "12:30"
+String durationLabel(int ms) {
+  final s = (ms / 1000).round();
+  return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+}

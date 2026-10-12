@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_colors.dart';
+import '../../features/stories/data/moments_index.dart';
 import 'net_image.dart';
 
-/// Circular avatar with optional lime "+" badge and story ring.
+/// Circular avatar with optional lime "+" badge and moment ring.
+///
+/// Pass [uid] to show the glowing ring automatically when that user has
+/// an active moment; tapping the avatar then opens the moment.
 class Avatar extends StatelessWidget {
   const Avatar({
     super.key,
@@ -12,41 +16,84 @@ class Avatar extends StatelessWidget {
     this.name = '',
     this.showPlus = false,
     this.ring = false,
+    this.seen = false,
     this.onPlusTap,
+    this.uid,
+    this.openMoment = true,
   });
 
   final String url;
   final double size;
   final String name;
   final bool showPlus;
+
+  /// Always draw a ring (outside [size]).
   final bool ring;
+
+  /// Ring drawn grey (already watched).
+  final bool seen;
   final VoidCallback? onPlusTap;
+
+  /// Owner of the avatar (enables the automatic moment ring).
+  final String? uid;
+
+  /// Tap opens the moment when the ring is shown.
+  final bool openMoment;
 
   @override
   Widget build(BuildContext context) {
+    final id = uid;
+    if (id == null || id.isEmpty) {
+      return _build(context, ring: ring, seen: seen, inside: false);
+    }
+    final index = MomentsIndex.instance;
+    return ListenableBuilder(
+      listenable: index.listenable,
+      builder: (context, _) {
+        final g = index.of(id);
+        if (g == null) {
+          return _build(context, ring: ring, seen: seen, inside: false);
+        }
+        final child = _build(
+          context,
+          ring: true,
+          seen: index.allSeen(g),
+          inside: !ring,
+        );
+        if (!openMoment) return child;
+        return GestureDetector(
+          onTap: () => index.open(context, id),
+          child: child,
+        );
+      },
+    );
+  }
+
+  /// [inside] = keep the total size == [size] (ring drawn inside it).
+  Widget _build(
+    BuildContext context, {
+    required bool ring,
+    required bool seen,
+    required bool inside,
+  }) {
+    final ringW = (size * 0.055).clamp(1.8, 3.2);
+    final gap = (size * 0.045).clamp(1.5, 2.8);
+    final inner = inside ? size - 2 * (ringW + gap) : size;
+
     Widget circle = ClipOval(
       child: SizedBox(
-        width: size,
-        height: size,
-        child: url.isEmpty ? _Initials(name: name, size: size) : NetImage(url),
+        width: inner,
+        height: inner,
+        child: url.isEmpty ? _Initials(name: name, size: inner) : NetImage(url),
       ),
     );
 
     if (ring) {
-      circle = Container(
-        padding: const EdgeInsets.all(3),
-        decoration: const BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: AppColors.fabGradient,
-        ),
-        child: Container(
-          padding: const EdgeInsets.all(2.5),
-          decoration: const BoxDecoration(
-            shape: BoxShape.circle,
-            color: AppColors.background,
-          ),
-          child: circle,
-        ),
+      circle = MomentRing(
+        seen: seen,
+        width: ringW,
+        gap: gap,
+        child: circle,
       );
     }
 
@@ -75,6 +122,51 @@ class Avatar extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Lime → mint glowing ring (grey when [seen]).
+class MomentRing extends StatelessWidget {
+  const MomentRing({
+    super.key,
+    required this.child,
+    this.seen = false,
+    this.width = 3,
+    this.gap = 2.5,
+  });
+
+  final Widget child;
+  final bool seen;
+  final double width;
+  final double gap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(width),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: seen ? null : AppColors.fabGradient,
+        color: seen ? const Color(0xFF3A3F4A) : null,
+        boxShadow: seen
+            ? null
+            : [
+                BoxShadow(
+                  color: AppColors.lime.withValues(alpha: 0.45),
+                  blurRadius: 10,
+                  spreadRadius: 0.5,
+                ),
+              ],
+      ),
+      child: Container(
+        padding: EdgeInsets.all(gap),
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          color: AppColors.background,
+        ),
+        child: child,
+      ),
     );
   }
 }

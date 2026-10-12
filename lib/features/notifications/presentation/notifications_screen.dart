@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/services/content_filter.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
@@ -9,6 +10,8 @@ import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/net_image.dart';
 import '../../post/presentation/post_detail_screen.dart';
+import '../../profile/data/user_repository.dart';
+import '../../settings/presentation/privacy_screens.dart';
 import '../data/notification_repository.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -21,6 +24,40 @@ class NotificationsScreen extends StatefulWidget {
 class _NotificationsScreenState extends State<NotificationsScreen> {
   final _repo = NotificationRepository.instance;
   late final Stream<List<AppNotification>> _stream = _repo.watchMine();
+  late final Stream<List<dynamic>> _requests = UserRepository.instance
+      .followRequests();
+
+  Widget _requestsTile() => StreamBuilder<List<dynamic>>(
+    stream: _requests,
+    builder: (context, s) {
+      final n = s.data?.length ?? 0;
+      if (n == 0) return const SizedBox.shrink();
+      return ListTile(
+        key: const ValueKey('follow-requests'),
+        leading: Container(
+          width: 46,
+          height: 46,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: AppColors.fabGradient,
+          ),
+          child: const Icon(Icons.person_add_alt_1, color: Colors.black),
+        ),
+        title: const Text(
+          'Follow requests',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: Text(
+          '$n waiting for you',
+          style: const TextStyle(color: AppColors.textSecondary),
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const FollowRequestsScreen()),
+        ),
+      );
+    },
+  );
 
   @override
   void dispose() {
@@ -51,8 +88,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         actions: [
           TextButton(
             onPressed: _repo.markAllRead,
-            child: const Text('Mark all read',
-                style: TextStyle(color: AppColors.lime)),
+            child: const Text(
+              'Mark all read',
+              style: TextStyle(color: AppColors.lime),
+            ),
           ),
         ],
       ),
@@ -61,20 +100,26 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         builder: (context, snap) {
           if (snap.hasError) return ErrorView(error: snap.error);
           if (!snap.hasData) return const LoadingView();
-          final list = snap.data!;
+          final list = snap.data!
+              .where((n) => !ContentFilter.instance.isBlocked(n.fromUid))
+              .toList();
           if (list.isEmpty) {
-            return const Center(
-              child: EmptyState(
-                icon: Icons.notifications_none,
-                title: 'No notifications yet',
-                subtitle: 'Likes, comments and new followers show up here.',
-              ),
+            return ListView(
+              children: [
+                _requestsTile(),
+                const EmptyState(
+                  icon: Icons.notifications_none,
+                  title: 'No notifications yet',
+                  subtitle: 'Likes, comments and new followers show up here.',
+                ),
+              ],
             );
           }
           return ListView.builder(
-            itemCount: list.length,
-            itemBuilder: (context, i) {
-              final n = list[i];
+            itemCount: list.length + 1,
+            itemBuilder: (context, index) {
+              if (index == 0) return _requestsTile();
+              final n = list[index - 1];
               return Container(
                 color: n.read
                     ? Colors.transparent
@@ -82,9 +127,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 child: ListTile(
                   onTap: () {
                     if (n.postId.isNotEmpty) {
-                      Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => PostDetailScreen(postId: n.postId),
-                      ));
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => PostDetailScreen(postId: n.postId),
+                        ),
+                      );
                     } else {
                       openProfile(context, n.fromUid);
                     }
@@ -92,20 +139,28 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   leading: GestureDetector(
                     onTap: () => openProfile(context, n.fromUid),
                     child: Avatar(
-                        url: n.fromPhotoUrl, name: n.fromUsername, size: 46),
+                      url: n.fromPhotoUrl,
+                      name: n.fromUsername,
+                      size: 46,
+                      uid: n.fromUid,
+                    ),
                   ),
                   title: Text.rich(
-                    TextSpan(children: [
-                      TextSpan(
-                        text: '${n.fromUsername} ',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      TextSpan(text: _text(n)),
-                      TextSpan(
-                        text: '  ${timeAgo(n.createdAt)}',
-                        style: const TextStyle(color: AppColors.textSecondary),
-                      ),
-                    ]),
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: '${n.fromUsername} ',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        TextSpan(text: _text(n)),
+                        TextSpan(
+                          text: '  ${timeAgo(n.createdAt)}',
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -119,9 +174,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           ),
                         )
                       : (n.type == AppNotification.follow
-                          ? const Icon(Icons.person_add_alt_1,
-                              color: AppColors.lime)
-                          : null),
+                            ? const Icon(
+                                Icons.person_add_alt_1,
+                                color: AppColors.lime,
+                              )
+                            : null),
                 ),
               );
             },

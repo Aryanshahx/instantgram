@@ -14,6 +14,7 @@ class ClipCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (post.thumbUrl.isNotEmpty) return NetImage(post.thumbUrl);
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -69,6 +70,28 @@ class PostTile extends StatelessWidget {
               top: 6,
               left: 6,
               child: Icon(Icons.push_pin, size: 18, color: Colors.white),
+            ),
+          if (post.isMulti)
+            const Positioned(
+              top: 6,
+              right: 6,
+              child: Icon(Icons.collections_rounded,
+                  size: 18,
+                  color: Colors.white,
+                  shadows: [Shadow(blurRadius: 4, color: Colors.black54)]),
+            ),
+          if (post.audience != Audience.everyone)
+            Positioned(
+              bottom: 6,
+              right: 6,
+              child: Icon(
+                post.audience == Audience.onlyMe
+                    ? Icons.lock_outline
+                    : Icons.people_outline,
+                size: 16,
+                color: Colors.white,
+                shadows: const [Shadow(blurRadius: 4, color: Colors.black54)],
+              ),
             ),
           if (post.isClip)
             Positioned(

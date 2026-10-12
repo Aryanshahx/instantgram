@@ -42,20 +42,16 @@ class ChatRepository {
     final chatRef = _chats.doc(chatIdWith(other.uid));
     final members = [me.uid, other.uid]..sort();
     final batch = _db.batch();
-    batch.set(
-      chatRef,
-      {
-        'members': members,
-        'memberInfo': {
-          me.uid: {'username': me.username, 'photoUrl': me.photoUrl},
-          other.uid: {'username': other.username, 'photoUrl': other.photoUrl},
-        },
-        'lastMessage': t.length > 200 ? t.substring(0, 200) : t,
-        'lastSenderId': me.uid,
-        'updatedAt': FieldValue.serverTimestamp(),
+    batch.set(chatRef, {
+      'members': members,
+      'memberInfo': {
+        me.uid: {'username': me.username, 'photoUrl': me.photoUrl},
+        other.uid: {'username': other.username, 'photoUrl': other.photoUrl},
       },
-      SetOptions(merge: true),
-    );
+      'lastMessage': t.length > 200 ? t.substring(0, 200) : t,
+      'lastSenderId': me.uid,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
     batch.set(chatRef.collection('messages').doc(), {
       'senderId': me.uid,
       'text': t,

@@ -62,12 +62,16 @@ class _CommentsSheetState extends State<CommentsSheet> {
         title: const Text('Delete comment?'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete',
-                  style: TextStyle(color: AppColors.like))),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: AppColors.like),
+            ),
+          ),
         ],
       ),
     );
@@ -83,8 +87,9 @@ class _CommentsSheetState extends State<CommentsSheet> {
     return SizedBox(
       height: MediaQuery.of(context).size.height * 0.75,
       child: Padding(
-        padding:
-            EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
         child: Column(
           children: [
             const Text(
@@ -123,23 +128,27 @@ class _CommentsSheetState extends State<CommentsSheet> {
                             url: c.authorPhotoUrl,
                             name: c.authorUsername,
                             size: 38,
+                            uid: c.authorId,
                           ),
                         ),
                         title: Text.rich(
-                          TextSpan(children: [
-                            TextSpan(
-                              text: '${c.authorUsername}  ',
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w700),
-                            ),
-                            TextSpan(
-                              text: timeAgo(c.createdAt),
-                              style: const TextStyle(
-                                color: AppColors.textSecondary,
-                                fontSize: 12,
+                          TextSpan(
+                            children: [
+                              TextSpan(
+                                text: '${c.authorUsername}  ',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
-                            ),
-                          ]),
+                              TextSpan(
+                                text: timeAgo(c.createdAt),
+                                style: const TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                         subtitle: Text(
                           c.text,
@@ -150,8 +159,11 @@ class _CommentsSheetState extends State<CommentsSheet> {
                         ),
                         trailing: canDelete
                             ? IconButton(
-                                icon: const Icon(Icons.delete_outline,
-                                    size: 20, color: AppColors.textSecondary),
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  size: 20,
+                                  color: AppColors.textSecondary,
+                                ),
                                 onPressed: () => _delete(c),
                               )
                             : null,
@@ -177,21 +189,24 @@ class _CommentsSheetState extends State<CommentsSheet> {
                         decoration: InputDecoration(
                           counterText: '',
                           hintText: 'Add a comment…',
-                          hintStyle:
-                              const TextStyle(color: AppColors.textHint),
+                          hintStyle: const TextStyle(color: AppColors.textHint),
                           filled: true,
                           fillColor: AppColors.background,
                           contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 18, vertical: 12),
+                            horizontal: 18,
+                            vertical: 12,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(24),
-                            borderSide:
-                                const BorderSide(color: AppColors.border),
+                            borderSide: const BorderSide(
+                              color: AppColors.border,
+                            ),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(24),
-                            borderSide:
-                                const BorderSide(color: AppColors.border),
+                            borderSide: const BorderSide(
+                              color: AppColors.border,
+                            ),
                           ),
                         ),
                       ),
@@ -202,9 +217,12 @@ class _CommentsSheetState extends State<CommentsSheet> {
                           ? const SizedBox(
                               width: 20,
                               height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(Icons.send_rounded,
-                              color: AppColors.lime),
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(
+                              Icons.send_rounded,
+                              color: AppColors.lime,
+                            ),
                     ),
                   ],
                 ),

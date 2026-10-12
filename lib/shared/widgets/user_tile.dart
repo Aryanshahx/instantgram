@@ -17,7 +17,8 @@ class UserTile extends StatelessWidget {
       onTap: onTap,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16),
       visualDensity: VisualDensity.compact,
-      leading: Avatar(url: user.photoUrl, name: user.displayName, size: 42),
+      leading: Avatar(
+          url: user.photoUrl, name: user.displayName, size: 42, uid: user.uid),
       title: Text(
         user.username,
         style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),

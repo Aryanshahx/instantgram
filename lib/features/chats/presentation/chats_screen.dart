@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../core/services/content_filter.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/time_ago.dart';
@@ -17,9 +18,8 @@ import '../data/chat_repository.dart';
 import 'chat_detail_screen.dart';
 
 void openChat(BuildContext context, UserProfile other) {
-  Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => ChatDetailScreen(other: other)),
-  );
+  Navigator.of(context)
+      .push(MaterialPageRoute(builder: (_) => ChatDetailScreen(other: other)));
 }
 
 class ChatsScreen extends StatefulWidget {
@@ -70,9 +70,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
         builder: (context, snap) {
           final q = _query.toLowerCase();
           final chats = (snap.data ?? const <Chat>[])
-              .where((c) =>
-                  q.isEmpty ||
-                  c.usernameOf(c.otherUid(me)).toLowerCase().contains(q))
+              .where(
+                (c) =>
+                    !ContentFilter.instance.isBlocked(c.otherUid(me)) &&
+                    (q.isEmpty ||
+                        c.usernameOf(c.otherUid(me)).toLowerCase().contains(q)),
+              )
               .toList();
 
           return ListView(
@@ -121,16 +124,21 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     padding: EdgeInsets.fromLTRB(4, 8, 4, 4),
                     child: Text(
                       'Start a new chat',
-                      style:
-                          TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                   for (final u in _people)
                     UserTile(
                       user: u,
                       onTap: () => openChat(context, u),
-                      trailing: const Icon(Icons.send_rounded,
-                          size: 20, color: AppColors.lime),
+                      trailing: const Icon(
+                        Icons.send_rounded,
+                        size: 20,
+                        color: AppColors.lime,
+                      ),
                     ),
                 ],
                 if (chats.isEmpty && _people.isEmpty)
@@ -165,8 +173,8 @@ class _ChatTile extends StatelessWidget {
     final preview = chat.lastMessage.isEmpty
         ? 'Say hi 👋'
         : fromMe
-            ? 'Sent · You: ${chat.lastMessage}'
-            : chat.lastMessage;
+        ? 'Sent · You: ${chat.lastMessage}'
+        : chat.lastMessage;
 
     return Material(
       color: AppColors.surface,
@@ -181,7 +189,12 @@ class _ChatTile extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(10, 10, 14, 10),
           child: Row(
             children: [
-              Avatar(url: chat.photoOf(other), name: name, size: 44),
+              Avatar(
+                url: chat.photoOf(other),
+                name: name,
+                size: 44,
+                uid: other,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(

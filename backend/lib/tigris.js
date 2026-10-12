@@ -4,7 +4,7 @@ import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env, HttpError, requireEnv } from './http.js';
 
-export const KINDS = ['post', 'clip', 'story', 'avatar', 'cover'];
+export const KINDS = ['post', 'clip', 'story', 'avatar', 'cover', 'thumb'];
 
 const MB = 1024 * 1024;
 export const MAX_IMAGE = 15 * MB;

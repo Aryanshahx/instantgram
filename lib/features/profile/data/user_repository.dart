@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../../core/services/content_filter.dart';
 import '../../../core/services/media_service.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/models/user_profile.dart';
@@ -68,14 +69,21 @@ class UserRepository {
   Future<List<UserProfile>> getUsers(List<String> uids) async {
     final out = <UserProfile>[];
     for (var i = 0; i < uids.length; i += 30) {
-      final chunk = uids.sublist(i, i + 30 > uids.length ? uids.length : i + 30);
-      final snap =
-          await _users.where(FieldPath.documentId, whereIn: chunk).get();
+      final chunk = uids.sublist(
+        i,
+        i + 30 > uids.length ? uids.length : i + 30,
+      );
+      final snap = await _users
+          .where(FieldPath.documentId, whereIn: chunk)
+          .get();
       out.addAll(snap.docs.map(UserProfile.fromDoc));
     }
     // keep original order
     final byId = {for (final u in out) u.uid: u};
-    return [for (final id in uids) if (byId[id] != null) byId[id]!];
+    return [
+      for (final id in uids)
+        if (byId[id] != null) byId[id]!,
+    ];
   }
 
   /// Username prefix search.
@@ -87,7 +95,10 @@ class UserRepository {
         .where('username', isLessThan: '$q\uf8ff')
         .limit(25)
         .get();
-    return snap.docs.map(UserProfile.fromDoc).toList();
+    return snap.docs
+        .map(UserProfile.fromDoc)
+        .where((u) => !ContentFilter.instance.isBlocked(u.uid))
+        .toList();
   }
 
   Future<void> updateProfile({
@@ -105,19 +116,27 @@ class UserRepository {
   }
 
   /// Upload new profile photo, update profile + your posts.
-  Future<void> changePhoto(File file, {ValueChanged<double>? onProgress}) async {
-    _clearMeCache();
+  Future<void> changePhoto(
+    File file, {
+    ValueChanged<double>? onProgress,
+  }) async {
     _clearMeCache();
     final old = await me();
-    final media = await MediaService.instance
-        .upload(file, kind: MediaKind.avatar, onProgress: onProgress);
+    final media = await MediaService.instance.upload(
+      file,
+      kind: MediaKind.avatar,
+      onProgress: onProgress,
+    );
     await _users.doc(myUid).update({
       'photoUrl': media.url,
       'photoKey': media.key,
     });
     // refresh avatar on your recent posts
-    final posts =
-        await _db.collection('posts').where('authorId', isEqualTo: myUid).limit(400).get();
+    final posts = await _db
+        .collection('posts')
+        .where('authorId', isEqualTo: myUid)
+        .limit(400)
+        .get();
     if (posts.docs.isNotEmpty) {
       final batch = _db.batch();
       for (final d in posts.docs) {
@@ -128,11 +147,17 @@ class UserRepository {
     if (old.photoKey.isNotEmpty) MediaService.instance.delete(old.photoKey);
   }
 
-  Future<void> changeCover(File file, {ValueChanged<double>? onProgress}) async {
+  Future<void> changeCover(
+    File file, {
+    ValueChanged<double>? onProgress,
+  }) async {
     _clearMeCache();
     final old = await me();
-    final media = await MediaService.instance
-        .upload(file, kind: MediaKind.cover, onProgress: onProgress);
+    final media = await MediaService.instance.upload(
+      file,
+      kind: MediaKind.cover,
+      onProgress: onProgress,
+    );
     await _users.doc(myUid).update({
       'coverUrl': media.url,
       'coverKey': media.key,
@@ -156,7 +181,10 @@ class UserRepository {
       .snapshots()
       .map((s) => s.docs.map((d) => d.id).toList());
 
+  /// Follow (public) or send a follow request (private account).
   Future<void> follow(UserProfile target) async {
+    final fresh = await getUser(target.uid) ?? target;
+    if (fresh.isPrivate) return requestFollow(fresh);
     final me = await this.me();
     final batch = _db.batch();
     batch.set(_users.doc(target.uid).collection('followers').doc(me.uid), {
@@ -194,7 +222,10 @@ class UserRepository {
   }
 
   /// Followers or following list.
-  Future<List<UserProfile>> connections(String uid, {required bool followers}) async {
+  Future<List<UserProfile>> connections(
+    String uid, {
+    required bool followers,
+  }) async {
     final snap = await _users
         .doc(uid)
         .collection(followers ? 'followers' : 'following')
@@ -203,4 +234,182 @@ class UserRepository {
         .get();
     return getUsers(snap.docs.map((d) => d.id).toList());
   }
+
+  // ---------------- Private account + requests ----------------
+
+  Future<void> setPrivate(bool on) async {
+    _clearMeCache();
+    await _users.doc(myUid).update({'isPrivate': on});
+  }
+
+  Future<void> setLanguage(String code) async {
+    _clearMeCache();
+    await _users.doc(myUid).update({'language': code});
+  }
+
+  DocumentReference<Map<String, dynamic>> _request(
+    String target,
+    String from,
+  ) => _users.doc(target).collection('requests').doc(from);
+
+  /// Did I already ask to follow [targetUid]?
+  Stream<bool> hasRequested(String targetUid) =>
+      _request(targetUid, myUid).snapshots().map((s) => s.exists);
+
+  Future<void> requestFollow(UserProfile target) async {
+    final me = await meCached();
+    await _request(target.uid, me.uid).set({
+      'username': me.username,
+      'name': me.name,
+      'photoUrl': me.photoUrl,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> cancelRequest(String targetUid) =>
+      _request(targetUid, myUid).delete();
+
+  /// People who asked to follow me (newest first).
+  Stream<List<UserProfile>> followRequests() => _users
+      .doc(myUid)
+      .collection('requests')
+      .orderBy('createdAt', descending: true)
+      .limit(200)
+      .snapshots()
+      .map(
+        (s) => s.docs.map((d) {
+          final m = d.data();
+          return UserProfile(
+            uid: d.id,
+            name: m['name'] is String ? m['name'] as String : '',
+            username: m['username'] is String ? m['username'] as String : '',
+            photoUrl: m['photoUrl'] is String ? m['photoUrl'] as String : '',
+          );
+        }).toList(),
+      );
+
+  /// Accept: they become my follower.
+  Future<void> approveRequest(String requesterUid) async {
+    final me = await meCached();
+    final batch = _db.batch();
+    batch.set(_users.doc(me.uid).collection('followers').doc(requesterUid), {
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    batch.set(_users.doc(requesterUid).collection('following').doc(me.uid), {
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    batch.update(_users.doc(me.uid), {
+      'followersCount': FieldValue.increment(1),
+    });
+    batch.update(_users.doc(requesterUid), {
+      'followingCount': FieldValue.increment(1),
+    });
+    batch.delete(_request(me.uid, requesterUid));
+    await batch.commit();
+  }
+
+  Future<void> declineRequest(String requesterUid) =>
+      _request(myUid, requesterUid).delete();
+
+  /// Remove someone who follows me.
+  Future<void> removeFollower(String uid) async {
+    final batch = _db.batch();
+    batch.delete(_users.doc(myUid).collection('followers').doc(uid));
+    batch.delete(_users.doc(uid).collection('following').doc(myUid));
+    batch.update(_users.doc(myUid), {
+      'followersCount': FieldValue.increment(-1),
+    });
+    batch.update(_users.doc(uid), {'followingCount': FieldValue.increment(-1)});
+    await batch.commit();
+  }
+
+  // ---------------- Block ----------------
+
+  CollectionReference<Map<String, dynamic>> get _blocked =>
+      _users.doc(myUid).collection('blocked');
+
+  Stream<bool> isBlocked(String uid) =>
+      _blocked.doc(uid).snapshots().map((s) => s.exists);
+
+  /// Block: they can't message, follow or comment; you don't see them.
+  Future<void> block(UserProfile user) async {
+    await _blocked.doc(user.uid).set({
+      'username': user.username,
+      'name': user.name,
+      'photoUrl': user.photoUrl,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    // stop following each other
+    try {
+      final iFollow = await _users
+          .doc(myUid)
+          .collection('following')
+          .doc(user.uid)
+          .get();
+      if (iFollow.exists) await unfollow(user);
+    } catch (_) {}
+    try {
+      final theyFollow = await _users
+          .doc(myUid)
+          .collection('followers')
+          .doc(user.uid)
+          .get();
+      if (theyFollow.exists) await removeFollower(user.uid);
+    } catch (_) {}
+    try {
+      await _request(myUid, user.uid).delete();
+    } catch (_) {}
+  }
+
+  Future<void> unblock(String uid) => _blocked.doc(uid).delete();
+
+  Stream<List<UserProfile>> blockedUsers() => _blocked
+      .orderBy('createdAt', descending: true)
+      .limit(500)
+      .snapshots()
+      .map(
+        (s) => s.docs.map((d) {
+          final m = d.data();
+          return UserProfile(
+            uid: d.id,
+            name: m['name'] is String ? m['name'] as String : '',
+            username: m['username'] is String ? m['username'] as String : '',
+            photoUrl: m['photoUrl'] is String ? m['photoUrl'] as String : '',
+          );
+        }).toList(),
+      );
+
+  // ---------------- Private info ----------------
+
+  /// Date of birth ('YYYY-MM-DD' or '').
+  Future<String> birthDate() async {
+    try {
+      final s = await _users.doc(myUid).collection('private').doc('info').get();
+      final v = s.data()?['birthDate'];
+      return v is String ? v : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<void> setBirthDate(DateTime d) =>
+      _users.doc(myUid).collection('private').doc('info').set({
+        'birthDate': formatBirthDate(d),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
 }
+
+String formatBirthDate(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+/// Full years between [birth] and [now].
+int ageOn(DateTime birth, DateTime now) {
+  var age = now.year - birth.year;
+  if (now.month < birth.month ||
+      (now.month == birth.month && now.day < birth.day)) {
+    age--;
+  }
+  return age;
+}
+
+const int kMinAge = 13;

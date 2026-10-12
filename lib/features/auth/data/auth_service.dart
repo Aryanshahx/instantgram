@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../../shared/models/user_profile.dart';
+import '../../profile/data/user_repository.dart';
 
 /// Thrown with a user-friendly message.
 class AuthFailure implements Exception {
@@ -62,7 +63,12 @@ class AuthService {
     required String username,
     required String email,
     required String password,
+    required DateTime birthDate,
+    required String language,
   }) async {
+    if (ageOn(birthDate, DateTime.now()) < kMinAge) {
+      throw const AuthFailure('You must be at least $kMinAge years old.');
+    }
     final uname = username.trim().toLowerCase();
     if (!usernamePattern.hasMatch(uname)) {
       throw const AuthFailure(
@@ -94,6 +100,7 @@ class AuthService {
       name: name.trim(),
       username: uname,
       email: email.trim(),
+      language: language,
     );
 
     try {
@@ -101,7 +108,13 @@ class AuthService {
         final snap = await tx.get(unameRef);
         if (snap.exists) throw const AuthFailure('That username is taken.');
         tx.set(unameRef, {'uid': user.uid, 'email': email.trim()});
-        tx.set(_db.collection('users').doc(user.uid), profile.toNewUserMap());
+        final userRef = _db.collection('users').doc(user.uid);
+        tx.set(userRef, profile.toNewUserMap());
+        // date of birth stays private (only you can read it)
+        tx.set(userRef.collection('private').doc('info'), {
+          'birthDate': formatBirthDate(birthDate),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
       });
       await user.updateDisplayName(name.trim());
     } catch (e) {

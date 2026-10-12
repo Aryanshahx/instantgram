@@ -19,6 +19,9 @@ class IgTextField extends StatefulWidget {
     this.height = 64,
     this.maxLines = 1,
     this.textCapitalization = TextCapitalization.none,
+    this.readOnly = false,
+    this.onTap,
+    this.trailing,
   });
 
   final String hint;
@@ -34,6 +37,13 @@ class IgTextField extends StatefulWidget {
   final double height;
   final int maxLines;
   final TextCapitalization textCapitalization;
+
+  /// Tap-only field (e.g. opens a date picker).
+  final bool readOnly;
+  final VoidCallback? onTap;
+
+  /// Icon on the right (ignored for password fields).
+  final IconData? trailing;
 
   @override
   State<IgTextField> createState() => _IgTextFieldState();
@@ -69,6 +79,9 @@ class _IgTextFieldState extends State<IgTextField> {
       maxLines: widget.isPassword ? 1 : widget.maxLines,
       minLines: 1,
       textCapitalization: widget.textCapitalization,
+      readOnly: widget.readOnly,
+      onTap: widget.onTap,
+      showCursor: widget.readOnly ? false : null,
       style: TextStyle(fontSize: fontSize, color: AppColors.textPrimary),
       decoration: InputDecoration(
         hintText: widget.hint,
@@ -104,7 +117,16 @@ class _IgTextFieldState extends State<IgTextField> {
                   color: const Color(0xFFC9CBB8),
                 ),
               )
-            : null,
+            : (widget.trailing == null
+                ? null
+                : Padding(
+                    padding: EdgeInsets.only(right: compact ? 10 : 14),
+                    child: Icon(
+                      widget.trailing,
+                      size: compact ? 20 : 24,
+                      color: const Color(0xFFC9CBB8),
+                    ),
+                  )),
         enabledBorder: _border(AppColors.border),
         focusedBorder: _border(AppColors.lime.withValues(alpha: 0.7)),
         errorBorder: _border(AppColors.like.withValues(alpha: 0.7)),

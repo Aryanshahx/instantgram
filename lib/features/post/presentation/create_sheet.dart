@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../../core/services/media_service.dart';
 import '../../../core/theme/app_colors.dart';
-import 'create_post_screen.dart';
+import '../../editor/edit_models.dart';
+import '../../editor/media_editor_screen.dart';
+
+export '../../editor/edit_models.dart' show ComposeMode;
 
 /// Bottom sheet opened by the "+" button.
 Future<void> showCreateSheet(BuildContext context) {
@@ -31,7 +34,7 @@ Future<void> showCreateSheet(BuildContext context) {
               _CreateOption(
                 icon: Icons.grid_view_rounded,
                 title: 'Post',
-                subtitle: 'Share a photo on your profile',
+                subtitle: 'Share up to 10 photos on your profile',
                 onTap: () => start(ComposeMode.photo),
               ),
               _CreateOption(
@@ -43,7 +46,7 @@ Future<void> showCreateSheet(BuildContext context) {
               _CreateOption(
                 icon: Icons.add_circle_outline,
                 title: 'Moment',
-                subtitle: 'A photo that disappears after 24 hours',
+                subtitle: 'Photos or videos for 24 hours',
                 onTap: () => start(ComposeMode.story),
               ),
             ],
@@ -54,16 +57,34 @@ Future<void> showCreateSheet(BuildContext context) {
   );
 }
 
-/// Pick media and open the compose screen.
+/// Pick media -> editor -> share screen.
 Future<void> startCompose(BuildContext context, ComposeMode mode) async {
-  final file = await MediaService.instance.pick(
-    context,
-    video: mode == ComposeMode.clip,
-  );
-  if (file == null || !context.mounted) return;
-  await Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => CreatePostScreen(file: file, mode: mode)),
-  );
+  final kind = switch (mode) {
+    ComposeMode.photo => PickKind.photos,
+    ComposeMode.clip => PickKind.video,
+    ComposeMode.story => PickKind.mixed,
+  };
+  var media = await MediaService.instance.pickForCreate(context, kind);
+  if (media.isEmpty || !context.mounted) return;
+  // posts = photos only, clips = one video only
+  if (mode == ComposeMode.photo) {
+    media = media.where((m) => !m.isVideo).toList();
+  } else if (mode == ComposeMode.clip) {
+    media = media.where((m) => m.isVideo).take(1).toList();
+  }
+  if (media.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          mode == ComposeMode.clip
+              ? 'Clips need a video'
+              : 'Posts need photos (use Clip for videos)',
+        ),
+      ),
+    );
+    return;
+  }
+  await openEditor(context, media, mode);
 }
 
 class _CreateOption extends StatelessWidget {
@@ -91,10 +112,13 @@ class _CreateOption extends StatelessWidget {
         ),
         child: ListTile(
           onTap: onTap,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 4,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
           leading: Container(
             width: 44,
             height: 44,

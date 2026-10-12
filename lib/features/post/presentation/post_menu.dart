@@ -6,8 +6,8 @@ import '../../../core/utils/errors.dart';
 import '../../../core/utils/share.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/navigation.dart';
-import '../../profile/data/user_repository.dart';
 import '../../../core/services/app_settings.dart';
+import '../../../core/services/content_filter.dart';
 import '../data/post_repository.dart';
 import 'report_sheet.dart';
 
@@ -19,7 +19,7 @@ Future<void> showPostMenu(
   VoidCallback? onDeleted,
   bool showAutoScroll = false,
 }) {
-  final mine = post.authorId == UserRepository.instance.myUid;
+  final mine = post.authorId == ContentFilter.instance.uid;
   final messenger = ScaffoldMessenger.of(context);
   final settings = AppSettings.instance;
   return showModalBottomSheet<void>(
@@ -72,6 +72,17 @@ Future<void> showPostMenu(
                       SnackBar(content: Text(friendlyError(e))),
                     );
                   }
+                },
+              ),
+            if (mine)
+              ListTile(
+                key: const ValueKey('menu-options'),
+                leading: const Icon(Icons.tune),
+                title: const Text('Audience and counts'),
+                subtitle: Text(Audience.label(post.audience)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  showPostOptionsSheet(context, post);
                 },
               ),
             ListTile(
@@ -157,4 +168,152 @@ Future<void> showPostMenu(
       ),
     ),
   );
+}
+
+/// Owner: change audience and hidden counts after posting.
+Future<void> showPostOptionsSheet(BuildContext context, Post post) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    builder: (ctx) => _PostOptionsSheet(post: post),
+  );
+}
+
+class _PostOptionsSheet extends StatefulWidget {
+  const _PostOptionsSheet({required this.post});
+  final Post post;
+
+  @override
+  State<_PostOptionsSheet> createState() => _PostOptionsSheetState();
+}
+
+class _PostOptionsSheetState extends State<_PostOptionsSheet> {
+  late String _audience = widget.post.audience;
+  late bool _likes = widget.post.hideLikes;
+  late bool _comments = widget.post.hideComments;
+  late bool _reposts = widget.post.hideReposts;
+  late bool _shares = widget.post.hideShares;
+  bool _saving = false;
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    final messenger = ScaffoldMessenger.of(context);
+    final nav = Navigator.of(context);
+    try {
+      await PostRepository.instance.updateOptions(widget.post, {
+        'audience': _audience,
+        'hideLikes': _likes,
+        'hideComments': _comments,
+        'hideReposts': _reposts,
+        'hideShares': _shares,
+      });
+      nav.pop();
+      messenger.showSnackBar(const SnackBar(content: Text('Saved')));
+    } catch (e) {
+      if (mounted) setState(() => _saving = false);
+      messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    }
+  }
+
+  Widget _switch(String title, bool v, ValueChanged<bool> on) => SwitchListTile(
+    dense: true,
+    title: Text(
+      title,
+      style: const TextStyle(
+        fontFamily: AppTheme.fontFamily,
+        fontSize: 14.5,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+    value: v,
+    activeThumbColor: Colors.black,
+    activeTrackColor: AppColors.lime,
+    onChanged: (x) => setState(() => on(x)),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 12, 20, 4),
+              child: Text(
+                'Who can see this',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+            ),
+            for (final a in Audience.all)
+              ListTile(
+                dense: true,
+                leading: Icon(switch (a) {
+                  Audience.followers => Icons.people_outline,
+                  Audience.onlyMe => Icons.lock_outline,
+                  _ => Icons.public,
+                }),
+                title: Text(
+                  Audience.label(a),
+                  style: const TextStyle(
+                    fontFamily: AppTheme.fontFamily,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                trailing: _audience == a
+                    ? const Icon(Icons.check_circle, color: AppColors.lime)
+                    : const Icon(
+                        Icons.circle_outlined,
+                        color: AppColors.textSecondary,
+                      ),
+                onTap: () => setState(() => _audience = a),
+              ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 10, 20, 0),
+              child: Text(
+                'HIDE COUNTS FROM OTHERS',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  letterSpacing: 1,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ),
+            _switch('Hide like count', _likes, (x) => _likes = x),
+            _switch('Hide comment count', _comments, (x) => _comments = x),
+            _switch('Hide repost count', _reposts, (x) => _reposts = x),
+            _switch('Hide share count', _shares, (x) => _shares = x),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.lime,
+                    foregroundColor: Colors.black,
+                    textStyle: const TextStyle(
+                      fontFamily: AppTheme.fontFamily,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  onPressed: _saving ? null : _save,
+                  child: _saving
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Save'),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

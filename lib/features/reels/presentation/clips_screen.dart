@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../core/services/app_settings.dart';
+import '../../../core/services/content_filter.dart';
+import '../../../core/services/system_volume.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/errors.dart';
 import '../../../core/utils/share.dart';
@@ -12,9 +14,10 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/async_views.dart';
 import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/net_image.dart';
+import '../../editor/filters.dart';
 import '../../post/data/post_repository.dart';
 import '../../post/presentation/comments_sheet.dart';
-import '../../post/presentation/create_post_screen.dart';
 import '../../post/presentation/create_sheet.dart';
 import '../../post/presentation/post_menu.dart';
 import '../../profile/data/user_repository.dart';
@@ -25,7 +28,7 @@ import '../../profile/data/user_repository.dart';
 ///
 /// Gestures on the video:
 ///  * tap = pause / play, double tap = like
-///  * hold = 2x speed, hold + move finger up/down = volume
+///  * hold = 2x speed, hold + move finger up/down = phone media volume
 ///  * swipe up = next clip (top bar hides), swipe down = previous (top bar shows)
 class ClipsScreen extends StatefulWidget {
   const ClipsScreen({super.key, this.clips, this.initialIndex = 0});
@@ -56,6 +59,9 @@ class _ClipsScreenState extends State<ClipsScreen> {
       _stream = PostRepository.instance.recent(type: Post.clip, limit: 50);
     }
     AppSettings.instance.load();
+    SystemVolume.instance.get().then((v) {
+      if (mounted) setState(() => _volume = v);
+    });
     // warm up the profile copy so the first like is instant
     UserRepository.instance.meCached().ignore();
   }
@@ -83,19 +89,16 @@ class _ClipsScreenState extends State<ClipsScreen> {
     );
   }
 
-  void _toggleMute() => setState(() {
-        if (_muted) {
-          _muted = false;
-          if (_volume < 0.05) _volume = 1;
-        } else {
-          _muted = true;
-        }
-      });
+  void _toggleMute() => setState(() => _muted = !_muted);
 
-  void _setVolume(double v) => setState(() {
-        _volume = v;
-        _muted = v < 0.01;
-      });
+  /// Changes the PHONE media volume (like the volume buttons).
+  void _setVolume(double v) {
+    SystemVolume.instance.set(v);
+    setState(() {
+      _volume = v;
+      if (v > 0.01) _muted = false;
+    });
+  }
 
   Widget _pager(List<Post> all) {
     final clips = all.where((c) => !_deleted.contains(c.id)).toList();
@@ -296,15 +299,29 @@ class _ClipPlayerState extends State<ClipPlayer>
     duration: const Duration(milliseconds: 700),
   );
 
-  double get _effectiveVolume => widget.muted ? 0 : widget.volume;
+  /// Player volume: the phone volume does the rest.
+  double get _effectiveVolume =>
+      (widget.muted || widget.clip.edits.muted) ? 0 : 1;
+
+  VideoEdits get _edits => widget.clip.edits;
+  int _startMs = 0;
+  int _endMs = 0; // 0 = until the end
+
+  /// Manual loop when trimmed or auto scroll.
+  bool get _manualLoop => widget.autoScroll || _edits.hasTrim;
 
   @override
   void initState() {
     super.initState();
     _ctrl = VideoPlayerController.networkUrl(Uri.parse(widget.clip.mediaUrl));
-    _ctrl.setLooping(!widget.autoScroll);
+    _ctrl.setLooping(!_manualLoop);
     _ctrl.addListener(_onTick);
-    _ctrl.initialize().then((_) {
+    _ctrl.initialize().then((_) async {
+      if (!mounted) return;
+      final total = _ctrl.value.duration.inMilliseconds;
+      _startMs = _edits.trimStartMs.clamp(0, total);
+      _endMs = _edits.trimEndMs > _startMs ? _edits.trimEndMs.clamp(0, total) : 0;
+      if (_startMs > 0) await _ctrl.seekTo(Duration(milliseconds: _startMs));
       if (!mounted) return;
       setState(() => _ready = true);
       _ctrl.setVolume(_effectiveVolume);
@@ -314,26 +331,37 @@ class _ClipPlayerState extends State<ClipPlayer>
     });
   }
 
+  int get _endOrTotal =>
+      _endMs > 0 ? _endMs : _ctrl.value.duration.inMilliseconds;
+
   void _play() {
     final v = _ctrl.value;
-    if (v.duration > Duration.zero && v.position >= v.duration) {
-      _ctrl.seekTo(Duration.zero);
+    final pos = v.position.inMilliseconds;
+    if (v.duration > Duration.zero &&
+        (pos >= _endOrTotal - 50 || pos < _startMs - 50)) {
+      _ctrl.seekTo(Duration(milliseconds: _startMs));
     }
     _finishedSent = false;
     _ctrl.play();
     _repo.addView(widget.clip);
   }
 
-  /// Auto scroll: tell the screen when this clip has ended.
+  /// End of the (trimmed) clip: loop, or tell the screen (auto scroll).
   void _onTick() {
-    if (!widget.autoScroll || !widget.active || _finishedSent) return;
+    if (!_manualLoop || !widget.active || _finishedSent) return;
     final v = _ctrl.value;
     if (!v.isInitialized || v.duration <= Duration.zero) return;
-    final ended = !v.isPlaying &&
-        v.position >= v.duration - const Duration(milliseconds: 250);
-    if (ended) {
+    final pos = v.position.inMilliseconds;
+    final atEnd = pos >= _endOrTotal - 120 ||
+        (!v.isPlaying && pos >= v.duration.inMilliseconds - 250);
+    if (!atEnd) return;
+    if (widget.autoScroll) {
       _finishedSent = true;
+      _ctrl.pause();
       widget.onFinished?.call();
+    } else {
+      _ctrl.seekTo(Duration(milliseconds: _startMs));
+      if (!v.isPlaying) _ctrl.play();
     }
   }
 
@@ -341,7 +369,7 @@ class _ClipPlayerState extends State<ClipPlayer>
   void didUpdateWidget(covariant ClipPlayer old) {
     super.didUpdateWidget(old);
     if (widget.autoScroll != old.autoScroll) {
-      _ctrl.setLooping(!widget.autoScroll);
+      _ctrl.setLooping(!_manualLoop);
       _finishedSent = false;
     }
     if (!_ready) return;
@@ -353,7 +381,7 @@ class _ClipPlayerState extends State<ClipPlayer>
         _ctrl.setPlaybackSpeed(1);
       }
     }
-    if (widget.muted != old.muted || widget.volume != old.volume) {
+    if (widget.muted != old.muted) {
       _ctrl.setVolume(_effectiveVolume);
     }
   }
@@ -377,7 +405,10 @@ class _ClipPlayerState extends State<ClipPlayer>
     if (!_ready) return;
     HapticFeedback.lightImpact();
     _wasPlaying = _ctrl.value.isPlaying;
-    _volumeAtStart = _effectiveVolume;
+    _volumeAtStart = widget.volume;
+    SystemVolume.instance.get().then((v) {
+      if (!_volumeMode) _volumeAtStart = v;
+    });
     _ctrl.setPlaybackSpeed(2);
     if (!_wasPlaying) _ctrl.play();
     setState(() {
@@ -506,7 +537,7 @@ class _ClipPlayerState extends State<ClipPlayer>
                       child: SizedBox(
                         width: _ctrl.value.size.width,
                         height: _ctrl.value.size.height,
-                        child: VideoPlayer(_ctrl),
+                        child: applyMatrix(c.edits.filter, VideoPlayer(_ctrl)),
                       ),
                     ),
                 ],
@@ -573,16 +604,17 @@ class _ClipPlayerState extends State<ClipPlayer>
                     ),
                   if (_volumeMode)
                     Center(
-                      child: _VolumeHud(value: _effectiveVolume),
+                      child: _VolumeHud(value: widget.volume),
                     ),
                   Center(child: _HeartBurst(animation: _heart)),
                 ],
               ),
             ),
             // 3) buttons (top layer — no double-tap delay)
+            // buttons sit ABOVE the username row
             Positioned(
               right: 6,
-              bottom: 10,
+              bottom: 60,
               child: _actions(c, liked, likedServer),
             ),
             Positioned(
@@ -604,6 +636,7 @@ class _ClipPlayerState extends State<ClipPlayer>
                         url: c.authorPhotoUrl,
                         name: c.authorUsername,
                         size: 34,
+                        uid: c.authorId,
                       ),
                       const SizedBox(width: 10),
                       Flexible(
@@ -631,18 +664,23 @@ class _ClipPlayerState extends State<ClipPlayer>
   }
 
   Widget _actions(Post c, bool liked, bool likedServer) {
+    // hidden counts are still shown to the owner
+    final mine = c.authorId == ContentFilter.instance.uid;
+    String count(int n, bool hidden, String word) =>
+        hidden && !mine ? word : compactCount(n);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         _Action(
           icon: liked ? Icons.favorite : Icons.favorite_border,
           color: liked ? AppColors.like : Colors.white,
-          label: compactCount(_like.count(c.likesCount, likedServer)),
+          label: count(_like.count(c.likesCount, likedServer), c.hideLikes,
+              'Like'),
           onTap: () => _toggle(_like, !liked, () => _repo.setLiked(c, !liked)),
         ),
         _Action(
           icon: Icons.chat_bubble_outline,
-          label: compactCount(c.commentsCount),
+          label: count(c.commentsCount, c.hideComments, 'Comment'),
           onTap: () => showComments(context, c),
         ),
         StreamBuilder<bool>(
@@ -653,7 +691,8 @@ class _ClipPlayerState extends State<ClipPlayer>
             return _Action(
               icon: Icons.repeat,
               color: on ? AppColors.lime : Colors.white,
-              label: compactCount(_repost.count(c.repostsCount, server)),
+              label: count(_repost.count(c.repostsCount, server),
+                  c.hideReposts, 'Repost'),
               onTap: () =>
                   _toggle(_repost, !on, () => _repo.setReposted(c, !on)),
             );
@@ -673,14 +712,26 @@ class _ClipPlayerState extends State<ClipPlayer>
         ),
         _Action(
           icon: Icons.ios_share,
-          label: 'Share',
+          label: c.sharesCount == 0
+              ? 'Share'
+              : count(c.sharesCount, c.hideShares, 'Share'),
           onTap: () => sharePost(c),
         ),
-        _Action(
-          icon: widget.muted ? Icons.volume_off : Icons.volume_up,
-          label: widget.muted ? 'Unmute' : 'Mute',
-          onTap: widget.onToggleMute,
-        ),
+        if (c.edits.muted)
+          _Action(
+            icon: Icons.music_off_outlined,
+            label: 'No sound',
+            onTap: () => ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(const SnackBar(
+                  content: Text('This clip was posted without sound'))),
+          )
+        else
+          _Action(
+            icon: widget.muted ? Icons.volume_off : Icons.volume_up,
+            label: widget.muted ? 'Unmute' : 'Mute',
+            onTap: widget.onToggleMute,
+          ),
         _Action(
           icon: Icons.more_horiz,
           label: '',
@@ -775,12 +826,6 @@ class _CaptionBar extends StatelessWidget {
                         const SizedBox(height: 10),
                         _detail(Icons.schedule,
                             'Posted ${fullDate(post.createdAt)}'),
-                        _detail(Icons.favorite_border,
-                            _plural(post.likesCount, 'like')),
-                        _detail(Icons.chat_bubble_outline,
-                            _plural(post.commentsCount, 'comment')),
-                        _detail(Icons.repeat,
-                            _plural(post.repostsCount, 'repost')),
                       ],
                     ),
                   ),
@@ -819,9 +864,6 @@ class _CaptionBar extends StatelessWidget {
       ),
     );
   }
-
-  static String _plural(int n, String word) =>
-      '${compactCount(n)} $word${n == 1 ? '' : 's'}';
 
   Widget _detail(IconData icon, String text) => Padding(
         padding: const EdgeInsets.only(top: 4),
@@ -955,15 +997,22 @@ class ClipCoverBackground extends StatelessWidget {
   final Post post;
 
   @override
-  Widget build(BuildContext context) => const DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF1E1B3A), Colors.black],
-          ),
+  Widget build(BuildContext context) {
+    const bg = DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF1E1B3A), Colors.black],
         ),
-      );
+      ),
+    );
+    if (post.thumbUrl.isEmpty) return bg;
+    return Stack(
+      fit: StackFit.expand,
+      children: [bg, NetImage(post.thumbUrl, fit: BoxFit.cover)],
+    );
+  }
 }
 
 /// Right-side action button: shrinks a little the moment you touch it.

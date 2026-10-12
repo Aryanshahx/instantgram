@@ -3,8 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../shared/models/post.dart';
 import '../../../../shared/models/user_profile.dart';
 import '../../../../shared/widgets/avatar.dart';
-import '../../../stories/data/story_repository.dart';
-import '../../../stories/presentation/story_viewer_screen.dart';
+import '../../../stories/data/moments_index.dart';
 
 class StoryBar extends StatelessWidget {
   const StoryBar({
@@ -20,27 +19,16 @@ class StoryBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<List<StoryGroup>>(
-      stream: StoryRepository.instance.active(),
-      builder: (context, snap) {
-        final all = snap.data ?? const <StoryGroup>[];
-        final mine = all.where((g) => g.authorId == myUid).toList();
-        final others = all.where((g) => g.authorId != myUid).toList();
-        final ordered = [...mine, ...others];
+    final index = MomentsIndex.instance;
+    return ListenableBuilder(
+      listenable: index.listenable,
+      builder: (context, _) {
+        final ordered = index.ordered(first: myUid);
+        final mine = ordered.where((g) => g.authorId == myUid).toList();
+        final others = ordered.where((g) => g.authorId != myUid).toList();
 
-        void open(StoryGroup g) {
-          Navigator.of(context).push(
-            PageRouteBuilder(
-              opaque: false,
-              pageBuilder: (_, a, b) => StoryViewerScreen(
-                groups: ordered,
-                initialGroup: ordered.indexOf(g),
-              ),
-              transitionsBuilder: (_, a, b, child) =>
-                  FadeTransition(opacity: a, child: child),
-            ),
-          );
-        }
+        void open(StoryGroup g) =>
+            openStoryViewer(context, ordered, ordered.indexOf(g));
 
         return SizedBox(
           height: 112,
@@ -60,6 +48,7 @@ class StoryBar extends StatelessWidget {
                     name: me?.displayName ?? '',
                     size: hasMine ? 62 : 70,
                     ring: hasMine,
+                    seen: hasMine && index.allSeen(mine.first),
                     showPlus: true,
                     onPlusTap: onAddStory,
                   ),
@@ -74,6 +63,7 @@ class StoryBar extends StatelessWidget {
                   name: g.username,
                   size: 62,
                   ring: true,
+                  seen: index.allSeen(g),
                 ),
               );
             },

@@ -15,6 +15,8 @@ class UserProfile {
     this.postsCount = 0,
     this.followersCount = 0,
     this.followingCount = 0,
+    this.language = '',
+    this.isPrivate = false,
   });
 
   final String uid;
@@ -30,6 +32,12 @@ class UserProfile {
   final int postsCount;
   final int followersCount;
   final int followingCount;
+
+  /// Language code chosen at sign up ('' = not set).
+  final String language;
+
+  /// Private account: only approved followers see posts.
+  final bool isPrivate;
 
   String get displayName => name.trim().isEmpty ? username : name;
 
@@ -50,6 +58,8 @@ class UserProfile {
       postsCount: n(map['postsCount']),
       followersCount: n(map['followersCount']),
       followingCount: n(map['followingCount']),
+      language: s(map['language']),
+      isPrivate: map['isPrivate'] == true,
     );
   }
 
@@ -68,6 +78,8 @@ class UserProfile {
         'postsCount': 0,
         'followersCount': 0,
         'followingCount': 0,
+        if (language.isNotEmpty) 'language': language,
+        'isPrivate': false,
         'createdAt': FieldValue.serverTimestamp(),
       };
 }

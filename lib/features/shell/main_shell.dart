@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../core/services/app_settings.dart';
+import '../../core/services/content_filter.dart';
+import '../../core/services/usage_tracker.dart';
+import '../stories/data/moments_index.dart';
+
 import '../chats/presentation/chats_screen.dart';
 import '../feed/presentation/home_screen.dart';
 import '../post/presentation/create_sheet.dart';
@@ -29,6 +34,49 @@ class _MainShellState extends State<MainShell> {
   ];
 
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    AppSettings.instance.load();
+    ContentFilter.instance.start(widget.uid);
+    MomentsIndex.instance.start();
+    UsageTracker.instance
+      ..onLimitReached = _limitReached
+      ..start();
+  }
+
+  @override
+  void dispose() {
+    UsageTracker.instance
+      ..onLimitReached = null
+      ..stop();
+    MomentsIndex.instance.stop();
+    ContentFilter.instance.stop();
+    super.dispose();
+  }
+
+  void _limitReached() {
+    if (!mounted) return;
+    final mins = AppSettings.instance.dailyLimitMinutes.value;
+    showDialog<void>(
+      context: context,
+      builder: (d) => AlertDialog(
+        icon: const Icon(Icons.hourglass_bottom_rounded, size: 36),
+        title: const Text('Time for a break?'),
+        content: Text(
+          "You've used InstantGram for $mins minutes today — your daily "
+          'reminder. You can change it in Settings → Manage time.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(d),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _onTap(int i) {
     if (i == _clipsIndex) {

@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/languages.dart';
+import '../../../core/services/app_settings.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/time_ago.dart';
+import '../../profile/data/user_repository.dart';
+import '../../../shared/widgets/language_picker.dart';
 import '../../../shared/widgets/glow_background.dart';
 import '../../../shared/widgets/ig_buttons.dart';
 import '../../../shared/widgets/ig_logo.dart';
@@ -20,7 +25,39 @@ class _SignupScreenState extends State<SignupScreen> {
   final _userCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
+  final _dobCtrl = TextEditingController();
+  final _langCtrl = TextEditingController();
+  DateTime? _dob;
+  String _lang = '';
   bool _loading = false;
+
+  Future<void> _pickDob() async {
+    FocusScope.of(context).unfocus();
+    final now = DateTime.now();
+    final d = await showDatePicker(
+      context: context,
+      initialDate: _dob ?? DateTime(now.year - 18, now.month, now.day),
+      firstDate: DateTime(1900),
+      lastDate: now,
+      helpText: 'Date of birth',
+      initialEntryMode: DatePickerEntryMode.calendarOnly,
+    );
+    if (d == null) return;
+    setState(() {
+      _dob = d;
+      _dobCtrl.text = shortDate(d);
+    });
+  }
+
+  Future<void> _pickLanguage() async {
+    FocusScope.of(context).unfocus();
+    final code = await showLanguagePicker(context, current: _lang);
+    if (code == null) return;
+    setState(() {
+      _lang = code;
+      _langCtrl.text = languageByCode(code)?.label ?? code;
+    });
+  }
 
   @override
   void dispose() {
@@ -28,6 +65,8 @@ class _SignupScreenState extends State<SignupScreen> {
     _userCtrl.dispose();
     _emailCtrl.dispose();
     _passCtrl.dispose();
+    _dobCtrl.dispose();
+    _langCtrl.dispose();
     super.dispose();
   }
 
@@ -41,7 +80,10 @@ class _SignupScreenState extends State<SignupScreen> {
         username: _userCtrl.text,
         email: _emailCtrl.text,
         password: _passCtrl.text,
+        birthDate: _dob!,
+        language: _lang,
       );
+      AppSettings.instance.setLanguage(_lang);
       if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
     } on AuthFailure catch (e) {
       if (mounted) {
@@ -145,10 +187,50 @@ class _SignupScreenState extends State<SignupScreen> {
                       isPassword: true,
                       textInputAction: TextInputAction.done,
                       autofillHints: const [AutofillHints.newPassword],
-                      onSubmitted: (_) => _signup(),
                       validator: (v) => (v == null || v.length < 6)
                           ? 'At least 6 characters'
                           : null,
+                    ),
+                    const SizedBox(height: 14),
+                    IgTextField(
+                      key: const ValueKey('dob'),
+                      hint: 'Date of birth',
+                      icon: Icons.cake_outlined,
+                      controller: _dobCtrl,
+                      readOnly: true,
+                      onTap: _pickDob,
+                      trailing: Icons.calendar_month_outlined,
+                      validator: (_) {
+                        final d = _dob;
+                        if (d == null) return 'Enter your date of birth';
+                        if (ageOn(d, DateTime.now()) < kMinAge) {
+                          return 'You must be at least $kMinAge years old';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    IgTextField(
+                      key: const ValueKey('language'),
+                      hint: 'Language',
+                      icon: Icons.translate,
+                      controller: _langCtrl,
+                      readOnly: true,
+                      onTap: _pickLanguage,
+                      trailing: Icons.expand_more,
+                      validator: (_) =>
+                          _lang.isEmpty ? 'Choose your language' : null,
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(8, 8, 8, 0),
+                      child: Text(
+                        'Your date of birth is private. It is used to check '
+                        'that you are $kMinAge or older.',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 28),
                     IgPrimaryButton(

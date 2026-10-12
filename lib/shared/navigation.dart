@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/services/app_settings.dart';
 import '../features/post/presentation/post_detail_screen.dart';
 import '../features/profile/presentation/profile_screen.dart';
 import '../features/reels/presentation/clips_screen.dart';
@@ -25,6 +26,7 @@ void openPost(BuildContext context, List<Post> posts, int index) {
       ),
     );
   } else {
+    AppSettings.instance.addHistory(post.id, isClip: false);
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => PostDetailScreen(postId: post.id)),
     );

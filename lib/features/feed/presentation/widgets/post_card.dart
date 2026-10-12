@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/services/content_filter.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/errors.dart';
 import '../../../../core/utils/share.dart';
@@ -11,6 +12,7 @@ import '../../../../shared/widgets/net_image.dart';
 import '../../../../shared/widgets/post_grid.dart';
 import '../../../post/data/post_repository.dart';
 import '../../../post/presentation/comments_sheet.dart';
+import '../../../post/presentation/create_post_screen.dart' show PageDots;
 import '../../../post/presentation/post_menu.dart';
 
 class PostCard extends StatefulWidget {
@@ -35,6 +37,7 @@ class _PostCardState extends State<PostCard>
   bool? _likedOverride;
   int _likeDelta = 0;
   bool _busy = false;
+  int _photo = 0; // carousel page
 
   @override
   void didUpdateWidget(covariant PostCard old) {
@@ -89,6 +92,7 @@ class _PostCardState extends State<PostCard>
   Widget build(BuildContext context) {
     final p = widget.post;
     final ratio = p.aspectRatio.clamp(0.8, 1.91);
+    final mine = p.authorId == ContentFilter.instance.uid;
 
     return StreamBuilder<bool>(
       stream: _repo.isLiked(p.id),
@@ -108,7 +112,10 @@ class _PostCardState extends State<PostCard>
                   GestureDetector(
                     onTap: () => openProfile(context, p.authorId),
                     child: Avatar(
-                        url: p.authorPhotoUrl, name: p.authorUsername, size: 38),
+                        url: p.authorPhotoUrl,
+                        name: p.authorUsername,
+                        size: 38,
+                        uid: p.authorId),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -148,8 +155,43 @@ class _PostCardState extends State<PostCard>
                   children: [
                     if (p.isClip)
                       ClipCover(post: p, big: true)
+                    else if (p.isMulti)
+                      PageView.builder(
+                        itemCount: p.photos.length,
+                        onPageChanged: (i) => setState(() => _photo = i),
+                        itemBuilder: (context, i) =>
+                            NetImage(p.photos[i].url),
+                      )
                     else
                       NetImage(p.mediaUrl),
+                    if (p.isMulti) ...[
+                      Positioned(
+                        right: 10,
+                        top: 10,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 9, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.6),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            '${_photo + 1}/${p.photos.length}',
+                            style: const TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 10,
+                        child: IgnorePointer(
+                          child: PageDots(
+                              count: p.photos.length, index: _photo),
+                        ),
+                      ),
+                    ],
                     if (p.isClip)
                       Center(
                         child: Icon(
@@ -217,6 +259,12 @@ class _PostCardState extends State<PostCard>
                     onPressed: () => sharePost(p),
                     icon: const Icon(Icons.send_outlined, size: 26),
                   ),
+                  if (p.sharesCount > 0 && (!p.hideShares || mine))
+                    Text(
+                      compactCount(p.sharesCount),
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w700),
+                    ),
                   const Spacer(),
                   StreamBuilder<bool>(
                     stream: _repo.isSaved(p.id),
@@ -241,10 +289,19 @@ class _PostCardState extends State<PostCard>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    '${compactCount(likes)} ${likes == 1 ? 'like' : 'likes'}',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
+                  if (!p.hideLikes || mine)
+                    Text(
+                      '${compactCount(likes)} ${likes == 1 ? 'like' : 'likes'}'
+                      '${p.hideLikes ? ' · hidden from others' : ''}',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  if (!mine && p.repostsCount > 0 && !p.hideReposts)
+                    Text(
+                      '${compactCount(p.repostsCount)} '
+                      '${p.repostsCount == 1 ? 'repost' : 'reposts'}',
+                      style: const TextStyle(
+                          fontSize: 12.5, color: AppColors.textSecondary),
+                    ),
                   if (p.caption.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Text.rich(
@@ -265,9 +322,11 @@ class _PostCardState extends State<PostCard>
                     GestureDetector(
                       onTap: () => showComments(context, p),
                       child: Text(
-                        p.commentsCount == 1
-                            ? 'View 1 comment'
-                            : 'View all ${p.commentsCount} comments',
+                        p.hideComments && !mine
+                            ? 'View comments'
+                            : p.commentsCount == 1
+                                ? 'View 1 comment'
+                                : 'View all ${p.commentsCount} comments',
                         style: const TextStyle(color: AppColors.textSecondary),
                       ),
                     ),

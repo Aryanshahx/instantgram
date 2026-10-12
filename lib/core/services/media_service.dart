@@ -9,7 +9,32 @@ import '../theme/app_colors.dart';
 import 'api_client.dart';
 
 /// What the file is used for (decides the folder in Tigris + size limits).
-enum MediaKind { post, clip, story, avatar, cover }
+enum MediaKind { post, clip, story, avatar, cover, thumb }
+
+/// What the create flow may pick.
+enum PickKind {
+  /// Posts: one or more photos (max 10).
+  photos,
+
+  /// Clips: exactly one video.
+  video,
+
+  /// Moments: photos and/or videos (max 10).
+  mixed,
+}
+
+/// A picked file from the gallery or camera.
+class PickedMedia {
+  const PickedMedia(this.file, {required this.isVideo});
+  final File file;
+  final bool isVideo;
+}
+
+bool isVideoPath(String path) {
+  final ext = path.split('.').last.toLowerCase();
+  return const {'mp4', 'mov', 'webm', '3gp', 'mkv', 'm4v', 'avi'}
+      .contains(ext);
+}
 
 class UploadedMedia {
   const UploadedMedia({required this.url, required this.key});
@@ -35,6 +60,7 @@ class MediaService {
     'webm': 'video/webm',
     '3gp': 'video/3gpp',
     'mkv': 'video/x-matroska',
+    'm4v': 'video/mp4',
   };
 
   String contentTypeFor(String path) {
@@ -95,6 +121,115 @@ class MediaService {
       }
       return null;
     }
+  }
+
+  static const int maxItems = 10;
+
+  /// Create flow picker: Gallery (many) or Camera.
+  Future<List<PickedMedia>> pickForCreate(
+    BuildContext context,
+    PickKind kind,
+  ) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined,
+                  color: AppColors.lime),
+              title: Text(switch (kind) {
+                PickKind.photos => 'Choose photos',
+                PickKind.video => 'Choose video',
+                PickKind.mixed => 'Choose photos or videos',
+              }),
+              subtitle: kind == PickKind.video
+                  ? null
+                  : const Text('You can pick up to $maxItems'),
+              onTap: () => Navigator.pop(ctx, 'gallery'),
+            ),
+            if (kind != PickKind.video)
+              ListTile(
+                leading: const Icon(Icons.photo_camera_outlined,
+                    color: AppColors.lime),
+                title: const Text('Take photo'),
+                onTap: () => Navigator.pop(ctx, 'photo'),
+              ),
+            if (kind != PickKind.photos)
+              ListTile(
+                leading:
+                    const Icon(Icons.videocam_outlined, color: AppColors.lime),
+                title: const Text('Record video'),
+                onTap: () => Navigator.pop(ctx, 'video'),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return const [];
+
+    try {
+      switch (choice) {
+        case 'photo':
+          final x = await _picker.pickImage(
+            source: ImageSource.camera,
+            maxWidth: 2048,
+            imageQuality: 92,
+          );
+          return x == null ? const [] : [PickedMedia(File(x.path), isVideo: false)];
+        case 'video':
+          final x = await _picker.pickVideo(
+            source: ImageSource.camera,
+            maxDuration: Duration(seconds: kind == PickKind.mixed ? 60 : 90),
+          );
+          return x == null ? const [] : [PickedMedia(File(x.path), isVideo: true)];
+      }
+      // gallery
+      switch (kind) {
+        case PickKind.photos:
+          final xs = await _picker.pickMultiImage(
+            maxWidth: 2048,
+            imageQuality: 92,
+            limit: maxItems,
+          );
+          return xs
+              .take(maxItems)
+              .map((x) => PickedMedia(File(x.path), isVideo: false))
+              .toList();
+        case PickKind.video:
+          final x = await _picker.pickVideo(source: ImageSource.gallery);
+          return x == null ? const [] : [PickedMedia(File(x.path), isVideo: true)];
+        case PickKind.mixed:
+          final xs = await _picker.pickMultipleMedia(
+            maxWidth: 2048,
+            imageQuality: 92,
+            limit: maxItems,
+          );
+          return xs
+              .take(maxItems)
+              .map((x) => PickedMedia(File(x.path), isVideo: isVideoPath(x.path)))
+              .toList();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open picker: $e')),
+        );
+      }
+      return const [];
+    }
+  }
+
+  /// One photo from the gallery (used for clip covers).
+  Future<File?> pickGalleryImage({double maxWidth = 1440}) async {
+    final x = await _picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: maxWidth,
+      imageQuality: 88,
+    );
+    return x == null ? null : File(x.path);
   }
 
   /// 1) ask the backend for a presigned URL  2) PUT the file to Tigris.

@@ -3,9 +3,14 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../../core/services/content_filter.dart';
 import '../../../core/services/media_service.dart';
 import '../../../shared/models/post.dart';
+import '../../../shared/models/user_profile.dart';
 import '../../profile/data/user_repository.dart';
+
+/// Max length of a video moment.
+const int kMomentMaxMs = 60 * 1000;
 
 class StoryRepository {
   StoryRepository._();
@@ -15,45 +20,93 @@ class StoryRepository {
   CollectionReference<Map<String, dynamic>> get _stories =>
       _db.collection('stories');
 
-  Future<void> create(File file, {ValueChanged<double>? onProgress}) async {
+  Map<String, dynamic> _base(UserProfile me, String audience) => {
+        'authorId': me.uid,
+        'authorUsername': me.username,
+        'authorPhotoUrl': me.photoUrl,
+        'audience': audience,
+        'createdAt': FieldValue.serverTimestamp(),
+        'expiresAt': Timestamp.fromDate(
+          DateTime.now().add(const Duration(hours: 24)),
+        ),
+      };
+
+  /// Upload one photo or video moment.
+  Future<void> create(
+    File file, {
+    bool isVideo = false,
+    VideoEdits edits = const VideoEdits(),
+    int durationMs = 0,
+    String audience = Audience.everyone,
+    ValueChanged<double>? onProgress,
+  }) async {
     final me = await UserRepository.instance.me();
     final media = await MediaService.instance
         .upload(file, kind: MediaKind.story, onProgress: onProgress);
     await _stories.add({
-      'authorId': me.uid,
-      'authorUsername': me.username,
-      'authorPhotoUrl': me.photoUrl,
+      ..._base(me, audience),
+      'type': isVideo ? Story.video : Story.photo,
       'mediaUrl': media.url,
       'mediaKey': media.key,
-      'createdAt': FieldValue.serverTimestamp(),
-      'expiresAt': Timestamp.fromDate(
-        DateTime.now().add(const Duration(hours: 24)),
-      ),
+      if (isVideo && durationMs > 0) 'durationMs': durationMs,
+      if (isVideo) ...edits.toMap(),
+    });
+  }
+
+  /// A moment that re-uses a new post's media (no own file -> mediaKey '').
+  void addSharedToBatch(
+    WriteBatch batch, {
+    required UserProfile me,
+    required String url,
+    required bool isVideo,
+    required String postId,
+    String audience = Audience.everyone,
+    VideoEdits edits = const VideoEdits(),
+    int durationMs = 0,
+  }) {
+    batch.set(_stories.doc(), {
+      ..._base(me, audience),
+      'type': isVideo ? Story.video : Story.photo,
+      'mediaUrl': url,
+      'mediaKey': '',
+      'postId': postId,
+      if (isVideo && durationMs > 0)
+        'durationMs': durationMs.clamp(0, kMomentMaxMs),
+      if (isVideo) ...edits.toMap(),
     });
   }
 
   Future<void> delete(Story story) async {
     await _stories.doc(story.id).delete();
-    MediaService.instance.delete(story.mediaKey);
+    if (story.mediaKey.isNotEmpty) MediaService.instance.delete(story.mediaKey);
   }
 
-  /// Active (last 24h) stories grouped by user, oldest first inside a group.
-  Stream<List<StoryGroup>> active() => _stories
-      .where('expiresAt', isGreaterThan: Timestamp.now())
-      .limit(300)
-      .snapshots()
-      .map((s) {
-        final map = <String, List<Story>>{};
-        for (final d in s.docs) {
-          final st = Story.fromDoc(d);
-          map.putIfAbsent(st.authorId, () => []).add(st);
-        }
-        final groups = map.entries.map((e) {
-          e.value.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-          return StoryGroup(e.key, e.value);
-        }).toList();
-        groups.sort((a, b) =>
-            b.stories.last.createdAt.compareTo(a.stories.last.createdAt));
-        return groups;
-      });
+  /// Active (last 24h) moments grouped by user, oldest first inside a group.
+  Stream<List<StoryGroup>> active() {
+    final raw = _stories
+        .where('expiresAt', isGreaterThan: Timestamp.now())
+        .limit(300)
+        .snapshots()
+        .map((s) => s.docs.map(Story.fromDoc).toList());
+    return ContentFilter.instance
+        .watch<Story>(raw, ContentFilter.instance.canSeeStory)
+        .map(groupStories);
+  }
+}
+
+/// Groups moments by author (newest group first).
+List<StoryGroup> groupStories(List<Story> stories) {
+  final now = DateTime.now();
+  final map = <String, List<Story>>{};
+  for (final st in stories) {
+    if (now.difference(st.createdAt) > const Duration(hours: 24)) continue;
+    map.putIfAbsent(st.authorId, () => []).add(st);
+  }
+  final groups = map.entries.map((e) {
+    e.value.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return StoryGroup(e.key, e.value);
+  }).toList();
+  groups.sort(
+      (a, b) => b.stories.last.createdAt.compareTo(a.stories.last.createdAt));
+  return groups;
 }

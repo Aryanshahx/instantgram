@@ -30,28 +30,34 @@ class NotificationRepository {
       'fromUsername': from.username,
       'fromPhotoUrl': from.photoUrl,
       'postId': post?.id ?? '',
-      'postThumb': (post != null && !post.isClip) ? post.mediaUrl : '',
+      'postThumb': post == null
+          ? ''
+          : (post.isClip ? post.thumbUrl : post.mediaUrl),
       'text': text.length > 120 ? '${text.substring(0, 120)}…' : text,
       'read': false,
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
-  Stream<List<AppNotification>> watchMine() => _col(_me)
-      .orderBy('createdAt', descending: true)
-      .limit(60)
-      .snapshots()
-      .map((s) => s.docs.map(AppNotification.fromDoc).toList());
+  Stream<List<AppNotification>> watchMine() =>
+      _col(_me)
+          .orderBy('createdAt', descending: true)
+          .limit(60)
+          .snapshots()
+          .map((s) => s.docs.map(AppNotification.fromDoc).toList());
 
-  Stream<bool> hasUnread() => _col(_me)
-      .where('read', isEqualTo: false)
-      .limit(1)
-      .snapshots()
-      .map((s) => s.docs.isNotEmpty);
+  Stream<bool> hasUnread() =>
+      _col(_me)
+          .where('read', isEqualTo: false)
+          .limit(1)
+          .snapshots()
+          .map((s) => s.docs.isNotEmpty);
 
   Future<void> markAllRead() async {
-    final unread =
-        await _col(_me).where('read', isEqualTo: false).limit(200).get();
+    final unread = await _col(_me)
+        .where('read', isEqualTo: false)
+        .limit(200)
+        .get();
     if (unread.docs.isEmpty) return;
     final batch = _db.batch();
     for (final d in unread.docs) {

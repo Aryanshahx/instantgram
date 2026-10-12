@@ -46,7 +46,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Could not save: ${friendlyError(e)}')));
+          SnackBar(content: Text('Could not save: ${friendlyError(e)}')),
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -54,8 +55,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _pick({required bool cover}) async {
-    final file = await MediaService.instance
-        .pick(context, maxWidth: cover ? 1600 : 800);
+    final file = await MediaService.instance.pick(
+      context,
+      maxWidth: cover ? 1600 : 800,
+    );
     if (file == null || !mounted) return;
     await runWithProgress(
       context,
@@ -95,10 +98,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               if (p.coverUrl.isEmpty)
                                 const DecoratedBox(
                                   decoration: BoxDecoration(
-                                    gradient: LinearGradient(colors: [
-                                      Color(0xFF1B1F6B),
-                                      Color(0xFF2E3FD6),
-                                    ]),
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        Color(0xFF1B1F6B),
+                                        Color(0xFF2E3FD6),
+                                      ],
+                                    ),
                                   ),
                                 )
                               else
@@ -111,10 +116,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                   children: [
                                     Icon(Icons.photo_camera_outlined, size: 18),
                                     SizedBox(width: 6),
-                                    Text('Change cover',
-                                        style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w600)),
+                                    Text(
+                                      'Change cover',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ),
@@ -189,14 +197,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Widget _label(String text) => Padding(
-        padding: const EdgeInsets.only(left: 4, bottom: 6),
-        child: Text(
-          text,
-          style: const TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 13,
-            color: AppColors.textSecondary,
-          ),
-        ),
-      );
+    padding: const EdgeInsets.only(left: 4, bottom: 6),
+    child: Text(
+      text,
+      style: const TextStyle(
+        fontWeight: FontWeight.w600,
+        fontSize: 13,
+        color: AppColors.textSecondary,
+      ),
+    ),
+  );
 }

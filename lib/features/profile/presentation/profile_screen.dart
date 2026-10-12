@@ -2,9 +2,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../../core/constants/app_constants.dart';
+import '../../../core/services/content_filter.dart';
 import '../../../core/services/media_service.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/email.dart';
 import '../../../core/utils/errors.dart';
 import '../../../core/utils/share.dart';
 import '../../../core/utils/time_ago.dart';
@@ -17,15 +18,14 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/ig_buttons.dart';
 import '../../../shared/widgets/net_image.dart';
 import '../../../shared/widgets/post_grid.dart';
-import '../../auth/data/auth_service.dart';
 import '../../chats/presentation/chats_screen.dart';
 import '../../dashboard/presentation/dashboard_screen.dart';
 import '../../post/data/post_repository.dart';
-import '../../post/presentation/create_post_screen.dart';
+import '../../post/data/report_repository.dart';
 import '../../post/presentation/create_sheet.dart';
+import '../../settings/presentation/settings_screen.dart';
 import '../data/user_repository.dart';
 import 'edit_profile_screen.dart';
-import 'saved_screen.dart';
 import 'user_list_screen.dart';
 
 /// Profile of any user. [standalone] = opened as its own page (shows back button).
@@ -123,9 +123,12 @@ class _ProfileViewState extends State<ProfileView>
     super.dispose();
   }
 
-  void _snack(String msg) => ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(msg)));
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg)));
+  }
 
   Future<void> _changePhoto() async {
     final file = await MediaService.instance.pick(context, maxWidth: 800);
@@ -150,67 +153,140 @@ class _ProfileViewState extends State<ProfileView>
   }
 
   void _openSettings() {
-    showModalBottomSheet<void>(
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SettingsScreen(profile: widget.profile),
+      ),
+    );
+  }
+
+  // ---------- ⋯ menu on other people's profiles ----------
+
+  Future<void> _openUserMenu() async {
+    final p = widget.profile;
+    final blocked = ContentFilter.instance.isBlocked(p.uid);
+    final action = await showModalBottomSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            const SizedBox(height: 6),
+            Text(
+              '@${p.username}',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 4),
             ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('Edit profile'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _editProfile();
-              },
+              dense: true,
+              leading: const Icon(Icons.share_outlined),
+              title: const Text('Share profile'),
+              onTap: () => Navigator.pop(ctx, 'share'),
             ),
             ListTile(
-              leading: const Icon(Icons.wallpaper_outlined),
-              title: const Text('Change cover'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _changeCover();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.bookmark_border),
-              title: const Text('Saved'),
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SavedScreen()),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: const Text('About InstantGram'),
-              onTap: () {
-                Navigator.pop(ctx);
-                showAboutDialog(
-                  context: context,
-                  applicationName: AppConstants.appName,
-                  applicationLegalese: '© HyperTech Labs',
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.logout, color: AppColors.like),
+              dense: true,
+              leading: const Icon(Icons.flag_outlined, color: AppColors.like),
               title: const Text(
-                'Log out',
+                'Report',
                 style: TextStyle(color: AppColors.like),
               ),
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.of(context).popUntil((r) => r.isFirst);
-                AuthService.instance.signOut();
-              },
+              subtitle: const Text('Opens your email app'),
+              onTap: () => Navigator.pop(ctx, 'report'),
+            ),
+            ListTile(
+              key: const ValueKey('menu-block'),
+              dense: true,
+              leading: Icon(
+                blocked ? Icons.lock_open : Icons.block,
+                color: AppColors.like,
+              ),
+              title: Text(
+                blocked ? 'Unblock' : 'Block',
+                style: const TextStyle(color: AppColors.like),
+              ),
+              onTap: () => Navigator.pop(ctx, blocked ? 'unblock' : 'block'),
             ),
             const SizedBox(height: 8),
           ],
         ),
       ),
     );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'share':
+        shareProfile(p);
+      case 'report':
+        await _reportUser();
+      case 'block':
+        await _block();
+      case 'unblock':
+        await _unblock();
+    }
+  }
+
+  Future<void> _reportUser() async {
+    final p = widget.profile;
+    var reporter = '';
+    var reporterUid = ContentFilter.instance.uid;
+    try {
+      final me = await UserRepository.instance.meCached();
+      reporter = me.username;
+      reporterUid = me.uid;
+    } catch (_) {}
+    if (!mounted) return;
+    final mail = ReportRepository.userEmail(
+      user: p,
+      message: 'Please describe the problem here: ',
+      reporterUsername: reporter,
+      reporterUid: reporterUid,
+    );
+    final ok = await openEmail(
+      context,
+      to: ReportRepository.to,
+      subject: mail.subject,
+      body: mail.body,
+    );
+    if (ok && mounted) _snack('Press Send in your email app to report');
+  }
+
+  Future<void> _block() async {
+    final p = widget.profile;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: Text('Block @${p.username}?'),
+        content: const Text(
+          "They won't be able to message you, follow you or comment on your "
+          "posts, and you won't see their content. They won't be told.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(d, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(d, true),
+            child: const Text('Block', style: TextStyle(color: AppColors.like)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await UserRepository.instance.block(p);
+      _snack('Blocked @${p.username}');
+    } catch (e) {
+      _snack(friendlyError(e));
+    }
+  }
+
+  Future<void> _unblock() async {
+    try {
+      await UserRepository.instance.unblock(widget.profile.uid);
+      _snack('Unblocked @${widget.profile.username}');
+    } catch (e) {
+      _snack(friendlyError(e));
+    }
   }
 
   void _editProfile() {
@@ -224,17 +300,27 @@ class _ProfileViewState extends State<ProfileView>
   void _openList(bool followers) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => UserListScreen(
-          uid: widget.profile.uid,
-          followers: followers,
-        ),
+        builder: (_) =>
+            UserListScreen(uid: widget.profile.uid, followers: followers),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: ContentFilter.instance.version,
+      builder: (context, v, child) => _buildProfile(context),
+    );
+  }
+
+  Widget _buildProfile(BuildContext context) {
     final p = widget.profile;
+    final f = ContentFilter.instance;
+    final blocked = !widget.isMe && f.isBlocked(p.uid);
+    final locked =
+        !widget.isMe && !blocked && p.isPrivate && !f.isFollowing(p.uid);
+    final hidden = blocked || locked;
     return NestedScrollView(
       headerSliverBuilder: (context, _) => [
         SliverToBoxAdapter(
@@ -245,17 +331,20 @@ class _ProfileViewState extends State<ProfileView>
                 ? () => Navigator.of(context).maybePop()
                 : null,
             onSettings: _openSettings,
+            onMore: _openUserMenu,
+            blocked: blocked,
+            onUnblock: _unblock,
             onEdit: _editProfile,
             onShare: () => shareProfile(p),
-            onDashboard: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const DashboardScreen()),
-            ),
+            onDashboard: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const DashboardScreen())),
             onAddPhoto: _changePhoto,
             onCoverTap: widget.isMe ? _changeCover : null,
             onNewStory: () => startCompose(context, ComposeMode.story),
             onPostsTap: () => _tabs.animateTo(0),
-            onFollowersTap: () => _openList(true),
-            onFollowingTap: () => _openList(false),
+            onFollowersTap: hidden ? null : () => _openList(true),
+            onFollowingTap: hidden ? null : () => _openList(false),
           ),
         ),
         SliverPersistentHeader(
@@ -284,26 +373,31 @@ class _ProfileViewState extends State<ProfileView>
           ),
         ),
       ],
-      body: TabBarView(
-        controller: _tabs,
-        children: [
-          _StreamGrid(
-            stream: _posts,
-            emptyIcon: Icons.photo_camera_outlined,
-            emptyTitle: 'No posts yet',
-            emptySubtitle: widget.isMe ? 'Tap + to share your first photo.' : null,
-            onCreate: widget.isMe ? () => showCreateSheet(context) : null,
-          ),
-          _StreamGrid(
-            stream: _clips,
-            emptyIcon: Icons.smart_display_outlined,
-            emptyTitle: 'No clips yet',
-            emptySubtitle:
-                widget.isMe ? 'Your short videos will appear here.' : null,
-          ),
-          _RepostsTab(ids: _reposts, isMe: widget.isMe),
-        ],
-      ),
+      body: hidden
+          ? _HiddenNotice(blocked: blocked, username: p.username)
+          : TabBarView(
+              controller: _tabs,
+              children: [
+                _StreamGrid(
+                  stream: _posts,
+                  emptyIcon: Icons.photo_camera_outlined,
+                  emptyTitle: 'No posts yet',
+                  emptySubtitle: widget.isMe
+                      ? 'Tap + to share your first photo.'
+                      : null,
+                  onCreate: widget.isMe ? () => showCreateSheet(context) : null,
+                ),
+                _StreamGrid(
+                  stream: _clips,
+                  emptyIcon: Icons.smart_display_outlined,
+                  emptyTitle: 'No clips yet',
+                  emptySubtitle: widget.isMe
+                      ? 'Your short videos will appear here.'
+                      : null,
+                ),
+                _RepostsTab(ids: _reposts, isMe: widget.isMe),
+              ],
+            ),
     );
   }
 
@@ -424,6 +518,9 @@ class _Header extends StatelessWidget {
     required this.isMe,
     required this.onBack,
     required this.onSettings,
+    required this.onMore,
+    required this.blocked,
+    required this.onUnblock,
     required this.onEdit,
     required this.onShare,
     required this.onDashboard,
@@ -439,6 +536,9 @@ class _Header extends StatelessWidget {
   final bool isMe;
   final VoidCallback? onBack;
   final VoidCallback onSettings;
+  final VoidCallback onMore;
+  final bool blocked;
+  final VoidCallback onUnblock;
   final VoidCallback onEdit;
   final VoidCallback onShare;
   final VoidCallback onDashboard;
@@ -446,8 +546,8 @@ class _Header extends StatelessWidget {
   final VoidCallback? onCoverTap;
   final VoidCallback onNewStory;
   final VoidCallback onPostsTap;
-  final VoidCallback onFollowersTap;
-  final VoidCallback onFollowingTap;
+  final VoidCallback? onFollowersTap;
+  final VoidCallback? onFollowingTap;
 
   static const double _coverHeight = 140;
   static const double _avatarSize = 80;
@@ -519,6 +619,12 @@ class _Header extends StatelessWidget {
                   right: 24,
                   top: topPad + 8,
                   child: _circleButton(Icons.settings, 'Settings', onSettings),
+                )
+              else
+                Positioned(
+                  right: 24,
+                  top: topPad + 8,
+                  child: _circleButton(Icons.more_horiz, 'More', onMore),
                 ),
               Positioned(
                 left: 26,
@@ -535,6 +641,7 @@ class _Header extends StatelessWidget {
                       url: p.photoUrl,
                       name: p.displayName,
                       size: _avatarSize,
+                      uid: p.uid,
                       showPlus: isMe,
                       onPlusTap: onAddPhoto,
                     ),
@@ -558,16 +665,34 @@ class _Header extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 2),
-              Text(
-                '@${p.username}',
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: AppColors.textSecondary,
-                ),
+              Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      '@${p.username}',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                  if (p.isPrivate) ...[
+                    const SizedBox(width: 5),
+                    const Icon(
+                      Icons.lock,
+                      size: 13,
+                      color: AppColors.textSecondary,
+                    ),
+                  ],
+                ],
               ),
               if (p.bio.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                Text(p.bio, style: const TextStyle(fontSize: 14.5, height: 1.35)),
+                Text(
+                  p.bio,
+                  style: const TextStyle(fontSize: 14.5, height: 1.35),
+                ),
               ],
               if (p.website.isNotEmpty) ...[
                 const SizedBox(height: 10),
@@ -630,6 +755,13 @@ class _Header extends StatelessWidget {
                 const SizedBox(height: 14),
                 _NewHighlight(onTap: onNewStory),
                 const SizedBox(height: 10),
+              ] else if (blocked) ...[
+                IgOutlineButton(
+                  label: 'Unblock',
+                  height: 36,
+                  onPressed: onUnblock,
+                ),
+                const SizedBox(height: 14),
               ] else ...[
                 _FollowRow(profile: p),
                 const SizedBox(height: 14),
@@ -651,18 +783,18 @@ class _FollowRow extends StatefulWidget {
 }
 
 class _FollowRowState extends State<_FollowRow> {
-  late final Stream<bool> _following =
-      UserRepository.instance.isFollowing(widget.profile.uid);
+  late final Stream<bool> _following = UserRepository.instance.isFollowing(
+    widget.profile.uid,
+  );
+  late final Stream<bool> _requested = UserRepository.instance.hasRequested(
+    widget.profile.uid,
+  );
   bool _busy = false;
 
-  Future<void> _toggle(bool following) async {
+  Future<void> _run(Future<void> Function() task) async {
     setState(() => _busy = true);
     try {
-      if (following) {
-        await UserRepository.instance.unfollow(widget.profile);
-      } else {
-        await UserRepository.instance.follow(widget.profile);
-      }
+      await task();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -673,40 +805,137 @@ class _FollowRowState extends State<_FollowRow> {
     }
   }
 
+  Future<void> _unfollow() async {
+    final p = widget.profile;
+    if (p.isPrivate) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (d) => AlertDialog(
+          title: Text('Unfollow @${p.username}?'),
+          content: const Text(
+            "This account is private. You'll need to ask again to see "
+            'their posts.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(d, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(d, true),
+              child: const Text(
+                'Unfollow',
+                style: TextStyle(color: AppColors.like),
+              ),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    await _run(() => UserRepository.instance.unfollow(p));
+  }
+
   @override
   Widget build(BuildContext context) {
+    final p = widget.profile;
     return StreamBuilder<bool>(
       stream: _following,
       builder: (context, snap) {
         final following = snap.data ?? false;
-        return Row(
-          children: [
-            Expanded(
-              child: following
-                  ? IgOutlineButton(
-                      label: 'Following',
-                      icon: Icons.check,
-                      height: 36,
-                      onPressed: _busy ? null : () => _toggle(true),
-                    )
-                  : IgPrimaryButton(
-                      label: 'Follow',
-                      height: 36,
-                      loading: _busy || !snap.hasData,
-                      onPressed: () => _toggle(false),
-                    ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: IgOutlineButton(
-                label: 'Message',
+        return StreamBuilder<bool>(
+          stream: p.isPrivate && !following ? _requested : null,
+          builder: (context, req) {
+            final requested = req.data ?? false;
+            Widget button;
+            if (following) {
+              button = IgOutlineButton(
+                label: 'Following',
+                icon: Icons.check,
                 height: 36,
-                onPressed: () => openChat(context, widget.profile),
-              ),
-            ),
-          ],
+                onPressed: _busy ? null : _unfollow,
+              );
+            } else if (requested) {
+              button = IgOutlineButton(
+                key: const ValueKey('requested'),
+                label: 'Requested',
+                height: 36,
+                onPressed: _busy
+                    ? null
+                    : () => _run(
+                        () => UserRepository.instance.cancelRequest(p.uid),
+                      ),
+              );
+            } else {
+              button = IgPrimaryButton(
+                key: const ValueKey('follow'),
+                label: 'Follow',
+                height: 36,
+                loading: _busy || !snap.hasData,
+                onPressed: () => _run(
+                  () => p.isPrivate
+                      ? UserRepository.instance.requestFollow(p)
+                      : UserRepository.instance.follow(p),
+                ),
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: button),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: IgOutlineButton(
+                    label: 'Message',
+                    height: 36,
+                    onPressed: () => openChat(context, p),
+                  ),
+                ),
+              ],
+            );
+          },
         );
       },
+    );
+  }
+}
+
+/// Shown instead of the grids for private (not followed) or blocked accounts.
+class _HiddenNotice extends StatelessWidget {
+  const _HiddenNotice({required this.blocked, required this.username});
+  final bool blocked;
+  final String username;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(32, 40, 32, 120),
+      children: [
+        Center(
+          child: Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: AppColors.textPrimary, width: 2),
+            ),
+            child: Icon(blocked ? Icons.block : Icons.lock_outline, size: 30),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          blocked ? 'You blocked @$username' : 'This account is private',
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          blocked
+              ? 'Unblock to see their posts and clips.'
+              : 'Follow this account to see their photos, clips and moments.',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: AppColors.textSecondary),
+        ),
+      ],
     );
   }
 }
@@ -759,7 +988,7 @@ class _Stat extends StatelessWidget {
 
   final int value;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {

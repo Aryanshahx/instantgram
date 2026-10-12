@@ -9,7 +9,6 @@ import '../../../shared/widgets/ig_logo.dart';
 import '../../notifications/data/notification_repository.dart';
 import '../../notifications/presentation/notifications_screen.dart';
 import '../../post/data/post_repository.dart';
-import '../../post/presentation/create_post_screen.dart';
 import '../../post/presentation/create_sheet.dart';
 import '../../profile/data/user_repository.dart';
 import 'widgets/post_card.dart';

@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// InstantGram Firestore security rules (v0.3.0)
+// InstantGram Firestore security rules (v0.4.0)
 // Deploy:  firebase deploy --only firestore --project YOUR_PROJECT_ID
 // or paste into: Firebase Console -> Firestore Database -> Rules -> Publish
 service cloud.firestore {
@@ -17,6 +17,15 @@ service cloud.firestore {
       return !changed().hasAny([f])
         || (request.resource.data[f] is int && (delta(f) == 1 || delta(f) == -1));
     }
+    function userDoc(u) { return /databases/$(database)/documents/users/$(u); }
+    // Private account (followers must be approved)
+    function isPrivate(u) {
+      return get(userDoc(u)).data.get('isPrivate', false) == true;
+    }
+    // Has [owner] blocked [other]?
+    function blockedBy(owner, other) {
+      return exists(/databases/$(database)/documents/users/$(owner)/blocked/$(other));
+    }
 
     // ---------------- Users ----------------
     match /users/{uid} {
@@ -28,14 +37,29 @@ service cloud.firestore {
         (me() == uid
           && changed().hasOnly(['name', 'bio', 'website', 'photoUrl', 'photoKey',
                                 'coverUrl', 'coverKey', 'postsCount',
-                                'followingCount', 'followersCount'])
+                                'followingCount', 'followersCount',
+                                'language', 'isPrivate'])
           && stepOk('postsCount') && stepOk('followingCount')
-          && stepOk('followersCount'))
+          && stepOk('followersCount')
+          && (!changed().hasAny(['isPrivate'])
+              || request.resource.data.isPrivate is bool)
+          && (!changed().hasAny(['language'])
+              || (request.resource.data.language is string
+                  && request.resource.data.language.size() <= 8)))
         ||
         // Someone follows / unfollows: followersCount +-1 with matching doc
         (changed().hasOnly(['followersCount']) && followOk(uid))
+        ||
+        // A private account approves / removes this user as follower
+        (changed().hasOnly(['followingCount']) && followingOk(uid))
       );
       allow delete: if false;
+
+      function followingOk(uid) {
+        let f = /databases/$(database)/documents/users/$(uid)/following/$(request.auth.uid);
+        return (delta('followingCount') == 1 && existsAfter(f) && !exists(f))
+          || (delta('followingCount') == -1 && !existsAfter(f) && exists(f));
+      }
 
       function followOk(uid) {
         let f = /databases/$(database)/documents/users/$(uid)/followers/$(request.auth.uid);
@@ -43,15 +67,49 @@ service cloud.firestore {
           || (delta('followersCount') == -1 && !existsAfter(f) && exists(f));
       }
 
+      // followers: you follow a public account, or the owner approves a request
       match /followers/{fid} {
         allow read: if signedIn();
-        allow create, delete: if signedIn() && me() == fid;
+        allow create: if signedIn() && (
+          (me() == fid && fid != uid && !isPrivate(uid) && !blockedBy(uid, fid))
+          || (me() == uid && exists(/databases/$(database)/documents/users/$(uid)/requests/$(fid))));
+        // unfollow, or the owner removes a follower
+        allow delete: if signedIn() && (me() == fid || me() == uid);
         allow update: if false;
       }
       match /following/{tid} {
         allow read: if signedIn();
-        allow create, delete: if signedIn() && me() == uid;
+        allow create: if signedIn() && (
+          (me() == uid && !blockedBy(tid, uid)
+            && (!isPrivate(tid)
+                || existsAfter(/databases/$(database)/documents/users/$(tid)/followers/$(uid))))
+          || (me() == tid && exists(/databases/$(database)/documents/users/$(tid)/requests/$(uid))));
+        allow delete: if signedIn() && (me() == uid || me() == tid);
         allow update: if false;
+      }
+      // follow requests to a private account (rid = who asks)
+      match /requests/{rid} {
+        allow read: if signedIn() && (me() == uid || me() == rid);
+        allow create: if signedIn() && me() == rid && rid != uid
+          && isPrivate(uid) && !blockedBy(uid, rid)
+          && request.resource.data.keys().hasOnly(['createdAt', 'username', 'name', 'photoUrl']);
+        allow delete: if signedIn() && (me() == uid || me() == rid);
+        allow update: if false;
+      }
+      // people you blocked (only you can see the list)
+      match /blocked/{bid} {
+        allow read: if signedIn() && me() == uid;
+        allow create, delete: if signedIn() && me() == uid && bid != uid;
+        allow update: if false;
+      }
+      // private info (date of birth) - only you
+      match /private/{doc} {
+        allow read, delete: if signedIn() && me() == uid;
+        allow create, update: if signedIn() && me() == uid
+          && request.resource.data.keys().hasOnly(['birthDate', 'updatedAt'])
+          && (!('birthDate' in request.resource.data)
+              || (request.resource.data.birthDate is string
+                  && request.resource.data.birthDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')));
       }
       match /reposts/{pid} {
         allow read: if signedIn();
@@ -82,20 +140,6 @@ service cloud.firestore {
     }
 
     // ---------------- Posts & clips ----------------
-    // Reports: private. One per user per post. Read them in the Firebase console.
-    match /reports/{rid} {
-      allow create: if signedIn()
-        && rid == request.resource.data.postId + '_' + me()
-        && request.resource.data.reporterId == me()
-        && request.resource.data.authorId != me()
-        && request.resource.data.reason is string
-        && request.resource.data.reason.size() <= 60
-        && request.resource.data.message is string
-        && request.resource.data.message.size() > 0
-        && request.resource.data.message.size() <= 500;
-      allow read, update, delete: if false;
-    }
-
     match /posts/{pid} {
       allow read: if signedIn();
       allow create: if signedIn()
@@ -108,16 +152,20 @@ service cloud.firestore {
         && request.resource.data.commentsCount == 0
         && request.resource.data.repostsCount == 0
         && request.resource.data.viewsCount == 0
-        && tagsOk();
+        && request.resource.data.get('sharesCount', 0) == 0
+        && tagsOk() && optionsOk();
       allow update: if signedIn() && (
         (resource.data.authorId == me()
-          && changed().hasOnly(['caption', 'tags', 'pinned', 'authorPhotoUrl'])
-          && tagsOk())
+          && changed().hasOnly(['caption', 'tags', 'pinned', 'authorPhotoUrl',
+                                'audience', 'hideLikes', 'hideComments',
+                                'hideReposts', 'hideShares'])
+          && tagsOk() && optionsOk())
         ||
-        (changed().hasOnly(['likesCount', 'commentsCount', 'repostsCount', 'viewsCount'])
+        (changed().hasOnly(['likesCount', 'commentsCount', 'repostsCount',
+                            'viewsCount', 'sharesCount'])
           && stepOk('likesCount') && stepOk('commentsCount')
           && stepOk('repostsCount') && stepOk('viewsCount')
-          && likeOk() && repostOk())
+          && shareOk() && likeOk() && repostOk())
       );
       allow delete: if signedIn() && resource.data.authorId == me();
 
@@ -127,6 +175,24 @@ service cloud.firestore {
         return !('tags' in request.resource.data)
           || (request.resource.data.tags is list
               && request.resource.data.tags.size() <= 30);
+      }
+
+      // audience, photos (max 10), filter, cover, hidden counts
+      function optionsOk() {
+        let d = request.resource.data;
+        return (!('audience' in d) || d.audience in ['everyone', 'followers', 'only_me'])
+          && (!('media' in d) || (d.media is list && d.media.size() >= 1 && d.media.size() <= 10))
+          && (!('filter' in d) || (d.filter is list && d.filter.size() == 20))
+          && (!('thumbUrl' in d) || d.thumbUrl is string)
+          && (!('hideLikes' in d) || d.hideLikes is bool)
+          && (!('hideComments' in d) || d.hideComments is bool)
+          && (!('hideReposts' in d) || d.hideReposts is bool)
+          && (!('hideShares' in d) || d.hideShares is bool);
+      }
+      // shares can only go up by 1
+      function shareOk() {
+        return !changed().hasAny(['sharesCount'])
+          || request.resource.data.sharesCount == resource.data.get('sharesCount', 0) + 1;
       }
 
       function likeOk() {
@@ -143,6 +209,12 @@ service cloud.firestore {
           || (delta('repostsCount') == -1 && !existsAfter(r) && exists(r));
       }
 
+      // the post owner blocked you -> no comments
+      function blockedByPostAuthor() {
+        let author = get(/databases/$(database)/documents/posts/$(pid)).data.authorId;
+        return blockedBy(author, request.auth.uid);
+      }
+
       match /likes/{uid} {
         allow read: if signedIn();
         allow create, delete: if signedIn() && me() == uid;
@@ -154,7 +226,8 @@ service cloud.firestore {
           && request.resource.data.authorId == me()
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
-          && request.resource.data.text.size() <= 1000;
+          && request.resource.data.text.size() <= 1000
+          && !blockedByPostAuthor();
         // comment author or post owner can delete
         allow delete: if signedIn() && (resource.data.authorId == me()
           || get(/databases/$(database)/documents/posts/$(pid)).data.authorId == me());
@@ -165,7 +238,10 @@ service cloud.firestore {
     // ---------------- Stories (24h) ----------------
     match /stories/{sid} {
       allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.authorId == me();
+      allow create: if signedIn() && request.resource.data.authorId == me()
+        && request.resource.data.mediaUrl is string
+        && request.resource.data.get('type', 'photo') in ['photo', 'video']
+        && request.resource.data.get('audience', 'everyone') in ['everyone', 'followers', 'only_me'];
       allow delete: if signedIn() && resource.data.authorId == me();
       allow update: if false;
     }
@@ -190,7 +266,10 @@ service cloud.firestore {
           && request.resource.data.senderId == me()
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
-          && request.resource.data.text.size() <= 2000;
+          && request.resource.data.text.size() <= 2000
+          // nobody in the chat blocked you
+          && !blockedBy(cid.split('_')[0], me())
+          && !blockedBy(cid.split('_')[1], me());
         allow update, delete: if false;
       }
     }
