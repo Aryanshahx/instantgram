@@ -182,7 +182,7 @@ class PostRepository {
     final ref = _posts.doc(post.id);
     final batch = _db.batch();
     if (like) {
-      final me = await UserRepository.instance.me();
+      final me = await UserRepository.instance.meCached();
       batch.set(ref.collection('likes').doc(_me), {
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -231,7 +231,7 @@ class PostRepository {
         _db.collection('users').doc(_me).collection('reposts').doc(post.id);
     final batch = _db.batch();
     if (repost) {
-      final me = await UserRepository.instance.me();
+      final me = await UserRepository.instance.meCached();
       batch.set(ref, {'createdAt': FieldValue.serverTimestamp()});
       batch.update(_posts.doc(post.id), {
         'repostsCount': FieldValue.increment(1),
@@ -265,7 +265,7 @@ class PostRepository {
   Future<void> addComment(Post post, String text) async {
     final t = text.trim();
     if (t.isEmpty) return;
-    final me = await UserRepository.instance.me();
+    final me = await UserRepository.instance.meCached();
     final ref = _posts.doc(post.id);
     final batch = _db.batch();
     batch.set(ref.collection('comments').doc(), {

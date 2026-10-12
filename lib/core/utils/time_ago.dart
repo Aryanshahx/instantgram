@@ -19,3 +19,16 @@ String compactCount(int n) {
   final v = n / 1000000;
   return '${v.toStringAsFixed(v < 10 ? 1 : 0).replaceAll('.0', '')}M';
 }
+
+const _months = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/// "12 Oct 2026, 3:45 PM"
+String fullDate(DateTime t) {
+  final h = t.hour % 12 == 0 ? 12 : t.hour % 12;
+  final m = t.minute.toString().padLeft(2, '0');
+  final ampm = t.hour < 12 ? 'AM' : 'PM';
+  return '${t.day} ${_months[t.month - 1]} ${t.year}, $h:$m $ampm';
+}

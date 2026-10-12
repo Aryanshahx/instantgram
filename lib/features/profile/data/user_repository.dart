@@ -31,10 +31,31 @@ class UserRepository {
     return snap.exists ? UserProfile.fromDoc(snap) : null;
   }
 
+  UserProfile? _meCache;
+  DateTime _meCacheAt = DateTime(2000);
+
+  /// Fast version of [me] for likes / reposts / comments:
+  /// uses a copy kept in memory (refreshed every 5 minutes).
+  Future<UserProfile> meCached() async {
+    final c = _meCache;
+    if (c != null &&
+        c.uid == FirebaseAuth.instance.currentUser?.uid &&
+        DateTime.now().difference(_meCacheAt).inMinutes < 5) {
+      return c;
+    }
+    return me();
+  }
+
+  void _clearMeCache() => _meCache = null;
+
   /// Current user's profile (falls back to auth info).
   Future<UserProfile> me() async {
     final u = FirebaseAuth.instance.currentUser!;
     final p = await getUser(u.uid);
+    if (p != null) {
+      _meCache = p;
+      _meCacheAt = DateTime.now();
+    }
     return p ??
         UserProfile(
           uid: u.uid,
@@ -85,6 +106,8 @@ class UserRepository {
 
   /// Upload new profile photo, update profile + your posts.
   Future<void> changePhoto(File file, {ValueChanged<double>? onProgress}) async {
+    _clearMeCache();
+    _clearMeCache();
     final old = await me();
     final media = await MediaService.instance
         .upload(file, kind: MediaKind.avatar, onProgress: onProgress);
@@ -106,6 +129,7 @@ class UserRepository {
   }
 
   Future<void> changeCover(File file, {ValueChanged<double>? onProgress}) async {
+    _clearMeCache();
     final old = await me();
     final media = await MediaService.instance
         .upload(file, kind: MediaKind.cover, onProgress: onProgress);

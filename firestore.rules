@@ -82,6 +82,20 @@ service cloud.firestore {
     }
 
     // ---------------- Posts & clips ----------------
+    // Reports: private. One per user per post. Read them in the Firebase console.
+    match /reports/{rid} {
+      allow create: if signedIn()
+        && rid == request.resource.data.postId + '_' + me()
+        && request.resource.data.reporterId == me()
+        && request.resource.data.authorId != me()
+        && request.resource.data.reason is string
+        && request.resource.data.reason.size() <= 60
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 0
+        && request.resource.data.message.size() <= 500;
+      allow read, update, delete: if false;
+    }
+
     match /posts/{pid} {
       allow read: if signedIn();
       allow create: if signedIn()
