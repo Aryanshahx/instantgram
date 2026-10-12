@@ -1,4 +1,4 @@
-package com.hypertechlabs.instantgram.instantgram
+package com.hypertechlabs.instantgram
 
 import io.flutter.embedding.android.FlutterActivity
 
