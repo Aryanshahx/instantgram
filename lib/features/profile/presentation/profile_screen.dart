@@ -3,50 +3,87 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/media_service.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/errors.dart';
+import '../../../core/utils/share.dart';
 import '../../../core/utils/time_ago.dart';
+import '../../../shared/models/post.dart';
 import '../../../shared/models/user_profile.dart';
+import '../../../shared/navigation.dart';
+import '../../../shared/widgets/async_views.dart';
 import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/ig_buttons.dart';
 import '../../../shared/widgets/net_image.dart';
+import '../../../shared/widgets/post_grid.dart';
 import '../../auth/data/auth_service.dart';
+import '../../chats/presentation/chats_screen.dart';
+import '../../dashboard/presentation/dashboard_screen.dart';
+import '../../post/data/post_repository.dart';
+import '../../post/presentation/create_post_screen.dart';
 import '../../post/presentation/create_sheet.dart';
 import '../data/user_repository.dart';
 import 'edit_profile_screen.dart';
+import 'saved_screen.dart';
+import 'user_list_screen.dart';
 
+/// Profile of any user. [standalone] = opened as its own page (shows back button).
 class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({super.key, required this.uid});
+  const ProfileScreen({super.key, required this.uid, this.standalone = false});
 
   final String uid;
+  final bool standalone;
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<UserProfile?>(
+    final body = StreamBuilder<UserProfile?>(
       stream: UserRepository.instance.watchUser(uid),
       builder: (context, snap) {
+        if (snap.hasError) return Center(child: ErrorView(error: snap.error));
         if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return const LoadingView();
         }
+        var profile = snap.data;
         final authUser = FirebaseAuth.instance.currentUser;
-        final profile =
-            snap.data ??
-            UserProfile(
-              uid: uid,
-              name: authUser?.displayName ?? 'New user',
-              username: (authUser?.email ?? 'user').split('@').first,
-              email: authUser?.email ?? '',
+        if (profile == null) {
+          if (uid != authUser?.uid) {
+            return const Center(
+              child: EmptyState(
+                icon: Icons.person_off_outlined,
+                title: 'User not found',
+              ),
             );
-        return ProfileView(profile: profile);
+          }
+          profile = UserProfile(
+            uid: uid,
+            name: authUser?.displayName ?? '',
+            username: (authUser?.email ?? 'user').split('@').first,
+            email: authUser?.email ?? '',
+          );
+        }
+        return ProfileView(
+          profile: profile,
+          isMe: uid == authUser?.uid,
+          standalone: standalone,
+        );
       },
     );
+    return standalone ? Scaffold(body: body) : body;
   }
 }
 
 class ProfileView extends StatefulWidget {
-  const ProfileView({super.key, required this.profile});
+  const ProfileView({
+    super.key,
+    required this.profile,
+    required this.isMe,
+    this.standalone = false,
+  });
 
   final UserProfile profile;
+  final bool isMe;
+  final bool standalone;
 
   @override
   State<ProfileView> createState() => _ProfileViewState();
@@ -56,6 +93,29 @@ class _ProfileViewState extends State<ProfileView>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 3, vsync: this)
     ..addListener(() => setState(() {}));
+
+  late Stream<List<Post>> _posts;
+  late Stream<List<Post>> _clips;
+  late Stream<List<String>> _reposts;
+
+  @override
+  void initState() {
+    super.initState();
+    _initStreams();
+  }
+
+  void _initStreams() {
+    final uid = widget.profile.uid;
+    _posts = PostRepository.instance.byUser(uid, type: Post.photo);
+    _clips = PostRepository.instance.byUser(uid, type: Post.clip);
+    _reposts = PostRepository.instance.repostIds(uid);
+  }
+
+  @override
+  void didUpdateWidget(covariant ProfileView old) {
+    super.didUpdateWidget(old);
+    if (old.profile.uid != widget.profile.uid) _initStreams();
+  }
 
   @override
   void dispose() {
@@ -67,10 +127,26 @@ class _ProfileViewState extends State<ProfileView>
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(msg)));
 
-  Future<void> _shareProfile() async {
-    final link = '${AppConstants.profileLinkBase}${widget.profile.username}';
-    await Clipboard.setData(ClipboardData(text: link));
-    _snack('Profile link copied: $link');
+  Future<void> _changePhoto() async {
+    final file = await MediaService.instance.pick(context, maxWidth: 800);
+    if (file == null || !mounted) return;
+    final ok = await runWithProgress(
+      context,
+      title: 'Updating photo',
+      task: (p) => UserRepository.instance.changePhoto(file, onProgress: p),
+    );
+    if (ok) _snack('Profile photo updated');
+  }
+
+  Future<void> _changeCover() async {
+    final file = await MediaService.instance.pick(context, maxWidth: 1600);
+    if (file == null || !mounted) return;
+    final ok = await runWithProgress(
+      context,
+      title: 'Updating cover',
+      task: (p) => UserRepository.instance.changeCover(file, onProgress: p),
+    );
+    if (ok) _snack('Cover updated');
   }
 
   void _openSettings() {
@@ -86,6 +162,24 @@ class _ProfileViewState extends State<ProfileView>
               onTap: () {
                 Navigator.pop(ctx);
                 _editProfile();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.wallpaper_outlined),
+              title: const Text('Change cover'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _changeCover();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.bookmark_border),
+              title: const Text('Saved'),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SavedScreen()),
+                );
               },
             ),
             ListTile(
@@ -108,6 +202,7 @@ class _ProfileViewState extends State<ProfileView>
               ),
               onTap: () {
                 Navigator.pop(ctx);
+                Navigator.of(context).popUntil((r) => r.isFirst);
                 AuthService.instance.signOut();
               },
             ),
@@ -126,6 +221,17 @@ class _ProfileViewState extends State<ProfileView>
     );
   }
 
+  void _openList(bool followers) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => UserListScreen(
+          uid: widget.profile.uid,
+          followers: followers,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = widget.profile;
@@ -134,12 +240,22 @@ class _ProfileViewState extends State<ProfileView>
         SliverToBoxAdapter(
           child: _Header(
             profile: p,
+            isMe: widget.isMe,
+            onBack: widget.standalone
+                ? () => Navigator.of(context).maybePop()
+                : null,
             onSettings: _openSettings,
             onEdit: _editProfile,
-            onShare: _shareProfile,
-            onDashboard: () => _snack('Dashboard is coming soon 📊'),
-            onAddPhoto: () => _snack('Photo upload is coming next (Tigris)'),
-            onNewHighlight: () => showCreateSheet(context),
+            onShare: () => shareProfile(p),
+            onDashboard: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const DashboardScreen()),
+            ),
+            onAddPhoto: _changePhoto,
+            onCoverTap: widget.isMe ? _changeCover : null,
+            onNewStory: () => startCompose(context, ComposeMode.story),
+            onPostsTap: () => _tabs.animateTo(0),
+            onFollowersTap: () => _openList(true),
+            onFollowingTap: () => _openList(false),
           ),
         ),
         SliverPersistentHeader(
@@ -170,22 +286,22 @@ class _ProfileViewState extends State<ProfileView>
       ],
       body: TabBarView(
         controller: _tabs,
-        children: const [
-          _TabEmpty(
-            icon: Icons.photo_camera_outlined,
-            title: 'No posts yet',
-            subtitle: 'Tap + to share your first photo.',
+        children: [
+          _StreamGrid(
+            stream: _posts,
+            emptyIcon: Icons.photo_camera_outlined,
+            emptyTitle: 'No posts yet',
+            emptySubtitle: widget.isMe ? 'Tap + to share your first photo.' : null,
+            onCreate: widget.isMe ? () => showCreateSheet(context) : null,
           ),
-          _TabEmpty(
-            icon: Icons.smart_display_outlined,
-            title: 'No clips yet',
-            subtitle: 'Your short videos will appear here.',
+          _StreamGrid(
+            stream: _clips,
+            emptyIcon: Icons.smart_display_outlined,
+            emptyTitle: 'No clips yet',
+            emptySubtitle:
+                widget.isMe ? 'Your short videos will appear here.' : null,
           ),
-          _TabEmpty(
-            icon: Icons.repeat,
-            title: 'No reposts yet',
-            subtitle: 'Posts you repost will appear here.',
-          ),
+          _RepostsTab(ids: _reposts, isMe: widget.isMe),
         ],
       ),
     );
@@ -213,27 +329,140 @@ class _ProfileViewState extends State<ProfileView>
   }
 }
 
+class _StreamGrid extends StatelessWidget {
+  const _StreamGrid({
+    required this.stream,
+    required this.emptyIcon,
+    required this.emptyTitle,
+    this.emptySubtitle,
+    this.onCreate,
+  });
+
+  final Stream<List<Post>> stream;
+  final IconData emptyIcon;
+  final String emptyTitle;
+  final String? emptySubtitle;
+  final VoidCallback? onCreate;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Post>>(
+      stream: stream,
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return SingleChildScrollView(child: ErrorView(error: snap.error));
+        }
+        if (!snap.hasData) return const LoadingView();
+        final posts = snap.data!;
+        return PostGrid(
+          posts: posts,
+          onTap: (i) => openPost(context, posts, i),
+          emptyIcon: emptyIcon,
+          emptyTitle: emptyTitle,
+          emptySubtitle: emptySubtitle,
+        );
+      },
+    );
+  }
+}
+
+class _RepostsTab extends StatefulWidget {
+  const _RepostsTab({required this.ids, required this.isMe});
+  final Stream<List<String>> ids;
+  final bool isMe;
+
+  @override
+  State<_RepostsTab> createState() => _RepostsTabState();
+}
+
+class _RepostsTabState extends State<_RepostsTab> {
+  String _key = '';
+  Future<List<Post>>? _future;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<String>>(
+      stream: widget.ids,
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return SingleChildScrollView(child: ErrorView(error: snap.error));
+        }
+        if (!snap.hasData) return const LoadingView();
+        final ids = snap.data!;
+        final key = ids.join(',');
+        if (key != _key || _future == null) {
+          _key = key;
+          _future = PostRepository.instance.byIds(ids);
+        }
+        return FutureBuilder<List<Post>>(
+          future: _future,
+          builder: (context, f) {
+            if (f.hasError) {
+              return SingleChildScrollView(child: ErrorView(error: f.error));
+            }
+            if (!f.hasData) return const LoadingView();
+            final posts = f.data!;
+            return PostGrid(
+              posts: posts,
+              onTap: (i) => openPost(context, posts, i),
+              emptyIcon: Icons.repeat,
+              emptyTitle: 'No reposts yet',
+              emptySubtitle: widget.isMe
+                  ? 'Posts you repost will appear here.'
+                  : null,
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
 class _Header extends StatelessWidget {
   const _Header({
     required this.profile,
+    required this.isMe,
+    required this.onBack,
     required this.onSettings,
     required this.onEdit,
     required this.onShare,
     required this.onDashboard,
     required this.onAddPhoto,
-    required this.onNewHighlight,
+    required this.onCoverTap,
+    required this.onNewStory,
+    required this.onPostsTap,
+    required this.onFollowersTap,
+    required this.onFollowingTap,
   });
 
   final UserProfile profile;
+  final bool isMe;
+  final VoidCallback? onBack;
   final VoidCallback onSettings;
   final VoidCallback onEdit;
   final VoidCallback onShare;
   final VoidCallback onDashboard;
   final VoidCallback onAddPhoto;
-  final VoidCallback onNewHighlight;
+  final VoidCallback? onCoverTap;
+  final VoidCallback onNewStory;
+  final VoidCallback onPostsTap;
+  final VoidCallback onFollowersTap;
+  final VoidCallback onFollowingTap;
 
   static const double _coverHeight = 200;
   static const double _avatarSize = 104;
+
+  Widget _circleButton(IconData icon, String tip, VoidCallback onTap) {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.45),
+      shape: const CircleBorder(),
+      child: IconButton(
+        tooltip: tip,
+        onPressed: onTap,
+        icon: Icon(icon, color: Colors.white),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -243,7 +472,6 @@ class _Header extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Cover + avatar
         SizedBox(
           height: _coverHeight + topPad + _avatarSize * 0.45,
           child: Stack(
@@ -254,40 +482,42 @@ class _Header extends StatelessWidget {
                 right: 12,
                 top: 0,
                 height: _coverHeight + topPad,
-                child: ClipRRect(
-                  borderRadius: const BorderRadius.vertical(
-                    bottom: Radius.circular(36),
-                  ),
-                  child: p.coverUrl.isEmpty
-                      ? const DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                Color(0xFF1B1F6B),
-                                Color(0xFF2E3FD6),
-                                Color(0xFF0E1446),
-                              ],
+                child: GestureDetector(
+                  onTap: onCoverTap,
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      bottom: Radius.circular(36),
+                    ),
+                    child: p.coverUrl.isEmpty
+                        ? const DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  Color(0xFF1B1F6B),
+                                  Color(0xFF2E3FD6),
+                                  Color(0xFF0E1446),
+                                ],
+                              ),
                             ),
-                          ),
-                        )
-                      : NetImage(p.coverUrl),
-                ),
-              ),
-              Positioned(
-                right: 28,
-                top: topPad + 12,
-                child: Material(
-                  color: Colors.black.withValues(alpha: 0.45),
-                  shape: const CircleBorder(),
-                  child: IconButton(
-                    tooltip: 'Settings',
-                    onPressed: onSettings,
-                    icon: const Icon(Icons.settings, color: Colors.white),
+                          )
+                        : NetImage(p.coverUrl),
                   ),
                 ),
               ),
+              if (onBack != null)
+                Positioned(
+                  left: 28,
+                  top: topPad + 12,
+                  child: _circleButton(Icons.arrow_back, 'Back', onBack!),
+                ),
+              if (isMe)
+                Positioned(
+                  right: 28,
+                  top: topPad + 12,
+                  child: _circleButton(Icons.settings, 'Settings', onSettings),
+                ),
               Positioned(
                 left: 34,
                 bottom: 0,
@@ -297,12 +527,15 @@ class _Header extends StatelessWidget {
                     color: AppColors.background,
                     shape: BoxShape.circle,
                   ),
-                  child: Avatar(
-                    url: p.photoUrl,
-                    name: p.name,
-                    size: _avatarSize,
-                    showPlus: true,
-                    onPlusTap: onAddPhoto,
+                  child: GestureDetector(
+                    onTap: isMe ? onAddPhoto : null,
+                    child: Avatar(
+                      url: p.photoUrl,
+                      name: p.displayName,
+                      size: _avatarSize,
+                      showPlus: isMe,
+                      onPlusTap: onAddPhoto,
+                    ),
                   ),
                 ),
               ),
@@ -315,7 +548,7 @@ class _Header extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                p.name.isEmpty ? p.username : p.name,
+                p.displayName,
                 style: const TextStyle(
                   fontSize: 32,
                   fontWeight: FontWeight.w800,
@@ -351,45 +584,127 @@ class _Header extends StatelessWidget {
               const SizedBox(height: 24),
               Row(
                 children: [
-                  _Stat(value: p.postsCount, label: 'Posts'),
-                  _Stat(value: p.followersCount, label: 'Followers'),
-                  _Stat(value: p.followingCount, label: 'Following'),
-                ],
-              ),
-              const SizedBox(height: 22),
-              Row(
-                children: [
-                  Expanded(
-                    child: IgPrimaryButton(
-                      label: 'Edit profile',
-                      height: 48,
-                      onPressed: onEdit,
-                    ),
+                  _Stat(value: p.postsCount, label: 'Posts', onTap: onPostsTap),
+                  _Stat(
+                    value: p.followersCount,
+                    label: 'Followers',
+                    onTap: onFollowersTap,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: IgOutlineButton(
-                      label: 'Share profile',
-                      height: 48,
-                      onPressed: onShare,
-                    ),
+                  _Stat(
+                    value: p.followingCount,
+                    label: 'Following',
+                    onTap: onFollowingTap,
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              IgOutlineButton(
-                label: 'Dashboard',
-                icon: Icons.auto_graph,
-                height: 48,
-                onPressed: onDashboard,
-              ),
               const SizedBox(height: 22),
-              _NewHighlight(onTap: onNewHighlight),
-              const SizedBox(height: 16),
+              if (isMe) ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: IgPrimaryButton(
+                        label: 'Edit profile',
+                        height: 48,
+                        onPressed: onEdit,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: IgOutlineButton(
+                        label: 'Share profile',
+                        height: 48,
+                        onPressed: onShare,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                IgOutlineButton(
+                  label: 'Dashboard',
+                  icon: Icons.auto_graph,
+                  height: 48,
+                  onPressed: onDashboard,
+                ),
+                const SizedBox(height: 22),
+                _NewHighlight(onTap: onNewStory),
+                const SizedBox(height: 16),
+              ] else ...[
+                _FollowRow(profile: p),
+                const SizedBox(height: 20),
+              ],
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+class _FollowRow extends StatefulWidget {
+  const _FollowRow({required this.profile});
+  final UserProfile profile;
+
+  @override
+  State<_FollowRow> createState() => _FollowRowState();
+}
+
+class _FollowRowState extends State<_FollowRow> {
+  late final Stream<bool> _following =
+      UserRepository.instance.isFollowing(widget.profile.uid);
+  bool _busy = false;
+
+  Future<void> _toggle(bool following) async {
+    setState(() => _busy = true);
+    try {
+      if (following) {
+        await UserRepository.instance.unfollow(widget.profile);
+      } else {
+        await UserRepository.instance.follow(widget.profile);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(friendlyError(e))));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<bool>(
+      stream: _following,
+      builder: (context, snap) {
+        final following = snap.data ?? false;
+        return Row(
+          children: [
+            Expanded(
+              child: following
+                  ? IgOutlineButton(
+                      label: 'Following',
+                      icon: Icons.check,
+                      height: 48,
+                      onPressed: _busy ? null : () => _toggle(true),
+                    )
+                  : IgPrimaryButton(
+                      label: 'Follow',
+                      height: 48,
+                      loading: _busy || !snap.hasData,
+                      onPressed: () => _toggle(false),
+                    ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: IgOutlineButton(
+                label: 'Message',
+                height: 48,
+                onPressed: () => openChat(context, widget.profile),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -407,7 +722,7 @@ class _LinkChip extends StatelessWidget {
         .replaceFirst(RegExp(r'/$'), '');
     return Material(
       color: AppColors.surface,
-      shape: StadiumBorder(side: BorderSide(color: AppColors.border)),
+      shape: const StadiumBorder(side: BorderSide(color: AppColors.border)),
       child: InkWell(
         customBorder: const StadiumBorder(),
         onTap: onTap,
@@ -438,30 +753,35 @@ class _LinkChip extends StatelessWidget {
 }
 
 class _Stat extends StatelessWidget {
-  const _Stat({required this.value, required this.label});
+  const _Stat({required this.value, required this.label, required this.onTap});
 
   final int value;
   final String label;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            compactCount(value),
-            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 15,
-              color: AppColors.textSecondary,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              compactCount(value < 0 ? 0 : value),
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
             ),
-          ),
-        ],
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 15,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -495,26 +815,6 @@ class _NewHighlight extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _TabEmpty extends StatelessWidget {
-  const _TabEmpty({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.only(bottom: 110),
-      child: EmptyState(icon: icon, title: title, subtitle: subtitle),
     );
   }
 }

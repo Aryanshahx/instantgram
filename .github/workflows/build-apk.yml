@@ -4,8 +4,10 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    paths-ignore: ['backend/**', '**/*.md', 'firestore.rules', 'firestore.indexes.json']
   pull_request:
     branches: [main]
+    paths-ignore: ['backend/**', '**/*.md']
   workflow_dispatch:
 
 permissions:
@@ -19,27 +21,55 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
 
-      - uses: subosito/flutter-action@v2
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
-      - run: flutter --version
-      - run: flutter pub get
-      - run: flutter analyze --no-fatal-infos
-      - run: flutter test
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze code
+        run: flutter analyze --no-fatal-infos
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Check backend URL
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          if [ -n "$API_BASE_URL" ]; then
+            echo "Backend URL from GitHub variable: $API_BASE_URL"
+          elif grep -q "kDefaultApiBaseUrl = 'https://" lib/core/config/api_url.dart; then
+            echo "Backend URL from lib/core/config/api_url.dart"
+          else
+            echo "::warning::No backend URL set. Uploads will not work. Set repo variable API_BASE_URL (Settings > Secrets and variables > Actions > Variables)."
+          fi
 
       - name: Build release APK
-        run: flutter build apk --release --build-number=${{ github.run_number }}
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          flutter build apk --release \
+            --build-number=${{ github.run_number }} \
+            --dart-define=API_BASE_URL="$API_BASE_URL"
 
       - name: Rename APK
         run: |
@@ -47,7 +77,8 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk \
              release/InstantGram-build-${{ github.run_number }}.apk
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
         with:
           name: InstantGram-apk-${{ github.run_number }}
           path: release/*.apk

@@ -1,15 +1,23 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/errors.dart';
+import '../../../../core/utils/share.dart';
 import '../../../../core/utils/time_ago.dart';
 import '../../../../shared/models/post.dart';
+import '../../../../shared/navigation.dart';
 import '../../../../shared/widgets/avatar.dart';
 import '../../../../shared/widgets/net_image.dart';
+import '../../../../shared/widgets/post_grid.dart';
+import '../../../post/data/post_repository.dart';
+import '../../../post/presentation/comments_sheet.dart';
+import '../../../post/presentation/post_menu.dart';
 
 class PostCard extends StatefulWidget {
-  const PostCard({super.key, required this.post});
+  const PostCard({super.key, required this.post, this.onDeleted});
 
   final Post post;
+  final VoidCallback? onDeleted;
 
   @override
   State<PostCard> createState() => _PostCardState();
@@ -17,12 +25,23 @@ class PostCard extends StatefulWidget {
 
 class _PostCardState extends State<PostCard>
     with SingleTickerProviderStateMixin {
-  bool _liked = false;
-  bool _saved = false;
+  final _repo = PostRepository.instance;
   late final AnimationController _heart = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 700),
   );
+
+  // optimistic UI: null = follow server state
+  bool? _likedOverride;
+  int _likeDelta = 0;
+  bool _busy = false;
+
+  @override
+  void didUpdateWidget(covariant PostCard old) {
+    super.didUpdateWidget(old);
+    // server count changed -> drop local delta
+    if (old.post.likesCount != widget.post.likesCount) _likeDelta = 0;
+  }
 
   @override
   void dispose() {
@@ -30,155 +49,243 @@ class _PostCardState extends State<PostCard>
     super.dispose();
   }
 
-  void _toggleLike() => setState(() => _liked = !_liked);
+  Future<void> _setLiked(bool serverLiked, bool like) async {
+    if (_busy || serverLiked == like) return;
+    setState(() {
+      _busy = true;
+      _likedOverride = like;
+      _likeDelta = like ? 1 : -1;
+    });
+    try {
+      await _repo.setLiked(widget.post, like);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _likeDelta = 0);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(friendlyError(e))));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _likedOverride = null;
+        });
+      }
+    }
+  }
 
-  void _doubleTapLike() {
-    setState(() => _liked = true);
-    _heart.forward(from: 0);
+  Future<void> _toggle(Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(friendlyError(e))));
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final p = widget.post;
-    final likes = p.likes + (_liked ? 1 : 0);
+    final ratio = p.aspectRatio.clamp(0.8, 1.91);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Header
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 6, 10),
-          child: Row(
-            children: [
-              Avatar(url: p.avatarUrl, name: p.username, size: 38),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  p.username,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
+    return StreamBuilder<bool>(
+      stream: _repo.isLiked(p.id),
+      builder: (context, likedSnap) {
+        final serverLiked = likedSnap.data ?? false;
+        final liked = _likedOverride ?? serverLiked;
+        final likes = (p.likesCount + _likeDelta).clamp(0, 1 << 31);
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
+              child: Row(
+                children: [
+                  GestureDetector(
+                    onTap: () => openProfile(context, p.authorId),
+                    child: Avatar(
+                        url: p.authorPhotoUrl, name: p.authorUsername, size: 38),
                   ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => openProfile(context, p.authorId),
+                      child: Text(
+                        p.authorUsername,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (p.pinned)
+                    const Icon(Icons.push_pin,
+                        size: 18, color: AppColors.textSecondary),
+                  IconButton(
+                    onPressed: () =>
+                        showPostMenu(context, p, onDeleted: widget.onDeleted),
+                    icon: const Icon(Icons.more_horiz),
+                  ),
+                ],
+              ),
+            ),
+            // Media
+            GestureDetector(
+              onTap: p.isClip ? () => openPost(context, [p], 0) : null,
+              onDoubleTap: () {
+                _heart.forward(from: 0);
+                _setLiked(serverLiked, true);
+              },
+              child: AspectRatio(
+                aspectRatio: p.isClip ? 4 / 5 : ratio,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (p.isClip)
+                      ClipCover(post: p, big: true)
+                    else
+                      NetImage(p.mediaUrl),
+                    if (p.isClip)
+                      Center(
+                        child: Icon(
+                          Icons.play_circle_fill,
+                          size: 72,
+                          color: Colors.white.withValues(alpha: 0.85),
+                        ),
+                      ),
+                    Center(
+                      child: AnimatedBuilder(
+                        animation: _heart,
+                        builder: (context, _) {
+                          final t = _heart.value;
+                          if (t == 0 || t == 1) return const SizedBox.shrink();
+                          final scale =
+                              t < 0.3 ? t / 0.3 * 1.2 : 1.2 - (t - 0.3) * 0.3;
+                          return Opacity(
+                            opacity: t < 0.7 ? 1 : (1 - t) / 0.3,
+                            child: Transform.scale(
+                              scale: scale,
+                              child: const Icon(Icons.favorite,
+                                  size: 110, color: Colors.white),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              IconButton(onPressed: () {}, icon: const Icon(Icons.more_horiz)),
-            ],
-          ),
-        ),
-        // Media
-        GestureDetector(
-          onDoubleTap: _doubleTapLike,
-          child: AspectRatio(
-            aspectRatio: p.aspectRatio,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                NetImage(p.imageUrl),
-                Center(
-                  child: AnimatedBuilder(
-                    animation: _heart,
-                    builder: (context, _) {
-                      final t = _heart.value;
-                      if (t == 0 || t == 1) return const SizedBox.shrink();
-                      final scale = t < 0.3
-                          ? t / 0.3 * 1.2
-                          : 1.2 - (t - 0.3) * 0.3;
-                      return Opacity(
-                        opacity: t < 0.7 ? 1 : (1 - t) / 0.3,
-                        child: Transform.scale(
-                          scale: scale,
-                          child: const Icon(
-                            Icons.favorite,
-                            size: 110,
-                            color: Colors.white,
-                          ),
+            ),
+            // Actions
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: () => _setLiked(serverLiked, !liked),
+                    icon: Icon(
+                      liked ? Icons.favorite : Icons.favorite_border,
+                      color: liked ? AppColors.like : null,
+                      size: 28,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => showComments(context, p),
+                    icon: const Icon(Icons.chat_bubble_outline, size: 26),
+                  ),
+                  StreamBuilder<bool>(
+                    stream: _repo.isReposted(p.id),
+                    builder: (context, s) {
+                      final reposted = s.data ?? false;
+                      return IconButton(
+                        onPressed: () =>
+                            _toggle(() => _repo.setReposted(p, !reposted)),
+                        icon: Icon(
+                          Icons.repeat,
+                          size: 27,
+                          color: reposted ? AppColors.lime : null,
                         ),
                       );
                     },
                   ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        // Actions
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: Row(
-            children: [
-              IconButton(
-                onPressed: _toggleLike,
-                icon: Icon(
-                  _liked ? Icons.favorite : Icons.favorite_border,
-                  color: _liked ? AppColors.like : null,
-                  size: 28,
-                ),
-              ),
-              IconButton(
-                onPressed: () {},
-                icon: const Icon(Icons.chat_bubble_outline, size: 26),
-              ),
-              IconButton(
-                onPressed: () {},
-                icon: const Icon(Icons.repeat, size: 27),
-              ),
-              IconButton(
-                onPressed: () {},
-                icon: const Icon(Icons.send_outlined, size: 26),
-              ),
-              const Spacer(),
-              IconButton(
-                onPressed: () => setState(() => _saved = !_saved),
-                icon: Icon(
-                  _saved ? Icons.bookmark : Icons.bookmark_border,
-                  size: 28,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${compactCount(likes)} likes',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              if (p.caption.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text.rich(
-                  TextSpan(
-                    children: [
-                      TextSpan(
-                        text: '${p.username} ',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      TextSpan(text: p.caption),
-                    ],
+                  IconButton(
+                    onPressed: () => sharePost(p),
+                    icon: const Icon(Icons.send_outlined, size: 26),
                   ),
-                ),
-              ],
-              if (p.comments > 0) ...[
-                const SizedBox(height: 4),
-                Text(
-                  'View all ${p.comments} comments',
-                  style: const TextStyle(color: AppColors.textSecondary),
-                ),
-              ],
-              const SizedBox(height: 4),
-              Text(
-                timeAgo(p.createdAt),
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                ),
+                  const Spacer(),
+                  StreamBuilder<bool>(
+                    stream: _repo.isSaved(p.id),
+                    builder: (context, s) {
+                      final saved = s.data ?? false;
+                      return IconButton(
+                        onPressed: () =>
+                            _toggle(() => _repo.setSaved(p, !saved)),
+                        icon: Icon(
+                          saved ? Icons.bookmark : Icons.bookmark_border,
+                          size: 28,
+                          color: saved ? AppColors.lime : null,
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-      ],
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${compactCount(likes)} ${likes == 1 ? 'like' : 'likes'}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  if (p.caption.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: '${p.authorUsername} ',
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          TextSpan(text: p.caption),
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (p.commentsCount > 0) ...[
+                    const SizedBox(height: 4),
+                    GestureDetector(
+                      onTap: () => showComments(context, p),
+                      child: Text(
+                        p.commentsCount == 1
+                            ? 'View 1 comment'
+                            : 'View all ${p.commentsCount} comments',
+                        style: const TextStyle(color: AppColors.textSecondary),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 4),
+                  Text(
+                    timeAgo(p.createdAt),
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

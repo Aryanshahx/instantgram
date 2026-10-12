@@ -52,3 +52,5 @@ release/
 update_*.sh
 firebase-debug.log
 *-debug.log
+backend/node_modules/
+backend/.vercel/

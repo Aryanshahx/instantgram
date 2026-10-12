@@ -1,33 +1,175 @@
 rules_version = '2';
 
-// InstantGram Firestore security rules
-// Paste into: Firebase Console → Firestore Database → Rules → Publish
+// InstantGram Firestore security rules (v0.3.0)
+// Deploy:  firebase deploy --only firestore --project YOUR_PROJECT_ID
+// or paste into: Firebase Console -> Firestore Database -> Rules -> Publish
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // User profiles
-    match /users/{uid} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null
-        && request.auth.uid == uid
-        && request.resource.data.uid == uid;
-      // Owner can edit profile, but not change uid/username/email
-      allow update: if request.auth != null
-        && request.auth.uid == uid
-        && request.resource.data.uid == resource.data.uid
-        && request.resource.data.username == resource.data.username
-        && request.resource.data.email == resource.data.email;
-      allow delete: if false;
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function changed() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+    function delta(f) { return request.resource.data[f] - resource.data[f]; }
+    // Counter unchanged, or moved by exactly +1 / -1
+    function stepOk(f) {
+      return !changed().hasAny([f])
+        || (request.resource.data[f] is int && (delta(f) == 1 || delta(f) == -1));
     }
 
-    // Username reservations (keeps usernames unique, allows "login with username")
+    // ---------------- Users ----------------
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create: if signedIn() && me() == uid
+        && request.resource.data.uid == uid;
+      allow update: if signedIn() && (
+        // Owner edits profile. uid / username / email can't change.
+        (me() == uid
+          && changed().hasOnly(['name', 'bio', 'website', 'photoUrl', 'photoKey',
+                                'coverUrl', 'coverKey', 'postsCount',
+                                'followingCount', 'followersCount'])
+          && stepOk('postsCount') && stepOk('followingCount')
+          && stepOk('followersCount'))
+        ||
+        // Someone follows / unfollows: followersCount +-1 with matching doc
+        (changed().hasOnly(['followersCount']) && followOk(uid))
+      );
+      allow delete: if false;
+
+      function followOk(uid) {
+        let f = /databases/$(database)/documents/users/$(uid)/followers/$(request.auth.uid);
+        return (delta('followersCount') == 1 && existsAfter(f) && !exists(f))
+          || (delta('followersCount') == -1 && !existsAfter(f) && exists(f));
+      }
+
+      match /followers/{fid} {
+        allow read: if signedIn();
+        allow create, delete: if signedIn() && me() == fid;
+        allow update: if false;
+      }
+      match /following/{tid} {
+        allow read: if signedIn();
+        allow create, delete: if signedIn() && me() == uid;
+        allow update: if false;
+      }
+      match /reposts/{pid} {
+        allow read: if signedIn();
+        allow create, delete: if signedIn() && me() == uid;
+        allow update: if false;
+      }
+      match /saved/{pid} {
+        allow read, create, delete: if signedIn() && me() == uid;
+        allow update: if false;
+      }
+      match /notifications/{nid} {
+        allow read, delete: if signedIn() && me() == uid;
+        allow create: if signedIn() && uid != me()
+          && request.resource.data.fromUid == me()
+          && request.resource.data.type in ['like', 'comment', 'follow', 'repost'];
+        allow update: if signedIn() && me() == uid && changed().hasOnly(['read']);
+      }
+    }
+
+    // Username reservations (unique usernames + "login with username")
     match /usernames/{name} {
-      allow get: if true;      // lookup a single username
-      allow list: if false;    // no listing / scraping
-      allow create: if request.auth != null
-        && request.resource.data.uid == request.auth.uid
+      allow get: if true;
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.uid == me()
         && name.matches('^[a-z0-9._]{3,30}$');
       allow update, delete: if false;
+    }
+
+    // ---------------- Posts & clips ----------------
+    match /posts/{pid} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.authorId == me()
+        && request.resource.data.type in ['photo', 'clip']
+        && request.resource.data.mediaUrl is string
+        && request.resource.data.caption is string
+        && request.resource.data.caption.size() <= 2200
+        && request.resource.data.likesCount == 0
+        && request.resource.data.commentsCount == 0
+        && request.resource.data.repostsCount == 0
+        && request.resource.data.viewsCount == 0;
+      allow update: if signedIn() && (
+        (resource.data.authorId == me()
+          && changed().hasOnly(['caption', 'pinned', 'authorPhotoUrl']))
+        ||
+        (changed().hasOnly(['likesCount', 'commentsCount', 'repostsCount', 'viewsCount'])
+          && stepOk('likesCount') && stepOk('commentsCount')
+          && stepOk('repostsCount') && stepOk('viewsCount')
+          && likeOk() && repostOk())
+      );
+      allow delete: if signedIn() && resource.data.authorId == me();
+
+      // likesCount must match your like doc
+      function likeOk() {
+        let l = /databases/$(database)/documents/posts/$(pid)/likes/$(request.auth.uid);
+        return !changed().hasAny(['likesCount'])
+          || (delta('likesCount') == 1 && existsAfter(l) && !exists(l))
+          || (delta('likesCount') == -1 && !existsAfter(l) && exists(l));
+      }
+      // repostsCount must match your repost doc
+      function repostOk() {
+        let r = /databases/$(database)/documents/users/$(request.auth.uid)/reposts/$(pid);
+        return !changed().hasAny(['repostsCount'])
+          || (delta('repostsCount') == 1 && existsAfter(r) && !exists(r))
+          || (delta('repostsCount') == -1 && !existsAfter(r) && exists(r));
+      }
+
+      match /likes/{uid} {
+        allow read: if signedIn();
+        allow create, delete: if signedIn() && me() == uid;
+        allow update: if false;
+      }
+      match /comments/{cid} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.authorId == me()
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 1000;
+        // comment author or post owner can delete
+        allow delete: if signedIn() && (resource.data.authorId == me()
+          || get(/databases/$(database)/documents/posts/$(pid)).data.authorId == me());
+        allow update: if false;
+      }
+    }
+
+    // ---------------- Stories (24h) ----------------
+    match /stories/{sid} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.authorId == me();
+      allow delete: if signedIn() && resource.data.authorId == me();
+      allow update: if false;
+    }
+
+    // ---------------- Direct messages ----------------
+    // chat id = the two uids sorted and joined with "_"
+    match /chats/{cid} {
+      allow get: if signedIn() && me() in cid.split('_');
+      allow list: if signedIn() && me() in resource.data.members;
+      allow create: if signedIn()
+        && request.resource.data.members.size() == 2
+        && me() in request.resource.data.members
+        && cid == request.resource.data.members[0] + '_' + request.resource.data.members[1];
+      allow update: if signedIn()
+        && me() in resource.data.members
+        && request.resource.data.members == resource.data.members;
+      allow delete: if false;
+
+      match /messages/{mid} {
+        allow read: if signedIn() && me() in cid.split('_');
+        allow create: if signedIn() && me() in cid.split('_')
+          && request.resource.data.senderId == me()
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000;
+        allow update, delete: if false;
+      }
     }
   }
 }
