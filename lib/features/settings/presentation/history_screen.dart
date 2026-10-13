@@ -105,7 +105,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     final posts = snap.data!;
                     return PostGrid(
                       posts: posts,
-                      onTap: (i) => openPost(context, posts, i),
+                      onTap: (i) =>
+                          openPost(context, posts, i, source: ViewSource.other),
                       emptyIcon: Icons.history,
                       emptyTitle: 'No history yet',
                       emptySubtitle:

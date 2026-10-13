@@ -30,9 +30,7 @@ class NotificationRepository {
       'fromUsername': from.username,
       'fromPhotoUrl': from.photoUrl,
       'postId': post?.id ?? '',
-      'postThumb': post == null
-          ? ''
-          : (post.isClip ? post.thumbUrl : post.mediaUrl),
+      'postThumb': post?.coverUrl ?? '',
       'text': text.length > 120 ? '${text.substring(0, 120)}…' : text,
       'read': false,
       'createdAt': FieldValue.serverTimestamp(),

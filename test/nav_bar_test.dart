@@ -17,16 +17,16 @@ const _items = [
 ];
 
 Widget _bar(int index) => MaterialApp(
-      theme: ThemeData(fontFamily: 'Inter'),
-      home: Scaffold(
-        bottomNavigationBar: FloatingNavBar(
-          items: _items,
-          currentIndex: index,
-          onTap: (_) {},
-          onCreate: () {},
-        ),
-      ),
-    );
+  theme: ThemeData(fontFamily: 'Inter'),
+  home: Scaffold(
+    bottomNavigationBar: FloatingNavBar(
+      items: _items,
+      currentIndex: index,
+      onTap: (_) {},
+      onCreate: () {},
+    ),
+  ),
+);
 
 Future<void> _loadInter() async {
   final loader = FontLoader('Inter');
@@ -41,8 +41,9 @@ void main() {
   setUpAll(_loadInter);
   for (final width in [320.0, 360.0, 411.0]) {
     for (final index in [0, 1, 3, 4]) {
-      testWidgets('nav shows full "${_items[index].label}" at ${width}dp',
-          (tester) async {
+      testWidgets('nav shows full "${_items[index].label}" at ${width}dp', (
+        tester,
+      ) async {
         tester.view.physicalSize = Size(width * 3, 800 * 3);
         tester.view.devicePixelRatio = 3;
         addTearDown(tester.view.reset);
@@ -55,7 +56,10 @@ void main() {
         // Text must not be clipped: painted width == wanted width.
         final para = tester.renderObject<RenderParagraph>(label);
         expect(para.didExceedMaxLines, isFalse);
-        expect(para.size.width, greaterThanOrEqualTo(para.getMaxIntrinsicWidth(100) - 0.5));
+        expect(
+          para.size.width,
+          greaterThanOrEqualTo(para.getMaxIntrinsicWidth(100) - 0.5),
+        );
         expect(tester.takeException(), isNull);
       });
     }
@@ -63,7 +67,9 @@ void main() {
 
   test('friendly errors', () {
     expect(
-      friendlyError('[cloud_firestore/failed-precondition] The query requires an index'),
+      friendlyError(
+        '[cloud_firestore/failed-precondition] The query requires an index',
+      ),
       contains('setting up'),
     );
     expect(friendlyError('[x/permission-denied] nope'), contains('Permission'));

@@ -7,8 +7,15 @@ import '../../feed/presentation/widgets/post_card.dart';
 import '../data/post_repository.dart';
 
 class PostDetailScreen extends StatelessWidget {
-  const PostDetailScreen({super.key, required this.postId});
+  const PostDetailScreen({
+    super.key,
+    required this.postId,
+    this.source = ViewSource.other,
+  });
   final String postId;
+
+  /// Where it was opened from (for Analytics).
+  final String source;
 
   @override
   Widget build(BuildContext context) {
@@ -35,6 +42,7 @@ class PostDetailScreen extends StatelessWidget {
             children: [
               PostCard(
                 post: post,
+                source: source,
                 onDeleted: () => Navigator.of(context).maybePop(),
               ),
             ],

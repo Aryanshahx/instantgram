@@ -321,84 +321,99 @@ class _ProfileViewState extends State<ProfileView>
     final locked =
         !widget.isMe && !blocked && p.isPrivate && !f.isFollowing(p.uid);
     final hidden = blocked || locked;
-    return NestedScrollView(
-      headerSliverBuilder: (context, _) => [
-        SliverToBoxAdapter(
-          child: _Header(
-            profile: p,
-            isMe: widget.isMe,
-            onBack: widget.standalone
-                ? () => Navigator.of(context).maybePop()
-                : null,
-            onSettings: _openSettings,
-            onMore: _openUserMenu,
-            blocked: blocked,
-            onUnblock: _unblock,
-            onEdit: _editProfile,
-            onShare: () => shareProfile(p),
-            onDashboard: () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const DashboardScreen())),
-            onAddPhoto: _changePhoto,
-            onCoverTap: widget.isMe ? _changeCover : null,
-            onNewStory: () => startCompose(context, ComposeMode.story),
-            onPostsTap: () => _tabs.animateTo(0),
-            onFollowersTap: hidden ? null : () => _openList(true),
-            onFollowingTap: hidden ? null : () => _openList(false),
-          ),
-        ),
-        SliverPersistentHeader(
-          pinned: true,
-          delegate: _TabBarDelegate(
-            TabBar(
-              controller: _tabs,
-              indicatorColor: AppColors.lime,
-              indicatorWeight: 3,
-              indicatorSize: TabBarIndicatorSize.tab,
-              labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-              dividerColor: AppColors.border,
-              labelColor: AppColors.textPrimary,
-              unselectedLabelColor: AppColors.textSecondary,
-              labelStyle: const TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w700,
-                fontFamily: 'Inter',
+    return RefreshIndicator(
+      key: const ValueKey('profile-refresh'),
+      color: AppColors.lime,
+      backgroundColor: AppColors.surface,
+      // pull from the header or from the grid below it
+      notificationPredicate: (n) => n.metrics.axis == Axis.vertical,
+      onRefresh: _onRefresh,
+      child: NestedScrollView(
+        headerSliverBuilder: (context, _) => [
+          SliverToBoxAdapter(
+            child: _Header(
+              profile: p,
+              isMe: widget.isMe,
+              onBack: widget.standalone
+                  ? () => Navigator.of(context).maybePop()
+                  : null,
+              onSettings: _openSettings,
+              onMore: _openUserMenu,
+              blocked: blocked,
+              onUnblock: _unblock,
+              onEdit: _editProfile,
+              onShare: () => shareProfile(p),
+              onDashboard: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DashboardScreen()),
               ),
-              tabs: [
-                _tab(0, Icons.grid_view_rounded, 'Posts'),
-                _tab(1, Icons.smart_display, 'Clips'),
-                _tab(2, Icons.repeat, 'Reposts'),
-              ],
+              onAddPhoto: _changePhoto,
+              onCoverTap: widget.isMe ? _changeCover : null,
+              onNewStory: () => startCompose(context, ComposeMode.story),
+              onPostsTap: () => _tabs.animateTo(0),
+              onFollowersTap: hidden ? null : () => _openList(true),
+              onFollowingTap: hidden ? null : () => _openList(false),
             ),
           ),
-        ),
-      ],
-      body: hidden
-          ? _HiddenNotice(blocked: blocked, username: p.username)
-          : TabBarView(
-              controller: _tabs,
-              children: [
-                _StreamGrid(
-                  stream: _posts,
-                  emptyIcon: Icons.photo_camera_outlined,
-                  emptyTitle: 'No posts yet',
-                  emptySubtitle: widget.isMe
-                      ? 'Tap + to share your first photo.'
-                      : null,
-                  onCreate: widget.isMe ? () => showCreateSheet(context) : null,
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _TabBarDelegate(
+              TabBar(
+                controller: _tabs,
+                indicatorColor: AppColors.lime,
+                indicatorWeight: 3,
+                indicatorSize: TabBarIndicatorSize.tab,
+                labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+                dividerColor: AppColors.border,
+                labelColor: AppColors.textPrimary,
+                unselectedLabelColor: AppColors.textSecondary,
+                labelStyle: const TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                  fontFamily: 'Inter',
                 ),
-                _StreamGrid(
-                  stream: _clips,
-                  emptyIcon: Icons.smart_display_outlined,
-                  emptyTitle: 'No clips yet',
-                  emptySubtitle: widget.isMe
-                      ? 'Your short videos will appear here.'
-                      : null,
-                ),
-                _RepostsTab(ids: _reposts, isMe: widget.isMe),
-              ],
+                tabs: [
+                  _tab(0, Icons.grid_view_rounded, 'Posts'),
+                  _tab(1, Icons.smart_display, 'Clips'),
+                  _tab(2, Icons.repeat, 'Reposts'),
+                ],
+              ),
             ),
+          ),
+        ],
+        body: hidden
+            ? _HiddenNotice(blocked: blocked, username: p.username)
+            : TabBarView(
+                controller: _tabs,
+                children: [
+                  _StreamGrid(
+                    stream: _posts,
+                    emptyIcon: Icons.photo_camera_outlined,
+                    emptyTitle: 'No posts yet',
+                    emptySubtitle: widget.isMe
+                        ? 'Tap + to share your first photo.'
+                        : null,
+                    onCreate: widget.isMe
+                        ? () => showCreateSheet(context)
+                        : null,
+                  ),
+                  _StreamGrid(
+                    stream: _clips,
+                    emptyIcon: Icons.smart_display_outlined,
+                    emptyTitle: 'No clips yet',
+                    emptySubtitle: widget.isMe
+                        ? 'Your short videos will appear here.'
+                        : null,
+                  ),
+                  _RepostsTab(ids: _reposts, isMe: widget.isMe),
+                ],
+              ),
+      ),
     );
+  }
+
+  Future<void> _onRefresh() async {
+    setState(_initStreams);
+    await Future<void>.delayed(const Duration(milliseconds: 700));
   }
 
   Widget _tab(int i, IconData icon, String label) {

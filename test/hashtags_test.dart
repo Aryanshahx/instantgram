@@ -3,10 +3,10 @@ import 'package:instantgram/features/post/data/post_repository.dart';
 
 void main() {
   test('hashtags are found, lowercased and unique', () {
-    expect(
-      PostRepository.extractTags('Sunset at #Goa with #friends_2 #goa!'),
-      ['goa', 'friends_2'],
-    );
+    expect(PostRepository.extractTags('Sunset at #Goa with #friends_2 #goa!'), [
+      'goa',
+      'friends_2',
+    ]);
   });
 
   test('hindi and other languages work', () {

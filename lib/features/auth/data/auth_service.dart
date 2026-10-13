@@ -65,6 +65,7 @@ class AuthService {
     required String password,
     required DateTime birthDate,
     required String language,
+    String country = '',
   }) async {
     if (ageOn(birthDate, DateTime.now()) < kMinAge) {
       throw const AuthFailure('You must be at least $kMinAge years old.');
@@ -101,6 +102,7 @@ class AuthService {
       username: uname,
       email: email.trim(),
       language: language,
+      country: country.toUpperCase(),
     );
 
     try {

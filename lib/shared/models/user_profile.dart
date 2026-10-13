@@ -17,6 +17,7 @@ class UserProfile {
     this.followingCount = 0,
     this.language = '',
     this.isPrivate = false,
+    this.country = '',
   });
 
   final String uid;
@@ -39,6 +40,9 @@ class UserProfile {
   /// Private account: only approved followers see posts.
   final bool isPrivate;
 
+  /// Country code chosen at sign up, e.g. 'IN' ('' = not set).
+  final String country;
+
   String get displayName => name.trim().isEmpty ? username : name;
 
   factory UserProfile.fromMap(String uid, Map<String, dynamic> map) {
@@ -60,6 +64,7 @@ class UserProfile {
       followingCount: n(map['followingCount']),
       language: s(map['language']),
       isPrivate: map['isPrivate'] == true,
+      country: s(map['country']),
     );
   }
 
@@ -67,19 +72,20 @@ class UserProfile {
       UserProfile.fromMap(doc.id, doc.data() ?? const {});
 
   Map<String, dynamic> toNewUserMap() => {
-        'uid': uid,
-        'name': name,
-        'username': username,
-        'email': email,
-        'bio': bio,
-        'website': website,
-        'photoUrl': photoUrl,
-        'coverUrl': coverUrl,
-        'postsCount': 0,
-        'followersCount': 0,
-        'followingCount': 0,
-        if (language.isNotEmpty) 'language': language,
-        'isPrivate': false,
-        'createdAt': FieldValue.serverTimestamp(),
-      };
+    'uid': uid,
+    'name': name,
+    'username': username,
+    'email': email,
+    'bio': bio,
+    'website': website,
+    'photoUrl': photoUrl,
+    'coverUrl': coverUrl,
+    'postsCount': 0,
+    'followersCount': 0,
+    'followingCount': 0,
+    if (language.isNotEmpty) 'language': language,
+    if (country.isNotEmpty) 'country': country,
+    'isPrivate': false,
+    'createdAt': FieldValue.serverTimestamp(),
+  };
 }

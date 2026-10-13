@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/time_ago.dart';
 import '../models/post.dart';
+import '../../core/services/content_filter.dart';
+import '../../features/insights/owner_sheet.dart';
 import 'empty_state.dart';
 import 'net_image.dart';
 
-/// Background used for clips (no thumbnail yet).
+/// Cover image of a post / clip (gradient when there is no image).
 class ClipCover extends StatelessWidget {
   const ClipCover({super.key, required this.post, this.big = false});
   final Post post;
@@ -14,7 +16,7 @@ class ClipCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (post.thumbUrl.isNotEmpty) return NetImage(post.thumbUrl);
+    if (post.coverUrl.isNotEmpty) return NetImage(post.coverUrl);
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -59,26 +61,44 @@ class PostTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mine = post.authorId == ContentFilter.instance.uid;
     return GestureDetector(
       onTap: onTap,
+      // your own post: hold -> Analytics / Pin
+      onLongPress: mine ? () => showOwnerQuickSheet(context, post) : null,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          post.isClip ? ClipCover(post: post) : NetImage(post.mediaUrl),
+          ClipCover(post: post),
           if (post.pinned)
             const Positioned(
               top: 6,
               left: 6,
               child: Icon(Icons.push_pin, size: 18, color: Colors.white),
             ),
-          if (post.isMulti)
-            const Positioned(
+          if (post.isMulti || (!post.isClip && post.startsWithVideo))
+            Positioned(
               top: 6,
               right: 6,
-              child: Icon(Icons.collections_rounded,
-                  size: 18,
-                  color: Colors.white,
-                  shadows: [Shadow(blurRadius: 4, color: Colors.black54)]),
+              child: Icon(
+                post.isMulti
+                    ? Icons.collections_rounded
+                    : Icons.videocam_rounded,
+                size: 18,
+                color: Colors.white,
+                shadows: const [Shadow(blurRadius: 4, color: Colors.black54)],
+              ),
+            ),
+          if (post.hasMusic)
+            const Positioned(
+              top: 6,
+              right: 28,
+              child: Icon(
+                Icons.music_note,
+                size: 16,
+                color: Colors.white,
+                shadows: [Shadow(blurRadius: 4, color: Colors.black54)],
+              ),
             ),
           if (post.audience != Audience.everyone)
             Positioned(
@@ -99,8 +119,11 @@ class PostTile extends StatelessWidget {
               bottom: 6,
               child: Row(
                 children: [
-                  const Icon(Icons.play_arrow_rounded,
-                      size: 18, color: Colors.white),
+                  const Icon(
+                    Icons.play_arrow_rounded,
+                    size: 18,
+                    color: Colors.white,
+                  ),
                   Text(
                     compactCount(post.viewsCount),
                     style: const TextStyle(
@@ -140,7 +163,11 @@ class PostGrid extends StatelessWidget {
       return ListView(
         padding: const EdgeInsets.only(bottom: 110),
         children: [
-          EmptyState(icon: emptyIcon, title: emptyTitle, subtitle: emptySubtitle),
+          EmptyState(
+            icon: emptyIcon,
+            title: emptyTitle,
+            subtitle: emptySubtitle,
+          ),
         ],
       );
     }

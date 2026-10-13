@@ -34,7 +34,9 @@ Future<File> bakeFilter(File src, List<double>? m) async {
     final out = await compute(_bake, _Args(await src.readAsBytes(), m));
     if (out == null) return src;
     final dir = await Directory.systemTemp.createTemp('ig_bake');
-    final f = File('${dir.path}/cover_${DateTime.now().millisecondsSinceEpoch}.jpg');
+    final f = File(
+      '${dir.path}/cover_${DateTime.now().millisecondsSinceEpoch}.jpg',
+    );
     await f.writeAsBytes(out, flush: true);
     return f;
   } catch (_) {

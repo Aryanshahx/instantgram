@@ -89,12 +89,7 @@ class Avatar extends StatelessWidget {
     );
 
     if (ring) {
-      circle = MomentRing(
-        seen: seen,
-        width: ringW,
-        gap: gap,
-        child: circle,
-      );
+      circle = MomentRing(seen: seen, width: ringW, gap: gap, child: circle);
     }
 
     if (!showPlus) return circle;

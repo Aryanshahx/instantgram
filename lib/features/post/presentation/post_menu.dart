@@ -9,6 +9,7 @@ import '../../../shared/navigation.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
 import '../data/post_repository.dart';
+import '../../insights/post_insights_screen.dart';
 import 'report_sheet.dart';
 
 /// "..." menu for a post or clip.
@@ -54,6 +55,17 @@ Future<void> showPostMenu(
                   activeTrackColor: AppColors.lime,
                   onChanged: settings.setClipsAutoScroll,
                 ),
+              ),
+            // not on the Clips screen (no analytics there)
+            if (mine && !showAutoScroll)
+              ListTile(
+                key: const ValueKey('menu-analytics'),
+                leading: const Icon(Icons.insights_outlined),
+                title: const Text('Analytics'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  openPostInsights(context, post);
+                },
               ),
             if (mine)
               ListTile(

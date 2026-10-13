@@ -29,7 +29,8 @@ class InstantGramApp extends StatelessWidget {
           return MediaQuery(
             data: mq.copyWith(
               textScaler: TextScaler.linear(
-                  (system * s.textScale.value).clamp(0.8, 2.0)),
+                (system * s.textScale.value).clamp(0.8, 2.0),
+              ),
               disableAnimations: mq.disableAnimations || s.reduceMotion.value,
             ),
             child: child ?? const SizedBox.shrink(),

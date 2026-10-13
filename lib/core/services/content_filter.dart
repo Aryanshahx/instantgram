@@ -33,6 +33,7 @@ class ContentFilter {
       return '';
     }
   }
+
   Set<String> get following => _following;
   Set<String> get blocked => _blocked;
   bool isBlocked(String uid) => _blocked.contains(uid);
@@ -49,32 +50,29 @@ class ContentFilter {
     final db = FirebaseFirestore.instance;
     final user = db.collection('users').doc(uid);
     void onErr(Object _) {}
-    _subs.add(user.collection('following').limit(1000).snapshots().listen(
-      (s) {
+    _subs.add(
+      user.collection('following').limit(1000).snapshots().listen((s) {
         _following = s.docs.map((d) => d.id).toSet();
         _bump();
-      },
-      onError: onErr,
-    ));
-    _subs.add(user.collection('blocked').limit(1000).snapshots().listen(
-      (s) {
+      }, onError: onErr),
+    );
+    _subs.add(
+      user.collection('blocked').limit(1000).snapshots().listen((s) {
         _blocked = s.docs.map((d) => d.id).toSet();
         _bump();
-      },
-      onError: onErr,
-    ));
-    _subs.add(db
-        .collection('users')
-        .where('isPrivate', isEqualTo: true)
-        .limit(1000)
-        .snapshots()
-        .listen(
-      (s) {
-        _private = s.docs.map((d) => d.id).toSet();
-        _bump();
-      },
-      onError: onErr,
-    ));
+      }, onError: onErr),
+    );
+    _subs.add(
+      db
+          .collection('users')
+          .where('isPrivate', isEqualTo: true)
+          .limit(1000)
+          .snapshots()
+          .listen((s) {
+            _private = s.docs.map((d) => d.id).toSet();
+            _bump();
+          }, onError: onErr),
+    );
   }
 
   void stop() {
@@ -124,10 +122,7 @@ class ContentFilter {
   List<Post> filter(List<Post> list) => list.where(canSee).toList();
 
   /// Re-filters [source] whenever the lists change.
-  Stream<List<T>> watch<T>(
-    Stream<List<T>> source,
-    bool Function(T item) test,
-  ) {
+  Stream<List<T>> watch<T>(Stream<List<T>> source, bool Function(T item) test) {
     late StreamController<List<T>> ctrl;
     StreamSubscription<List<T>>? sub;
     List<T>? last;

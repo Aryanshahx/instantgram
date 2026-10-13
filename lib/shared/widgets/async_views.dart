@@ -9,15 +9,15 @@ class LoadingView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: EdgeInsets.all(padding),
-        child: const Center(
-          child: SizedBox(
-            width: 28,
-            height: 28,
-            child: CircularProgressIndicator(strokeWidth: 2.6),
-          ),
-        ),
-      );
+    padding: EdgeInsets.all(padding),
+    child: const Center(
+      child: SizedBox(
+        width: 28,
+        height: 28,
+        child: CircularProgressIndicator(strokeWidth: 2.6),
+      ),
+    ),
+  );
 }
 
 class ErrorView extends StatelessWidget {
@@ -26,20 +26,20 @@ class ErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.cloud_off, color: AppColors.textSecondary, size: 36),
-            const SizedBox(height: 12),
-            Text(
-              friendlyError(error),
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: AppColors.textSecondary),
-            ),
-          ],
+    padding: const EdgeInsets.all(32),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.cloud_off, color: AppColors.textSecondary, size: 36),
+        const SizedBox(height: 12),
+        Text(
+          friendlyError(error),
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: AppColors.textSecondary),
         ),
-      );
+      ],
+    ),
+  );
 }
 
 /// Shows a dialog with a progress bar while [task] runs.

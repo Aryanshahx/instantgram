@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
+import '../../../core/services/music_player.dart';
 import '../../../core/services/system_volume.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/errors.dart';
@@ -14,8 +17,8 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/async_views.dart';
 import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/media_view.dart';
 import '../../../shared/widgets/net_image.dart';
-import '../../editor/filters.dart';
 import '../../post/data/post_repository.dart';
 import '../../post/presentation/comments_sheet.dart';
 import '../../post/presentation/create_sheet.dart';
@@ -31,10 +34,18 @@ import '../../profile/data/user_repository.dart';
 ///  * hold = 2x speed, hold + move finger up/down = phone media volume
 ///  * swipe up = next clip (top bar hides), swipe down = previous (top bar shows)
 class ClipsScreen extends StatefulWidget {
-  const ClipsScreen({super.key, this.clips, this.initialIndex = 0});
+  const ClipsScreen({
+    super.key,
+    this.clips,
+    this.initialIndex = 0,
+    this.source,
+  });
 
   final List<Post>? clips;
   final int initialIndex;
+
+  /// Where the clips were opened from (Analytics). null = Clips tab.
+  final String? source;
 
   @override
   State<ClipsScreen> createState() => _ClipsScreenState();
@@ -140,6 +151,9 @@ class _ClipsScreenState extends State<ClipsScreen> {
           onVolumeChanged: _setVolume,
           onFinished: _next,
           onDeleted: () => setState(() => _deleted.add(clips[i].id)),
+          source:
+              widget.source ??
+              (widget.clips == null ? ViewSource.clips : ViewSource.other),
         ),
       ),
     );
@@ -240,9 +254,13 @@ class ClipPlayer extends StatefulWidget {
     this.onVolumeChanged,
     this.onFinished,
     this.onDeleted,
+    this.source = ViewSource.clips,
   });
 
   final Post clip;
+
+  /// Where it is watched (for Analytics).
+  final String source;
   final bool active;
   final bool muted;
   final double volume;
@@ -273,7 +291,9 @@ class _Optimistic {
 class _ClipPlayerState extends State<ClipPlayer>
     with SingleTickerProviderStateMixin {
   final _repo = PostRepository.instance;
-  late final VideoPlayerController _ctrl;
+
+  /// Player for the current item when it is a video (else null).
+  VideoPlayerController? _ctrl;
   late final Stream<Post?> _live = _repo.watch(widget.clip.id);
   late final Stream<bool> _likedStream = _repo.isLiked(widget.clip.id);
   late final Stream<bool> _repostedStream = _repo.isReposted(widget.clip.id);
@@ -281,11 +301,21 @@ class _ClipPlayerState extends State<ClipPlayer>
   final _like = _Optimistic();
   final _repost = _Optimistic();
   final _save = _Optimistic();
+  final PageController _itemPages = PageController();
+
+  /// Current photo / video inside this clip.
+  int _item = 0;
+  late final List<MediaItem> _items = widget.clip.items;
 
   bool _ready = false;
   bool _failed = false;
   bool _finishedSent = false;
   bool _detailsOpen = false;
+  Timer? _photoTimer;
+
+  // watch time of the current video (for the author's Analytics)
+  int _maxWatch = 0;
+  bool _completed = false;
 
   // hold gestures
   bool _fast = false; // 2x speed
@@ -299,97 +329,225 @@ class _ClipPlayerState extends State<ClipPlayer>
     duration: const Duration(milliseconds: 700),
   );
 
-  /// Player volume: the phone volume does the rest.
-  double get _effectiveVolume =>
-      (widget.muted || widget.clip.edits.muted) ? 0 : 1;
+  MediaItem get _cur => _items[_item.clamp(0, _items.length - 1)];
+  bool get _isVideo => _cur.isVideo;
+  String get _musicOwner => 'clip-${widget.clip.id}';
 
-  VideoEdits get _edits => widget.clip.edits;
+  /// Player volume: the phone volume does the rest.
+  /// Music replaces the video sound.
+  double get _effectiveVolume =>
+      (widget.muted || _edits.muted || widget.clip.hasMusic) ? 0 : 1;
+
+  VideoEdits get _edits => _cur.edits;
   int _startMs = 0;
   int _endMs = 0; // 0 = until the end
 
-  /// Manual loop when trimmed or auto scroll.
-  bool get _manualLoop => widget.autoScroll || _edits.hasTrim;
+  /// Manual loop when trimmed, auto scroll or more items follow.
+  bool get _manualLoop =>
+      widget.autoScroll || _edits.hasTrim || _items.length > 1;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = VideoPlayerController.networkUrl(Uri.parse(widget.clip.mediaUrl));
-    _ctrl.setLooping(!_manualLoop);
-    _ctrl.addListener(_onTick);
-    _ctrl.initialize().then((_) async {
-      if (!mounted) return;
-      final total = _ctrl.value.duration.inMilliseconds;
-      _startMs = _edits.trimStartMs.clamp(0, total);
-      _endMs = _edits.trimEndMs > _startMs ? _edits.trimEndMs.clamp(0, total) : 0;
-      if (_startMs > 0) await _ctrl.seekTo(Duration(milliseconds: _startMs));
-      if (!mounted) return;
-      setState(() => _ready = true);
-      _ctrl.setVolume(_effectiveVolume);
-      if (widget.active) _play();
-    }).catchError((Object _) {
-      if (mounted) setState(() => _failed = true);
-    });
+    _openItem();
+    if (widget.active) _startActive();
   }
 
-  int get _endOrTotal =>
-      _endMs > 0 ? _endMs : _ctrl.value.duration.inMilliseconds;
+  /// Prepares the current item (video player or photo).
+  void _openItem() {
+    _ready = false;
+    _failed = false;
+    _finishedSent = false;
+    _photoTimer?.cancel();
+    if (!_isVideo) {
+      _ready = true;
+      return;
+    }
+    if (kDisableVideoPlayback) return;
+    final c = VideoPlayerController.networkUrl(
+      Uri.parse(_cur.url),
+      videoPlayerOptions: VideoPlayerOptions(
+        mixWithOthers: widget.clip.hasMusic,
+      ),
+    );
+    _ctrl = c;
+    c.setLooping(!_manualLoop);
+    c.addListener(_onTick);
+    c
+        .initialize()
+        .then((_) async {
+          if (!mounted || _ctrl != c) return;
+          final total = c.value.duration.inMilliseconds;
+          _startMs = _edits.trimStartMs.clamp(0, total);
+          _endMs = _edits.trimEndMs > _startMs
+              ? _edits.trimEndMs.clamp(0, total)
+              : 0;
+          if (_startMs > 0) await c.seekTo(Duration(milliseconds: _startMs));
+          if (!mounted || _ctrl != c) return;
+          setState(() => _ready = true);
+          c.setVolume(_effectiveVolume);
+          if (widget.active) _play();
+        })
+        .catchError((Object _) {
+          if (mounted && _ctrl == c) setState(() => _failed = true);
+        });
+  }
+
+  /// Frees the current video player (and reports watch time).
+  void _closeItem() {
+    _photoTimer?.cancel();
+    final c = _ctrl;
+    _ctrl = null;
+    if (c != null) {
+      c.removeListener(_onTick);
+      c.dispose();
+    }
+    _sendWatch();
+  }
+
+  void _sendWatch() {
+    if (_maxWatch > 0 || _completed) {
+      _repo.reportWatch(widget.clip, watchMs: _maxWatch, completed: _completed);
+    }
+    _maxWatch = 0;
+    _completed = false;
+  }
+
+  void _goToItem(int i) {
+    if (i == _item || i < 0 || i >= _items.length) return;
+    setState(() {
+      _closeItem();
+      _item = i;
+      _openItem();
+    });
+    if (widget.active && !_isVideo) _startPhotoTimer();
+  }
+
+  /// Clip came on screen.
+  void _startActive() {
+    _repo.addView(widget.clip, source: widget.source);
+    if (widget.clip.hasMusic) {
+      MusicPlayer.instance.play(
+        _musicOwner,
+        widget.clip.audioUrl,
+        volume: widget.muted ? 0 : 1,
+      );
+    }
+    if (_isVideo) {
+      if (_ready) _play();
+    } else {
+      _startPhotoTimer();
+    }
+  }
+
+  /// Auto scroll: photos stay 5 seconds.
+  void _startPhotoTimer() {
+    _photoTimer?.cancel();
+    if (!widget.autoScroll) return;
+    _photoTimer = Timer(const Duration(seconds: 5), _itemFinished);
+  }
+
+  /// Current item ended (auto scroll): next item, or next clip.
+  void _itemFinished() {
+    if (!mounted || !widget.active) return;
+    if (_item < _items.length - 1) {
+      _itemPages.animateToPage(
+        _item + 1,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    } else if (widget.autoScroll) {
+      _finishedSent = true;
+      widget.onFinished?.call();
+    }
+  }
+
+  int get _endOrTotal {
+    final c = _ctrl;
+    if (c == null) return 0;
+    return _endMs > 0 ? _endMs : c.value.duration.inMilliseconds;
+  }
 
   void _play() {
-    final v = _ctrl.value;
+    final c = _ctrl;
+    if (c == null) return;
+    final v = c.value;
     final pos = v.position.inMilliseconds;
     if (v.duration > Duration.zero &&
         (pos >= _endOrTotal - 50 || pos < _startMs - 50)) {
-      _ctrl.seekTo(Duration(milliseconds: _startMs));
+      c.seekTo(Duration(milliseconds: _startMs));
     }
     _finishedSent = false;
-    _ctrl.play();
-    _repo.addView(widget.clip);
+    c.play();
   }
 
-  /// End of the (trimmed) clip: loop, or tell the screen (auto scroll).
+  /// End of the (trimmed) video: loop, next item, or next clip.
   void _onTick() {
-    if (!_manualLoop || !widget.active || _finishedSent) return;
-    final v = _ctrl.value;
+    final c = _ctrl;
+    if (c == null) return;
+    final v = c.value;
     if (!v.isInitialized || v.duration <= Duration.zero) return;
     final pos = v.position.inMilliseconds;
-    final atEnd = pos >= _endOrTotal - 120 ||
+    final watched = pos - _startMs;
+    if (watched > _maxWatch) _maxWatch = watched;
+    if (!_manualLoop || !widget.active || _finishedSent) return;
+    final atEnd =
+        pos >= _endOrTotal - 120 ||
         (!v.isPlaying && pos >= v.duration.inMilliseconds - 250);
     if (!atEnd) return;
-    if (widget.autoScroll) {
+    _completed = true;
+    final more = _item < _items.length - 1;
+    if (widget.autoScroll || more) {
       _finishedSent = true;
-      _ctrl.pause();
-      widget.onFinished?.call();
+      c.pause();
+      if (more) {
+        _itemPages.animateToPage(
+          _item + 1,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      } else {
+        widget.onFinished?.call();
+      }
     } else {
-      _ctrl.seekTo(Duration(milliseconds: _startMs));
-      if (!v.isPlaying) _ctrl.play();
+      c.seekTo(Duration(milliseconds: _startMs));
+      if (!v.isPlaying) c.play();
     }
   }
 
   @override
   void didUpdateWidget(covariant ClipPlayer old) {
     super.didUpdateWidget(old);
+    final c = _ctrl;
     if (widget.autoScroll != old.autoScroll) {
-      _ctrl.setLooping(!_manualLoop);
+      c?.setLooping(!_manualLoop);
       _finishedSent = false;
+      if (widget.active && !_isVideo) _startPhotoTimer();
     }
-    if (!_ready) return;
     if (widget.active != old.active) {
       if (widget.active) {
-        _play();
+        _startActive();
       } else {
-        _ctrl.pause();
-        _ctrl.setPlaybackSpeed(1);
+        _photoTimer?.cancel();
+        c?.pause();
+        c?.setPlaybackSpeed(1);
+        _sendWatch();
+        if (widget.clip.hasMusic) MusicPlayer.instance.stop(_musicOwner);
       }
     }
     if (widget.muted != old.muted) {
-      _ctrl.setVolume(_effectiveVolume);
+      c?.setVolume(_effectiveVolume);
+      if (widget.clip.hasMusic && widget.active) {
+        MusicPlayer.instance.setVolume(widget.muted ? 0 : 1);
+      }
     }
   }
 
   @override
   void dispose() {
-    _ctrl.removeListener(_onTick);
-    _ctrl.dispose();
+    _closeItem();
+    if (widget.clip.hasMusic) MusicPlayer.instance.stop(_musicOwner);
+    _itemPages.dispose();
     _heart.dispose();
     super.dispose();
   }
@@ -397,33 +555,35 @@ class _ClipPlayerState extends State<ClipPlayer>
   // ---------------- gestures ----------------
 
   void _togglePlay() {
-    if (!_ready) return;
-    setState(() => _ctrl.value.isPlaying ? _ctrl.pause() : _play());
+    final c = _ctrl;
+    if (!_ready || c == null) return;
+    setState(() => c.value.isPlaying ? c.pause() : _play());
   }
 
   void _holdStart(LongPressStartDetails d) {
-    if (!_ready) return;
+    final c = _ctrl;
     HapticFeedback.lightImpact();
-    _wasPlaying = _ctrl.value.isPlaying;
+    _wasPlaying = c?.value.isPlaying ?? false;
     _volumeAtStart = widget.volume;
     SystemVolume.instance.get().then((v) {
       if (!_volumeMode) _volumeAtStart = v;
     });
-    _ctrl.setPlaybackSpeed(2);
-    if (!_wasPlaying) _ctrl.play();
+    if (c != null && _ready) {
+      c.setPlaybackSpeed(2);
+      if (!_wasPlaying) c.play();
+    }
     setState(() {
-      _fast = true;
+      _fast = c != null && _ready;
       _volumeMode = false;
     });
   }
 
   void _holdMove(LongPressMoveUpdateDetails d) {
-    if (!_ready) return;
     final dy = d.offsetFromOrigin.dy;
     if (!_volumeMode) {
       if (dy.abs() < 18) return;
       // finger moved up/down -> volume mode (normal speed)
-      _ctrl.setPlaybackSpeed(1);
+      _ctrl?.setPlaybackSpeed(1);
       setState(() {
         _fast = false;
         _volumeMode = true;
@@ -435,9 +595,11 @@ class _ClipPlayerState extends State<ClipPlayer>
   }
 
   void _holdEnd() {
-    if (!_ready) return;
-    _ctrl.setPlaybackSpeed(1);
-    if (!_wasPlaying) _ctrl.pause();
+    final c = _ctrl;
+    if (c != null && _ready) {
+      c.setPlaybackSpeed(1);
+      if (!_wasPlaying) c.pause();
+    }
     setState(() {
       _fast = false;
       _volumeMode = false;
@@ -489,9 +651,9 @@ class _ClipPlayerState extends State<ClipPlayer>
             ),
             SizedBox(
               height: 3,
-              child: _ready
+              child: _ready && _ctrl != null
                   ? VideoProgressIndicator(
-                      _ctrl,
+                      _ctrl!,
                       allowScrubbing: true,
                       padding: EdgeInsets.zero,
                       colors: const VideoProgressColors(
@@ -526,22 +688,15 @@ class _ClipPlayerState extends State<ClipPlayer>
               onLongPressMoveUpdate: _holdMove,
               onLongPressEnd: (_) => _holdEnd(),
               onLongPressCancel: _holdEnd,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (!_ready) ClipCoverBackground(post: c),
-                  if (_ready)
-                    FittedBox(
-                      fit: BoxFit.cover,
-                      clipBehavior: Clip.hardEdge,
-                      child: SizedBox(
-                        width: _ctrl.value.size.width,
-                        height: _ctrl.value.size.height,
-                        child: applyMatrix(c.edits.filter, VideoPlayer(_ctrl)),
-                      ),
+              child: _items.length == 1
+                  ? _media(c, 0)
+                  : PageView.builder(
+                      key: const ValueKey('clip-items'),
+                      controller: _itemPages,
+                      itemCount: _items.length,
+                      onPageChanged: _goToItem,
+                      itemBuilder: (context, i) => _media(c, i),
                     ),
-                ],
-              ),
             ),
             // 2) things that never catch touches
             IgnorePointer(
@@ -578,8 +733,21 @@ class _ClipPlayerState extends State<ClipPlayer>
                       ),
                     ),
                   ),
-                  if (!_ready && !_failed)
+                  if (!_ready && !_failed && !kDisableVideoPlayback)
                     const Center(child: CircularProgressIndicator()),
+                  if (_items.length > 1) ...[
+                    Positioned(
+                      right: 12,
+                      top: MediaQuery.of(context).padding.top + 14,
+                      child: MediaPill(text: '${_item + 1}/${_items.length}'),
+                    ),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      top: MediaQuery.of(context).padding.top + 20,
+                      child: PageDots(count: _items.length, index: _item),
+                    ),
+                  ],
                   if (_failed)
                     const Center(
                       child: Text(
@@ -587,7 +755,10 @@ class _ClipPlayerState extends State<ClipPlayer>
                         style: TextStyle(color: AppColors.textSecondary),
                       ),
                     ),
-                  if (_ready && !_ctrl.value.isPlaying && !_fast)
+                  if (_ready &&
+                      _ctrl != null &&
+                      !_ctrl!.value.isPlaying &&
+                      !_fast)
                     Center(
                       child: Icon(
                         Icons.play_arrow_rounded,
@@ -603,9 +774,7 @@ class _ClipPlayerState extends State<ClipPlayer>
                       child: Center(child: _SpeedPill()),
                     ),
                   if (_volumeMode)
-                    Center(
-                      child: _VolumeHud(value: widget.volume),
-                    ),
+                    Center(child: _VolumeHud(value: widget.volume)),
                   Center(child: _HeartBurst(animation: _heart)),
                 ],
               ),
@@ -626,7 +795,7 @@ class _ClipPlayerState extends State<ClipPlayer>
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: () {
-                    _ctrl.pause();
+                    _ctrl?.pause();
                     openProfile(context, c.authorId);
                   },
                   child: Row(
@@ -640,16 +809,26 @@ class _ClipPlayerState extends State<ClipPlayer>
                       ),
                       const SizedBox(width: 10),
                       Flexible(
-                        child: Text(
-                          c.authorUsername,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            shadows: [
-                              Shadow(blurRadius: 6, color: Colors.black54),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              c.authorUsername,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                shadows: [
+                                  Shadow(blurRadius: 6, color: Colors.black54),
+                                ],
+                              ),
+                            ),
+                            if (c.hasMusic) ...[
+                              const SizedBox(height: 3),
+                              MusicChip(name: c.audioName),
                             ],
-                          ),
+                          ],
                         ),
                       ),
                     ],
@@ -660,6 +839,31 @@ class _ClipPlayerState extends State<ClipPlayer>
           ],
         );
       },
+    );
+  }
+
+  /// One photo or video of this clip.
+  Widget _media(Post c, int i) {
+    final m = _items[i];
+    if (!m.isVideo) return MediaPhoto(url: m.url);
+    final screen = MediaQuery.of(context).size;
+    final screenAspect =
+        screen.width / (screen.height <= 0 ? 1 : screen.height);
+    // fill the screen when the shape is close, else show it whole
+    final close = (m.aspectRatio - screenAspect).abs() / screenAspect < 0.2;
+    final fit = close ? BoxFit.cover : BoxFit.contain;
+    final ctrl = _ctrl;
+    if (i != _item || !_ready || ctrl == null) {
+      return ColoredBox(
+        color: Colors.black,
+        child: m.thumbUrl.isEmpty
+            ? (i == 0 ? ClipCoverBackground(post: c) : const SizedBox.expand())
+            : SizedBox.expand(child: NetImage(m.thumbUrl, fit: fit)),
+      );
+    }
+    return ColoredBox(
+      color: Colors.black,
+      child: videoSurface(ctrl, m.edits.filter, fit: fit),
     );
   }
 
@@ -674,8 +878,11 @@ class _ClipPlayerState extends State<ClipPlayer>
         _Action(
           icon: liked ? Icons.favorite : Icons.favorite_border,
           color: liked ? AppColors.like : Colors.white,
-          label: count(_like.count(c.likesCount, likedServer), c.hideLikes,
-              'Like'),
+          label: count(
+            _like.count(c.likesCount, likedServer),
+            c.hideLikes,
+            'Like',
+          ),
           onTap: () => _toggle(_like, !liked, () => _repo.setLiked(c, !liked)),
         ),
         _Action(
@@ -691,8 +898,11 @@ class _ClipPlayerState extends State<ClipPlayer>
             return _Action(
               icon: Icons.repeat,
               color: on ? AppColors.lime : Colors.white,
-              label: count(_repost.count(c.repostsCount, server),
-                  c.hideReposts, 'Repost'),
+              label: count(
+                _repost.count(c.repostsCount, server),
+                c.hideReposts,
+                'Repost',
+              ),
               onTap: () =>
                   _toggle(_repost, !on, () => _repo.setReposted(c, !on)),
             );
@@ -717,14 +927,25 @@ class _ClipPlayerState extends State<ClipPlayer>
               : count(c.sharesCount, c.hideShares, 'Share'),
           onTap: () => sharePost(c),
         ),
-        if (c.edits.muted)
+        if (c.hasMusic)
+          _Action(
+            icon: widget.muted ? Icons.music_off : Icons.music_note,
+            label: widget.muted ? 'Unmute' : 'Music',
+            onTap: widget.onToggleMute,
+          )
+        else if (c.items.every((m) => !m.isVideo))
+          const SizedBox.shrink()
+        else if (_edits.muted)
           _Action(
             icon: Icons.music_off_outlined,
             label: 'No sound',
             onTap: () => ScaffoldMessenger.of(context)
               ..hideCurrentSnackBar()
-              ..showSnackBar(const SnackBar(
-                  content: Text('This clip was posted without sound'))),
+              ..showSnackBar(
+                const SnackBar(
+                  content: Text('This clip was posted without sound'),
+                ),
+              ),
           )
         else
           _Action(
@@ -765,14 +986,18 @@ class _CaptionBar extends StatelessWidget {
     final re = RegExp(r'#[\p{L}\p{M}\p{N}_]+', unicode: true);
     var last = 0;
     for (final m in re.allMatches(text)) {
-      if (m.start > last) spans.add(TextSpan(text: text.substring(last, m.start)));
-      spans.add(TextSpan(
-        text: m.group(0),
-        style: const TextStyle(
-          color: AppColors.lime,
-          fontWeight: FontWeight.w600,
+      if (m.start > last) {
+        spans.add(TextSpan(text: text.substring(last, m.start)));
+      }
+      spans.add(
+        TextSpan(
+          text: m.group(0),
+          style: const TextStyle(
+            color: AppColors.lime,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-      ));
+      );
       last = m.end;
     }
     if (last < text.length) spans.add(TextSpan(text: text.substring(last)));
@@ -812,8 +1037,11 @@ class _CaptionBar extends StatelessWidget {
                                 ),
                               ),
                             ),
-                            const Icon(Icons.keyboard_arrow_down,
-                                size: 20, color: AppColors.textSecondary),
+                            const Icon(
+                              Icons.keyboard_arrow_down,
+                              size: 20,
+                              color: AppColors.textSecondary,
+                            ),
                           ],
                         ),
                         if (hasCaption) ...[
@@ -824,8 +1052,10 @@ class _CaptionBar extends StatelessWidget {
                           ),
                         ],
                         const SizedBox(height: 10),
-                        _detail(Icons.schedule,
-                            'Posted ${fullDate(post.createdAt)}'),
+                        _detail(
+                          Icons.schedule,
+                          'Posted ${fullDate(post.createdAt)}',
+                        ),
                       ],
                     ),
                   ),
@@ -866,21 +1096,18 @@ class _CaptionBar extends StatelessWidget {
   }
 
   Widget _detail(IconData icon, String text) => Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Row(
-          children: [
-            Icon(icon, size: 15, color: AppColors.textSecondary),
-            const SizedBox(width: 8),
-            Text(
-              text,
-              style: const TextStyle(
-                fontSize: 13,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ],
+    padding: const EdgeInsets.only(top: 4),
+    child: Row(
+      children: [
+        Icon(icon, size: 15, color: AppColors.textSecondary),
+        const SizedBox(width: 8),
+        Text(
+          text,
+          style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
         ),
-      );
+      ],
+    ),
+  );
 }
 
 class _SpeedPill extends StatelessWidget {
@@ -918,8 +1145,8 @@ class _VolumeHud extends StatelessWidget {
     final icon = value < 0.01
         ? Icons.volume_off
         : value < 0.5
-            ? Icons.volume_down
-            : Icons.volume_up;
+        ? Icons.volume_down
+        : Icons.volume_up;
     return Container(
       width: 64,
       padding: const EdgeInsets.symmetric(vertical: 14),
@@ -1010,7 +1237,10 @@ class ClipCoverBackground extends StatelessWidget {
     if (post.thumbUrl.isEmpty) return bg;
     return Stack(
       fit: StackFit.expand,
-      children: [bg, NetImage(post.thumbUrl, fit: BoxFit.cover)],
+      children: [
+        bg,
+        NetImage(post.thumbUrl, fit: BoxFit.cover),
+      ],
     );
   }
 }

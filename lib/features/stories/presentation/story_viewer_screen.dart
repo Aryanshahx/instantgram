@@ -34,12 +34,11 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
 
   late int _g = widget.initialGroup.clamp(0, widget.groups.length - 1);
   late int _s = _firstUnseen(widget.groups[_g]);
-  late final AnimationController _timer = AnimationController(
-    vsync: this,
-    duration: _photoTime,
-  )..addStatusListener((st) {
-      if (st == AnimationStatus.completed) _next();
-    });
+  late final AnimationController _timer =
+      AnimationController(vsync: this, duration: _photoTime)
+        ..addStatusListener((st) {
+          if (st == AnimationStatus.completed) _next();
+        });
 
   VideoPlayerController? _video;
   bool _videoReady = false;
@@ -164,12 +163,16 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
         title: const Text('Delete this moment?'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(d, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(d, false),
+            child: const Text('Cancel'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(d, true),
-              child: const Text('Delete',
-                  style: TextStyle(color: AppColors.like))),
+            onPressed: () => Navigator.pop(d, true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: AppColors.like),
+            ),
+          ),
         ],
       ),
     );
@@ -187,8 +190,10 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     final c = _video;
     if (_videoError) {
       return const Center(
-        child: Text('Could not play this moment',
-            style: TextStyle(color: Colors.white70)),
+        child: Text(
+          'Could not play this moment',
+          style: TextStyle(color: Colors.white70),
+        ),
       );
     }
     if (c == null || !_videoReady) {
@@ -252,23 +257,24 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                         for (var i = 0; i < _group.stories.length; i++)
                           Expanded(
                             child: Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 2,
+                              ),
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(2),
                                 child: AnimatedBuilder(
                                   animation: _timer,
                                   builder: (context, _) =>
                                       LinearProgressIndicator(
-                                    minHeight: 3,
-                                    value: i < _s
-                                        ? 1
-                                        : i == _s
+                                        minHeight: 3,
+                                        value: i < _s
+                                            ? 1
+                                            : i == _s
                                             ? _timer.value
                                             : 0,
-                                    backgroundColor: Colors.white24,
-                                    color: Colors.white,
-                                  ),
+                                        backgroundColor: Colors.white24,
+                                        color: Colors.white,
+                                      ),
                                 ),
                               ),
                             ),
@@ -306,8 +312,11 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                         ),
                         if (_story.isVideo && _story.edits.muted) ...[
                           const SizedBox(width: 6),
-                          const Icon(Icons.volume_off,
-                              size: 16, color: Colors.white70),
+                          const Icon(
+                            Icons.volume_off,
+                            size: 16,
+                            color: Colors.white70,
+                          ),
                         ],
                         const Spacer(),
                         if (mine)

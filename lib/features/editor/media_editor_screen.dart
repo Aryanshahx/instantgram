@@ -4,17 +4,18 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:image/image.dart' as img;
 import 'package:video_player/video_player.dart';
 
 import '../../core/services/media_service.dart';
+import '../../core/services/music_player.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/time_ago.dart';
 import '../post/presentation/create_post_screen.dart';
 import 'edit_models.dart';
 import 'filters.dart';
+import 'photo_render.dart';
 import 'video_frames.dart';
 
 /// Opens the editor for picked media, then the share screen.
@@ -78,6 +79,11 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
   bool _videoReady = false;
   String? _videoError;
 
+  /// Music from phone storage (posts and clips only).
+  PickedAudio? _audio;
+  bool _audioPlaying = false;
+  bool get _musicAllowed => widget.mode != ComposeMode.story;
+
   EditItem get _item => _items[_index];
 
   List<_Tool> get _tools => _item.isVideo
@@ -92,6 +98,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
 
   @override
   void dispose() {
+    MusicPlayer.instance.stop(_kPreview);
     _video?.dispose();
     for (final i in _items) {
       i.zoom?.dispose();
@@ -120,18 +127,21 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     if (item.natural != null) return;
     final stream = FileImage(item.file).resolve(ImageConfiguration.empty);
     late ImageStreamListener l;
-    l = ImageStreamListener((info, _) {
-      item.natural = Size(
-        info.image.width.toDouble(),
-        info.image.height.toDouble(),
-      );
-      stream.removeListener(l);
-      if (mounted) setState(() {});
-    }, onError: (e, _) {
-      stream.removeListener(l);
-      item.natural = const Size(1000, 1000);
-      if (mounted) setState(() {});
-    });
+    l = ImageStreamListener(
+      (info, _) {
+        item.natural = Size(
+          info.image.width.toDouble(),
+          info.image.height.toDouble(),
+        );
+        stream.removeListener(l);
+        if (mounted) setState(() {});
+      },
+      onError: (e, _) {
+        stream.removeListener(l);
+        item.natural = const Size(1000, 1000);
+        if (mounted) setState(() {});
+      },
+    );
     stream.addListener(l);
   }
 
@@ -146,11 +156,10 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
       item.videoAspect = c.value.aspectRatio > 0 ? c.value.aspectRatio : 9 / 16;
       final max = maxVideoMs(widget.mode);
       if (item.trimEnd == 0 || item.trimEnd > item.durationMs) {
-        item.trimEnd =
-            item.durationMs > max ? max : item.durationMs;
+        item.trimEnd = item.durationMs > max ? max : item.durationMs;
       }
       await c.setLooping(false);
-      await c.setVolume(item.muted ? 0 : 1);
+      await c.setVolume(item.muted || _audioPlaying ? 0 : 1);
       await c.seekTo(Duration(milliseconds: item.trimStart));
       c.addListener(_loop);
       setState(() => _videoReady = true);
@@ -203,6 +212,130 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     _openItem();
   }
 
+  // ---------------------------------------------------------------- music
+
+  static const String _kPreview = 'editor-preview';
+
+  Future<void> _pickMusic() async {
+    try {
+      final a = await MediaService.instance.pickAudio();
+      if (a == null || !mounted) return;
+      setState(() => _audio = a);
+      _playMusic(true);
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e is StateError ? e.message : 'Could not open music: $e';
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
+  void _playMusic(bool on) {
+    final a = _audio;
+    if (a == null) return;
+    setState(() => _audioPlaying = on);
+    if (on) {
+      MusicPlayer.instance.play(_kPreview, a.file.path);
+      _video?.setVolume(0); // music replaces the video sound
+    } else {
+      MusicPlayer.instance.stop(_kPreview);
+      _video?.setVolume(_item.muted ? 0 : 1);
+    }
+  }
+
+  void _removeMusic() {
+    MusicPlayer.instance.stop(_kPreview);
+    setState(() {
+      _audio = null;
+      _audioPlaying = false;
+    });
+    _video?.setVolume(_item.muted ? 0 : 1);
+  }
+
+  Widget _musicBar() {
+    final a = _audio;
+    if (a == null) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: ActionChip(
+            key: const ValueKey('editor-music'),
+            avatar: const Icon(
+              Icons.music_note,
+              size: 18,
+              color: AppColors.lime,
+            ),
+            label: const Text('Add music'),
+            labelStyle: const TextStyle(
+              fontFamily: AppTheme.fontFamily,
+              fontWeight: FontWeight.w700,
+            ),
+            backgroundColor: AppColors.surface,
+            side: const BorderSide(color: AppColors.border),
+            onPressed: _pickMusic,
+          ),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+      child: Container(
+        key: const ValueKey('editor-music-chip'),
+        padding: const EdgeInsets.only(left: 12),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.music_note, size: 18, color: AppColors.lime),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    a.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13.5,
+                    ),
+                  ),
+                  const Text(
+                    'Plays in a loop · replaces video sound',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: _audioPlaying ? 'Pause' : 'Play',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _playMusic(!_audioPlaying),
+              icon: Icon(_audioPlaying ? Icons.pause : Icons.play_arrow),
+            ),
+            IconButton(
+              key: const ValueKey('editor-music-remove'),
+              tooltip: 'Remove music',
+              visualDensity: VisualDensity.compact,
+              onPressed: _removeMusic,
+              icon: const Icon(Icons.close),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ---------------------------------------------------------------- export
 
   Future<void> _next() async {
@@ -215,51 +348,55 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
         if (item.isVideo) {
           File? preview;
           if (!kIsWeb) {
-            preview = await VideoFrames.file(item.file.path, item.trimStart,
-                maxWidth: 720, quality: 80);
+            preview = await VideoFrames.file(
+              item.file.path,
+              item.trimStart,
+              maxWidth: 720,
+              quality: 80,
+            );
           }
-          out.add(EditedMedia(
-            file: item.file,
-            isVideo: true,
-            aspectRatio: item.videoAspect,
-            edits: item.videoEdits,
-            durationMs: item.trimmedMs,
-            preview: preview,
-          ));
+          out.add(
+            EditedMedia(
+              file: item.file,
+              isVideo: true,
+              aspectRatio: item.videoAspect,
+              edits: item.videoEdits,
+              durationMs: item.trimmedMs,
+              preview: preview,
+            ),
+          );
           continue;
         }
         if (!item.photoEdited) {
           final n = item.natural ?? await _naturalOf(item);
-          out.add(EditedMedia(
-            file: item.file,
-            isVideo: false,
-            aspectRatio: n.width / n.height,
-          ));
+          out.add(
+            EditedMedia(
+              file: item.file,
+              isVideo: false,
+              aspectRatio: n.width / n.height,
+            ),
+          );
           continue;
         }
-        // show it, wait for paint, capture
-        if (_index != i) {
-          setState(() => _index = i);
-          await _openItem();
-        }
-        await _waitPainted(item);
-        out.add(await _capture(item, i));
+        out.add(await _renderEdited(item, i));
       }
       if (!mounted) return;
       if (widget.onDone != null) {
         widget.onDone!(out);
       } else {
+        _playMusic(false);
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (_) => CreatePostScreen(items: out, mode: widget.mode),
+            builder: (_) =>
+                CreatePostScreen(items: out, mode: widget.mode, audio: _audio),
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not prepare media: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not prepare media: $e')));
       }
     } finally {
       if (mounted) setState(() => _exporting = false);
@@ -270,55 +407,95 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     final c = Completer<Size>();
     final stream = FileImage(item.file).resolve(ImageConfiguration.empty);
     late ImageStreamListener l;
-    l = ImageStreamListener((info, _) {
-      if (!c.isCompleted) {
-        c.complete(Size(info.image.width.toDouble(),
-            info.image.height.toDouble()));
-      }
-      stream.removeListener(l);
-    }, onError: (e, _) {
-      if (!c.isCompleted) c.complete(const Size(1, 1));
-      stream.removeListener(l);
-    });
+    l = ImageStreamListener(
+      (info, _) {
+        if (!c.isCompleted) {
+          c.complete(
+            Size(info.image.width.toDouble(), info.image.height.toDouble()),
+          );
+        }
+        stream.removeListener(l);
+      },
+      onError: (e, _) {
+        if (!c.isCompleted) c.complete(const Size(1, 1));
+        stream.removeListener(l);
+      },
+    );
     stream.addListener(l);
-    final s = await c.future.timeout(const Duration(seconds: 10),
-        onTimeout: () => const Size(1, 1));
+    final s = await c.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => const Size(1, 1),
+    );
     item.natural ??= s;
     return s;
   }
 
-  Future<void> _waitPainted(EditItem item) async {
-    if (item.natural == null) await _naturalOf(item);
-    if (mounted) await precacheImage(FileImage(item.file), context);
-    for (var i = 0; i < 6; i++) {
-      await WidgetsBinding.instance.endOfFrame;
+  /// Draws the edited photo on a canvas (crop, zoom, rotate, flip,
+  /// filter, text) and saves it as a JPG.
+  Future<EditedMedia> _renderEdited(EditItem item, int i) async {
+    final natural = item.natural ?? await _naturalOf(item);
+    final aspect = _targetAspect(item);
+    final PhotoLayout layout;
+    Matrix4 transform;
+    final frame = item.frameSize, photo = item.photoSize;
+    if (frame != null && photo != null && item.zoom != null) {
+      layout = PhotoLayout(frame, photo);
+      transform = item.zoom!.value.clone();
+    } else {
+      // never shown on screen: centered at zoom 1
+      layout = PhotoLayout.compute(
+        natural: natural,
+        turns: item.turns,
+        aspect: aspect,
+        box: const Size(1000, 1000),
+      );
+      transform = layout.centered();
     }
-  }
-
-  Future<EditedMedia> _capture(EditItem item, int i) async {
-    final ctx = item.boundaryKey.currentContext;
-    final ro = ctx?.findRenderObject();
-    if (ro is! RenderRepaintBoundary) {
-      throw StateError('editor not ready');
+    final bytes = await item.file.readAsBytes();
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frameInfo = await codec.getNextFrame();
+    codec.dispose();
+    final src = frameInfo.image;
+    final targetW = widget.mode == ComposeMode.story ? 1080 : 1350;
+    final textScale = mounted
+        ? MediaQuery.textScalerOf(context).scale(100) / 100
+        : 1.0;
+    final ui.Image image;
+    try {
+      image = await renderPhoto(
+        src,
+        PhotoRenderSpec(
+          layout: layout,
+          transform: transform,
+          turns: item.turns,
+          flip: item.flip,
+          colorMatrix: item.color.isNone ? null : item.color.matrix,
+          texts: item.texts,
+          textScale: textScale,
+        ),
+        outWidth: targetW,
+      );
+    } finally {
+      src.dispose();
     }
-    final w = ro.size.width;
-    final h = ro.size.height;
-    final targetW = (widget.mode == ComposeMode.story ? 1080.0 : 1350.0)
-        .clamp(320.0, 1600.0);
-    final ratio = (targetW / w).clamp(1.0, 6.0);
-    final image = await ro.toImage(pixelRatio: ratio);
     final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
     final width = image.width, height = image.height;
     image.dispose();
+    if (data == null) throw StateError('Could not draw the photo');
     final jpg = await compute(
       _encodeJpg,
-      _Raw(data!.buffer.asUint8List(), width, height),
+      _Raw(data.buffer.asUint8List(), width, height),
     );
     final dir = await Directory.systemTemp.createTemp('ig_edit');
     final file = File(
-        '${dir.path}/edit_${DateTime.now().millisecondsSinceEpoch}_$i.jpg');
+      '${dir.path}/edit_${DateTime.now().millisecondsSinceEpoch}_$i.jpg',
+    );
     await file.writeAsBytes(jpg, flush: true);
-    return EditedMedia(file: file, isVideo: false, aspectRatio: w / h);
+    return EditedMedia(
+      file: file,
+      isVideo: false,
+      aspectRatio: layout.frame.width / layout.frame.height,
+    );
   }
 
   // ---------------------------------------------------------------- photo frame
@@ -328,8 +505,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     final na = item.turns.isOdd ? n.height / n.width : n.width / n.height;
     final r = item.aspect.ratio;
     if (r != null) return r;
-    if (widget.mode == ComposeMode.photo) return na.clamp(0.8, 1.91);
-    return na;
+    return na; // "Original" keeps the real shape (no crop)
   }
 
   Widget _photoCanvas(EditItem item) {
@@ -337,94 +513,99 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     if (n == null) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2.5));
     }
-    return LayoutBuilder(builder: (context, box) {
-      final a = _targetAspect(item);
-      final maxW = box.maxWidth - 24, maxH = box.maxHeight - 24;
-      double fw, fh;
-      if (maxW / maxH > a) {
-        fh = maxH;
-        fw = maxH * a;
-      } else {
-        fw = maxW;
-        fh = maxW / a;
-      }
-      final na = item.turns.isOdd ? n.height / n.width : n.width / n.height;
-      double cw, ch;
-      if (na > a) {
-        ch = fh;
-        cw = fh * na;
-      } else {
-        cw = fw;
-        ch = fw / na;
-      }
-      item.zoom ??= TransformationController(
-        Matrix4.translationValues(-(cw - fw) / 2, -(ch - fh) / 2, 0),
-      );
+    return LayoutBuilder(
+      builder: (context, box) {
+        final a = _targetAspect(item);
+        final maxW = box.maxWidth - 24, maxH = box.maxHeight - 24;
+        double fw, fh;
+        if (maxW / maxH > a) {
+          fh = maxH;
+          fw = maxH * a;
+        } else {
+          fw = maxW;
+          fh = maxW / a;
+        }
+        final na = item.turns.isOdd ? n.height / n.width : n.width / n.height;
+        double cw, ch;
+        if (na > a) {
+          ch = fh;
+          cw = fh * na;
+        } else {
+          cw = fw;
+          ch = fw / na;
+        }
+        item.zoom ??= TransformationController(
+          Matrix4.translationValues(-(cw - fw) / 2, -(ch - fh) / 2, 0),
+        );
+        // remembered for the export (same numbers as on screen)
+        item.frameSize = Size(fw, fh);
+        item.photoSize = Size(cw, ch);
 
-      final photo = SizedBox(
-        width: cw,
-        height: ch,
-        child: applyMatrix(
-          item.color.isNone ? null : item.color.matrix,
-          Transform(
-            alignment: Alignment.center,
-            transform: Matrix4.diagonal3Values(item.flip ? -1 : 1, 1, 1),
-            child: RotatedBox(
-              quarterTurns: item.turns % 4,
-              child: Image.file(
-                item.file,
-                fit: BoxFit.fill,
-                gaplessPlayback: true,
+        final photo = SizedBox(
+          width: cw,
+          height: ch,
+          child: applyMatrix(
+            item.color.isNone ? null : item.color.matrix,
+            Transform(
+              alignment: Alignment.center,
+              transform: Matrix4.diagonal3Values(item.flip ? -1 : 1, 1, 1),
+              child: RotatedBox(
+                quarterTurns: item.turns % 4,
+                child: Image.file(
+                  item.file,
+                  fit: BoxFit.fill,
+                  gaplessPlayback: true,
+                ),
               ),
             ),
           ),
-        ),
-      );
+        );
 
-      return Center(
-        child: SizedBox(
-          width: fw,
-          height: fh,
-          child: Stack(
-            children: [
-              RepaintBoundary(
-                key: item.boundaryKey,
-                child: ClipRect(
-                  child: ColoredBox(
-                    color: Colors.black,
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: InteractiveViewer(
-                            transformationController: item.zoom,
-                            constrained: false,
-                            minScale: 1,
-                            maxScale: 5,
-                            boundaryMargin: EdgeInsets.zero,
-                            onInteractionStart: (_) =>
-                                setState(() => _showGrid = true),
-                            onInteractionEnd: (_) => setState(() {
-                              _showGrid = false;
-                              item.zoomChanged = true;
-                            }),
-                            child: photo,
+        return Center(
+          child: SizedBox(
+            width: fw,
+            height: fh,
+            child: Stack(
+              children: [
+                RepaintBoundary(
+                  child: ClipRect(
+                    child: ColoredBox(
+                      color: Colors.black,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: InteractiveViewer(
+                              transformationController: item.zoom,
+                              constrained: false,
+                              minScale: 1,
+                              maxScale: 5,
+                              boundaryMargin: EdgeInsets.zero,
+                              onInteractionStart: (_) =>
+                                  setState(() => _showGrid = true),
+                              onInteractionEnd: (_) => setState(() {
+                                _showGrid = false;
+                                item.zoomChanged = true;
+                              }),
+                              child: photo,
+                            ),
                           ),
-                        ),
-                        for (final t in item.texts) _textLayer(item, t, fw, fh),
-                      ],
+                          for (final t in item.texts)
+                            _textLayer(item, t, fw, fh),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-              if (_showGrid || _tool == _Tool.crop)
-                const Positioned.fill(
-                  child: IgnorePointer(child: CustomPaint(painter: _Grid())),
-                ),
-            ],
+                if (_showGrid || _tool == _Tool.crop)
+                  const Positioned.fill(
+                    child: IgnorePointer(child: CustomPaint(painter: _Grid())),
+                  ),
+              ],
+            ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
   }
 
   Widget _textLayer(EditItem item, TextLayer t, double fw, double fh) {
@@ -461,7 +642,9 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
             child: t.background
                 ? Container(
                     padding: EdgeInsets.symmetric(
-                        horizontal: fs * 0.4, vertical: fs * 0.15),
+                      horizontal: fs * 0.4,
+                      vertical: fs * 0.15,
+                    ),
                     decoration: BoxDecoration(
                       color: t.color.computeLuminance() > 0.5
                           ? Colors.black87
@@ -495,12 +678,14 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
         return;
       }
       if (layer == null) {
-        item.texts.add(TextLayer(
-          text: res.text.trim(),
-          color: res.color,
-          size: res.size,
-          background: res.background,
-        ));
+        item.texts.add(
+          TextLayer(
+            text: res.text.trim(),
+            color: res.color,
+            size: res.size,
+            background: res.background,
+          ),
+        );
       } else {
         layer
           ..text = res.text.trim()
@@ -517,8 +702,10 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     final c = _video;
     if (_videoError != null) {
       return Center(
-        child: Text(_videoError!,
-            style: const TextStyle(color: AppColors.textSecondary)),
+        child: Text(
+          _videoError!,
+          style: const TextStyle(color: AppColors.textSecondary),
+        ),
       );
     }
     if (c == null || !_videoReady) {
@@ -547,9 +734,11 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                     builder: (context, v, _) => v.isPlaying
                         ? const SizedBox.shrink()
                         : Center(
-                            child: Icon(Icons.play_arrow_rounded,
-                                size: 72,
-                                color: Colors.white.withValues(alpha: 0.9)),
+                            child: Icon(
+                              Icons.play_arrow_rounded,
+                              size: 72,
+                              color: Colors.white.withValues(alpha: 0.9),
+                            ),
                           ),
                   ),
                   if (item.muted)
@@ -622,7 +811,8 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
         final p = kFilterPresets[i];
         final sel = item.color.preset == i;
         return GestureDetector(
-          onTap: () => setState(() => item.color = item.color.copyWith(preset: i)),
+          onTap: () =>
+              setState(() => item.color = item.color.copyWith(preset: i)),
           child: Column(
             children: [
               Text(
@@ -658,20 +848,20 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
   }
 
   double _adjustValue(ColorEdits c, _Adjust a) => switch (a) {
-        _Adjust.brightness => c.brightness,
-        _Adjust.contrast => c.contrast,
-        _Adjust.saturation => c.saturation,
-        _Adjust.warmth => c.warmth,
-        _Adjust.fade => c.fade,
-      };
+    _Adjust.brightness => c.brightness,
+    _Adjust.contrast => c.contrast,
+    _Adjust.saturation => c.saturation,
+    _Adjust.warmth => c.warmth,
+    _Adjust.fade => c.fade,
+  };
 
   ColorEdits _setAdjust(ColorEdits c, _Adjust a, double v) => switch (a) {
-        _Adjust.brightness => c.copyWith(brightness: v),
-        _Adjust.contrast => c.copyWith(contrast: v),
-        _Adjust.saturation => c.copyWith(saturation: v),
-        _Adjust.warmth => c.copyWith(warmth: v),
-        _Adjust.fade => c.copyWith(fade: v),
-      };
+    _Adjust.brightness => c.copyWith(brightness: v),
+    _Adjust.contrast => c.copyWith(contrast: v),
+    _Adjust.saturation => c.copyWith(saturation: v),
+    _Adjust.warmth => c.copyWith(warmth: v),
+    _Adjust.fade => c.copyWith(fade: v),
+  };
 
   Widget _adjustPanel() {
     final item = _item;
@@ -718,12 +908,14 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                   max: 1,
                   activeColor: AppColors.lime,
                   onChanged: (x) => setState(
-                      () => item.color = _setAdjust(item.color, _adjust, x)),
+                    () => item.color = _setAdjust(item.color, _adjust, x),
+                  ),
                 ),
               ),
               TextButton(
-                onPressed: () => setState(() =>
-                    item.color = ColorEdits(preset: item.color.preset)),
+                onPressed: () => setState(
+                  () => item.color = ColorEdits(preset: item.color.preset),
+                ),
                 child: const Text('Reset'),
               ),
             ],
@@ -793,8 +985,10 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
         ),
         const Padding(
           padding: EdgeInsets.only(top: 6),
-          child: Text('Pinch to zoom · drag to move',
-              style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          child: Text(
+            'Pinch to zoom · drag to move',
+            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          ),
         ),
       ],
     );
@@ -833,8 +1027,10 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     final item = _item;
     if (!_videoReady || item.durationMs <= 0) {
       return const Center(
-        child: Text('Loading video…',
-            style: TextStyle(color: AppColors.textSecondary)),
+        child: Text(
+          'Loading video…',
+          style: TextStyle(color: AppColors.textSecondary),
+        ),
       );
     }
     final max = maxVideoMs(widget.mode);
@@ -864,10 +1060,12 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                         for (var i = 0; i < 8; i++)
                           Expanded(
                             child: thumbs != null && thumbs[i] != null
-                                ? Image.memory(thumbs[i] as Uint8List,
+                                ? Image.memory(
+                                    thumbs[i] as Uint8List,
                                     fit: BoxFit.cover,
                                     height: 56,
-                                    gaplessPlayback: true)
+                                    gaplessPlayback: true,
+                                  )
                                 : Container(
                                     color: i.isEven
                                         ? const Color(0xFF1D2029)
@@ -884,8 +1082,9 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                     activeTrackColor: AppColors.lime.withValues(alpha: 0.18),
                     inactiveTrackColor: Colors.black.withValues(alpha: 0.55),
                     rangeTrackShape: const RectangularRangeSliderTrackShape(),
-                    rangeThumbShape:
-                        const RoundRangeSliderThumbShape(enabledThumbRadius: 9),
+                    rangeThumbShape: const RoundRangeSliderThumbShape(
+                      enabledThumbRadius: 9,
+                    ),
                     thumbColor: AppColors.lime,
                     overlayShape: SliderComponentShape.noOverlay,
                   ),
@@ -914,8 +1113,13 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                         item.trimStart = s.round();
                         item.trimEnd = e.round();
                       });
-                      _video?.seekTo(Duration(
-                          milliseconds: movedStart ? s.round() : (e - 800).round()));
+                      _video?.seekTo(
+                        Duration(
+                          milliseconds: movedStart
+                              ? s.round()
+                              : (e - 800).round(),
+                        ),
+                      );
                     },
                     onChangeEnd: (_) {
                       _video?.seekTo(Duration(milliseconds: item.trimStart));
@@ -929,20 +1133,25 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
           const SizedBox(height: 8),
           Row(
             children: [
-              Text(durationLabel(item.trimStart),
-                  style: const TextStyle(fontSize: 12)),
+              Text(
+                durationLabel(item.trimStart),
+                style: const TextStyle(fontSize: 12),
+              ),
               const Spacer(),
               Text(
                 'Length ${durationLabel(item.trimmedMs)}'
                 '  ·  max ${durationLabel(max)}',
                 style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.lime),
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.lime,
+                ),
               ),
               const Spacer(),
-              Text(durationLabel(end.round()),
-                  style: const TextStyle(fontSize: 12)),
+              Text(
+                durationLabel(end.round()),
+                style: const TextStyle(fontSize: 12),
+              ),
             ],
           ),
         ],
@@ -963,8 +1172,10 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
             item.muted ? Icons.volume_off : Icons.volume_up,
             color: AppColors.lime,
           ),
-          title: const Text('Original sound',
-              style: TextStyle(fontWeight: FontWeight.w700)),
+          title: const Text(
+            'Original sound',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
           subtitle: const Text('Turn off to post the video without sound'),
           onChanged: (on) {
             setState(() => item.muted = !on);
@@ -976,22 +1187,22 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
   }
 
   String _toolLabel(_Tool t) => switch (t) {
-        _Tool.filters => 'Filters',
-        _Tool.adjust => 'Adjust',
-        _Tool.crop => 'Crop',
-        _Tool.text => 'Text',
-        _Tool.trim => 'Trim',
-        _Tool.sound => 'Sound',
-      };
+    _Tool.filters => 'Filters',
+    _Tool.adjust => 'Adjust',
+    _Tool.crop => 'Crop',
+    _Tool.text => 'Text',
+    _Tool.trim => 'Trim',
+    _Tool.sound => 'Sound',
+  };
 
   IconData _toolIcon(_Tool t) => switch (t) {
-        _Tool.filters => Icons.auto_awesome,
-        _Tool.adjust => Icons.tune,
-        _Tool.crop => Icons.crop_rotate,
-        _Tool.text => Icons.text_fields,
-        _Tool.trim => Icons.content_cut,
-        _Tool.sound => Icons.music_note_outlined,
-      };
+    _Tool.filters => Icons.auto_awesome,
+    _Tool.adjust => Icons.tune,
+    _Tool.crop => Icons.crop_rotate,
+    _Tool.text => Icons.text_fields,
+    _Tool.trim => Icons.content_cut,
+    _Tool.sound => Icons.music_note_outlined,
+  };
 
   // ---------------------------------------------------------------- build
 
@@ -1026,7 +1237,9 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                               ? '$title  ${_index + 1}/${_items.length}'
                               : title,
                           style: const TextStyle(
-                              fontSize: 17, fontWeight: FontWeight.w800),
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                       FilledButton(
@@ -1046,6 +1259,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                     ],
                   ),
                 ),
+                if (_musicAllowed) _musicBar(),
                 Expanded(
                   child: item.isVideo ? _videoCanvas(item) : _photoCanvas(item),
                 ),
@@ -1254,8 +1468,11 @@ class _Chip extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon,
-                  size: 16, color: selected ? Colors.black : AppColors.lime),
+              Icon(
+                icon,
+                size: 16,
+                color: selected ? Colors.black : AppColors.lime,
+              ),
               const SizedBox(width: 6),
               Text(
                 label,
@@ -1449,11 +1666,13 @@ class _TextSheetState extends State<_TextSheet> {
             children: [
               if (widget.layer != null)
                 TextButton.icon(
-                  onPressed: () => Navigator.pop(
-                      context, const _TextResult(delete: true)),
+                  onPressed: () =>
+                      Navigator.pop(context, const _TextResult(delete: true)),
                   icon: const Icon(Icons.delete_outline, color: AppColors.like),
-                  label: const Text('Delete',
-                      style: TextStyle(color: AppColors.like)),
+                  label: const Text(
+                    'Delete',
+                    style: TextStyle(color: AppColors.like),
+                  ),
                 ),
               const Spacer(),
               FilledButton(

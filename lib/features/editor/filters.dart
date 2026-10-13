@@ -82,8 +82,28 @@ class ColorMatrix {
     return [s, 0, 0, 0, o, 0, s, 0, 0, o, 0, 0, s, 0, o, 0, 0, 0, 1, 0];
   }
 
-  static List<double> tint(double r, double g, double b) =>
-      [r, 0, 0, 0, 0, 0, g, 0, 0, 0, 0, 0, b, 0, 0, 0, 0, 0, 1, 0];
+  static List<double> tint(double r, double g, double b) => [
+    r,
+    0,
+    0,
+    0,
+    0,
+    0,
+    g,
+    0,
+    0,
+    0,
+    0,
+    0,
+    b,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+  ];
 
   static const List<double> sepia = [
     0.393, 0.769, 0.189, 0, 0, //
@@ -102,52 +122,59 @@ class FilterPreset {
 final List<FilterPreset> kFilterPresets = [
   const FilterPreset('Normal', ColorMatrix.identity),
   FilterPreset(
-      'Vivid',
-      ColorMatrix.chain(
-          [ColorMatrix.saturation(1.45), ColorMatrix.contrast(0.25)])),
+    'Vivid',
+    ColorMatrix.chain([
+      ColorMatrix.saturation(1.45),
+      ColorMatrix.contrast(0.25),
+    ]),
+  ),
   FilterPreset(
-      'Warm',
-      ColorMatrix.chain(
-          [ColorMatrix.warmth(0.8), ColorMatrix.saturation(1.1)])),
+    'Warm',
+    ColorMatrix.chain([ColorMatrix.warmth(0.8), ColorMatrix.saturation(1.1)]),
+  ),
   FilterPreset(
-      'Cool',
-      ColorMatrix.chain(
-          [ColorMatrix.warmth(-0.8), ColorMatrix.brightness(0.05)])),
+    'Cool',
+    ColorMatrix.chain([ColorMatrix.warmth(-0.8), ColorMatrix.brightness(0.05)]),
+  ),
   FilterPreset('Mono', ColorMatrix.saturation(0)),
   FilterPreset(
-      'Noir',
-      ColorMatrix.chain(
-          [ColorMatrix.saturation(0), ColorMatrix.contrast(0.6)])),
+    'Noir',
+    ColorMatrix.chain([ColorMatrix.saturation(0), ColorMatrix.contrast(0.6)]),
+  ),
   FilterPreset(
-      'Vintage',
-      ColorMatrix.chain([
-        ColorMatrix.sepia,
-        ColorMatrix.saturation(1.2),
-        ColorMatrix.fade(0.4),
-      ])),
+    'Vintage',
+    ColorMatrix.chain([
+      ColorMatrix.sepia,
+      ColorMatrix.saturation(1.2),
+      ColorMatrix.fade(0.4),
+    ]),
+  ),
   FilterPreset(
-      'Faded',
-      ColorMatrix.chain(
-          [ColorMatrix.fade(0.8), ColorMatrix.saturation(0.75)])),
+    'Faded',
+    ColorMatrix.chain([ColorMatrix.fade(0.8), ColorMatrix.saturation(0.75)]),
+  ),
   FilterPreset(
-      'Lime',
-      ColorMatrix.chain([
-        ColorMatrix.tint(0.95, 1.1, 0.85),
-        ColorMatrix.contrast(0.15),
-      ])),
+    'Lime',
+    ColorMatrix.chain([
+      ColorMatrix.tint(0.95, 1.1, 0.85),
+      ColorMatrix.contrast(0.15),
+    ]),
+  ),
   FilterPreset(
-      'Dusk',
-      ColorMatrix.chain([
-        ColorMatrix.tint(1.1, 0.9, 1.12),
-        ColorMatrix.fade(0.2),
-      ])),
+    'Dusk',
+    ColorMatrix.chain([
+      ColorMatrix.tint(1.1, 0.9, 1.12),
+      ColorMatrix.fade(0.2),
+    ]),
+  ),
   FilterPreset(
-      'Drama',
-      ColorMatrix.chain([
-        ColorMatrix.contrast(0.7),
-        ColorMatrix.saturation(0.8),
-        ColorMatrix.brightness(-0.08),
-      ])),
+    'Drama',
+    ColorMatrix.chain([
+      ColorMatrix.contrast(0.7),
+      ColorMatrix.saturation(0.8),
+      ColorMatrix.brightness(-0.08),
+    ]),
+  ),
   FilterPreset('Sepia', ColorMatrix.sepia),
 ];
 
@@ -184,15 +211,14 @@ class ColorEdits {
     double? saturation,
     double? warmth,
     double? fade,
-  }) =>
-      ColorEdits(
-        preset: preset ?? this.preset,
-        brightness: brightness ?? this.brightness,
-        contrast: contrast ?? this.contrast,
-        saturation: saturation ?? this.saturation,
-        warmth: warmth ?? this.warmth,
-        fade: fade ?? this.fade,
-      );
+  }) => ColorEdits(
+    preset: preset ?? this.preset,
+    brightness: brightness ?? this.brightness,
+    contrast: contrast ?? this.contrast,
+    saturation: saturation ?? this.saturation,
+    warmth: warmth ?? this.warmth,
+    fade: fade ?? this.fade,
+  );
 
   List<double> get matrix {
     final p = kFilterPresets[preset.clamp(0, kFilterPresets.length - 1)];

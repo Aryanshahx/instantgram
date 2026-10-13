@@ -64,15 +64,17 @@ class TextLayer {
 /// One picked photo/video and all its edits.
 class EditItem {
   EditItem(this.src, {required ComposeMode mode})
-      : aspect = mode == ComposeMode.story
-            ? CropAspect.story
-            : CropAspect.original;
+    : aspect = mode == ComposeMode.story
+          ? CropAspect.story
+          : CropAspect.original;
 
   final PickedMedia src;
   File get file => src.file;
   bool get isVideo => src.isVideo;
 
-  final GlobalKey boundaryKey = GlobalKey();
+  /// Crop frame + photo box as last shown on screen (for the export).
+  Size? frameSize;
+  Size? photoSize;
 
   // ---- photo + video
   ColorEdits color = const ColorEdits();
@@ -116,11 +118,11 @@ class EditItem {
       ((trimEnd > 0 ? trimEnd : durationMs) - trimStart).clamp(0, 1 << 30);
 
   VideoEdits get videoEdits => VideoEdits(
-        trimStartMs: trimStart,
-        trimEndMs: trimEnd > 0 && trimEnd < durationMs ? trimEnd : 0,
-        filter: color.matrixOrNull,
-        muted: muted,
-      );
+    trimStartMs: trimStart,
+    trimEndMs: trimEnd > 0 && trimEnd < durationMs ? trimEnd : 0,
+    filter: color.matrixOrNull,
+    muted: muted,
+  );
 }
 
 /// Result of the editor (ready to share).

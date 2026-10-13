@@ -11,7 +11,6 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/async_views.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/ig_text_field.dart';
-import '../../../shared/widgets/net_image.dart';
 import '../../../shared/widgets/post_grid.dart';
 import '../../../shared/widgets/user_tile.dart';
 import '../../post/data/post_repository.dart';
@@ -30,10 +29,11 @@ class ExploreScreen extends StatefulWidget {
 ///  * "#tag"     -> clips with that hashtag
 class _ExploreScreenState extends State<ExploreScreen> {
   final _searchCtrl = TextEditingController();
-  final Stream<List<Post>> _recent =
-      PostRepository.instance.recent(limit: 90);
-  final Stream<List<Post>> _recentClips =
-      PostRepository.instance.recent(type: Post.clip, limit: 100);
+  final Stream<List<Post>> _recent = PostRepository.instance.recent(limit: 90);
+  final Stream<List<Post>> _recentClips = PostRepository.instance.recent(
+    type: Post.clip,
+    limit: 100,
+  );
   Timer? _debounce;
   String _query = '';
   List<UserProfile> _people = const [];
@@ -102,18 +102,18 @@ class _ExploreScreenState extends State<ExploreScreen> {
   }
 
   Widget _grid(List<Post> posts) => SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        sliver: SliverMasonryGrid.count(
-          crossAxisCount: 2,
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
-          childCount: posts.length,
-          itemBuilder: (context, i) => _ExploreTile(
-            post: posts[i],
-            onTap: () => openPost(context, posts, i),
-          ),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 10),
+    sliver: SliverMasonryGrid.count(
+      crossAxisCount: 2,
+      mainAxisSpacing: 8,
+      crossAxisSpacing: 8,
+      childCount: posts.length,
+      itemBuilder: (context, i) => _ExploreTile(
+        post: posts[i],
+        onTap: () => openPost(context, posts, i, source: ViewSource.explore),
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -216,12 +216,12 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 6),
-        child: Text(
-          text,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-        ),
-      );
+    padding: const EdgeInsets.fromLTRB(20, 8, 20, 6),
+    child: Text(
+      text,
+      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+    ),
+  );
 }
 
 class _ExploreTile extends StatelessWidget {
@@ -232,7 +232,9 @@ class _ExploreTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ratio = post.isClip ? 0.62 : post.aspectRatio.clamp(0.56, 1.8);
+    final ratio = post.isClip
+        ? 0.62
+        : post.items.first.aspectRatio.clamp(0.56, 1.8);
     return GestureDetector(
       onTap: onTap,
       child: ClipRRect(
@@ -242,7 +244,7 @@ class _ExploreTile extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              if (post.isClip) ClipCover(post: post) else NetImage(post.mediaUrl),
+              ClipCover(post: post),
               const DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -262,8 +264,11 @@ class _ExploreTile extends StatelessWidget {
                 const Positioned(
                   right: 10,
                   top: 10,
-                  child: Icon(Icons.play_circle_fill,
-                      size: 22, color: Colors.white),
+                  child: Icon(
+                    Icons.play_circle_fill,
+                    size: 22,
+                    color: Colors.white,
+                  ),
                 ),
               Positioned(
                 left: 10,

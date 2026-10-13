@@ -143,7 +143,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         section: 'More info and support',
         icon: Icons.info_outline,
         title: 'About',
-        keywords: 'about version contact help support',
+        keywords: 'about version contact help support error log crash',
         onTap: (c) => _push(c, const AboutScreen()),
       ),
       _Item(
@@ -151,14 +151,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         icon: Icons.privacy_tip_outlined,
         title: 'Privacy policy',
         keywords: 'privacy data policy',
-        onTap: (c) => _push(c, const LegalScreen(privacy: true)),
+        onTap: (c) => openLink(c, AppInfo.privacyPolicyUrl),
       ),
       _Item(
         section: 'More info and support',
         icon: Icons.description_outlined,
         title: 'Terms of use',
         keywords: 'terms rules conditions',
-        onTap: (c) => _push(c, const LegalScreen(privacy: false)),
+        onTap: (c) => openLink(c, AppInfo.termsUrl),
       ),
       _Item(
         section: 'Login',

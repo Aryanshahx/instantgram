@@ -2,16 +2,21 @@
 class AppInfo {
   AppInfo._();
 
-  static const String version = '0.4.0';
+  static const String version = '0.5.0';
   static const String supportEmail = 'techlabs.hyper@gmail.com';
   static const String company = 'HyperTech Labs';
 
   /// GitHub repo used by "App update" (releases come from version tags).
   static const String githubRepo = 'Aryanshahx/instantgram';
-  static const String releasesPage =
-      'https://github.com/$githubRepo/releases';
+  static const String releasesPage = 'https://github.com/$githubRepo/releases';
   static const String latestReleaseApi =
       'https://api.github.com/repos/$githubRepo/releases/latest';
+
+  /// Legal pages (files in the GitHub repo).
+  static const String privacyPolicyUrl =
+      'https://github.com/$githubRepo/blob/main/privacypolicy.md';
+  static const String termsUrl =
+      'https://github.com/$githubRepo/blob/main/termsofuse.md';
 }
 
 /// "0.4.0" < "0.4.1"  (ignores a leading "v" and "+build")

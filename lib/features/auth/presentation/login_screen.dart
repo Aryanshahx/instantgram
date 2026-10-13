@@ -6,7 +6,7 @@ import '../../../shared/widgets/ig_buttons.dart';
 import '../../../shared/widgets/ig_logo.dart';
 import '../../../shared/widgets/ig_text_field.dart';
 import '../data/auth_service.dart';
-import 'signup_screen.dart';
+import 'choose_language_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -200,7 +200,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           label: 'Create an account',
                           onPressed: () => Navigator.of(context).push(
                             MaterialPageRoute(
-                              builder: (_) => const SignupScreen(),
+                              builder: (_) => const ChooseLanguageScreen(),
                             ),
                           ),
                         ),

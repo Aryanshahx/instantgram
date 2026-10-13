@@ -47,8 +47,7 @@ Future<bool> openEmail(
 Future<bool> openLink(BuildContext context, String url) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
   try {
-    if (await launchUrl(Uri.parse(url),
-        mode: LaunchMode.externalApplication)) {
+    if (await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication)) {
       return true;
     }
   } catch (_) {}

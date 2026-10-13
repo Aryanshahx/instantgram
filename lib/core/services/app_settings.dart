@@ -10,8 +10,11 @@ class HistoryEntry {
   final bool isClip;
   final DateTime at;
 
-  Map<String, dynamic> toJson() =>
-      {'id': postId, 'c': isClip, 't': at.millisecondsSinceEpoch};
+  Map<String, dynamic> toJson() => {
+    'id': postId,
+    'c': isClip,
+    't': at.millisecondsSinceEpoch,
+  };
 
   static HistoryEntry? fromJson(Object? j) {
     if (j is! Map) return null;
@@ -19,7 +22,10 @@ class HistoryEntry {
     final t = j['t'];
     if (id is! String || t is! int) return null;
     return HistoryEntry(
-        id, j['c'] == true, DateTime.fromMillisecondsSinceEpoch(t));
+      id,
+      j['c'] == true,
+      DateTime.fromMillisecondsSinceEpoch(t),
+    );
   }
 }
 
@@ -37,6 +43,10 @@ class AppSettings {
   static const _kUsage = 'usage_seconds';
   static const _kLimit = 'daily_limit_min';
   static const _kLimitShown = 'daily_limit_shown';
+  static const _kViewed = 'viewed_posts';
+  static const _kErrors = 'error_log';
+  static const maxViewed = 3000;
+  static const maxErrors = 30;
 
   static const maxHistory = 200;
   static const maxSeen = 600;
@@ -57,14 +67,25 @@ class AppSettings {
   final ValueNotifier<Set<String>> seenMoments = ValueNotifier(<String>{});
 
   /// Watched posts/clips (newest first).
-  final ValueNotifier<List<HistoryEntry>> history =
-      ValueNotifier(const <HistoryEntry>[]);
+  final ValueNotifier<List<HistoryEntry>> history = ValueNotifier(
+    const <HistoryEntry>[],
+  );
 
   /// Seconds used per day: {"2026-10-13": 812}
   final ValueNotifier<Map<String, int>> usage = ValueNotifier(const {});
 
   /// Daily reminder in minutes (0 = off).
   final ValueNotifier<int> dailyLimitMinutes = ValueNotifier(0);
+
+  /// Sound in Discover (videos + music). On by default, not saved.
+  final ValueNotifier<bool> feedMuted = ValueNotifier(false);
+
+  /// Posts this account already counted a view for (on this phone).
+  final List<String> _viewed = [];
+  final Set<String> _viewedSet = {};
+
+  /// Last app errors (newest first) — Settings → About → Error log.
+  final ValueNotifier<List<String>> errorLog = ValueNotifier(const <String>[]);
 
   String _limitShownDay = '';
 
@@ -86,6 +107,14 @@ class AppSettings {
       seenMoments.value = (p.getStringList(_kSeen) ?? const []).toSet();
       dailyLimitMinutes.value = p.getInt(_kLimit) ?? 0;
       _limitShownDay = p.getString(_kLimitShown) ?? '';
+      final viewed = p.getStringList(_kViewed) ?? const [];
+      _viewed
+        ..clear()
+        ..addAll(viewed);
+      _viewedSet
+        ..clear()
+        ..addAll(viewed);
+      errorLog.value = p.getStringList(_kErrors) ?? const [];
       final h = p.getString(_kHistory);
       if (h != null) {
         final list = (jsonDecode(h) as List)
@@ -142,10 +171,41 @@ class AppSettings {
   Future<void> markSeen(String momentId) async {
     if (seenMoments.value.contains(momentId)) return;
     final list = [...seenMoments.value, momentId];
-    final trimmed =
-        list.length > maxSeen ? list.sublist(list.length - maxSeen) : list;
+    final trimmed = list.length > maxSeen
+        ? list.sublist(list.length - maxSeen)
+        : list;
     seenMoments.value = trimmed.toSet();
     await (await _prefs())?.setStringList(_kSeen, trimmed);
+  }
+
+  // ---------------- Views (one per account) ----------------
+
+  bool hasViewed(String postId) => _viewedSet.contains(postId);
+
+  Future<void> markViewed(String postId) async {
+    if (!_viewedSet.add(postId)) return;
+    _viewed.add(postId);
+    while (_viewed.length > maxViewed) {
+      _viewedSet.remove(_viewed.removeAt(0));
+    }
+    await (await _prefs())?.setStringList(_kViewed, _viewed);
+  }
+
+  // ---------------- Error log ----------------
+
+  Future<void> logError(String text) async {
+    final t = text.length > 1500 ? '${text.substring(0, 1500)}…' : text;
+    final line = '${DateTime.now().toIso8601String().substring(0, 19)}  $t';
+    final list = [line, ...errorLog.value];
+    errorLog.value = list.length > maxErrors
+        ? list.sublist(0, maxErrors)
+        : list;
+    await (await _prefs())?.setStringList(_kErrors, errorLog.value);
+  }
+
+  Future<void> clearErrors() async {
+    errorLog.value = const [];
+    await (await _prefs())?.remove(_kErrors);
   }
 
   // ---------------- History ----------------
@@ -155,8 +215,9 @@ class AppSettings {
       HistoryEntry(postId, isClip, DateTime.now()),
       ...history.value.where((e) => e.postId != postId),
     ];
-    history.value =
-        list.length > maxHistory ? list.sublist(0, maxHistory) : list;
+    history.value = list.length > maxHistory
+        ? list.sublist(0, maxHistory)
+        : list;
     await _saveHistory();
   }
 

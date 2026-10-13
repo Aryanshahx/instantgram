@@ -118,15 +118,15 @@ class _IgTextFieldState extends State<IgTextField> {
                 ),
               )
             : (widget.trailing == null
-                ? null
-                : Padding(
-                    padding: EdgeInsets.only(right: compact ? 10 : 14),
-                    child: Icon(
-                      widget.trailing,
-                      size: compact ? 20 : 24,
-                      color: const Color(0xFFC9CBB8),
-                    ),
-                  )),
+                  ? null
+                  : Padding(
+                      padding: EdgeInsets.only(right: compact ? 10 : 14),
+                      child: Icon(
+                        widget.trailing,
+                        size: compact ? 20 : 24,
+                        color: const Color(0xFFC9CBB8),
+                      ),
+                    )),
         enabledBorder: _border(AppColors.border),
         focusedBorder: _border(AppColors.lime.withValues(alpha: 0.7)),
         errorBorder: _border(AppColors.like.withValues(alpha: 0.7)),

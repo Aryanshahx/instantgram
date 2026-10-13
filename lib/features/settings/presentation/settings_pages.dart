@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 import '../../../core/config/app_info.dart';
+import '../../../core/constants/countries.dart';
 import '../../../core/constants/languages.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/media_service.dart';
@@ -15,6 +16,7 @@ import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/user_profile.dart';
 import '../../../shared/widgets/async_views.dart';
 import '../../../shared/widgets/avatar.dart';
+import '../../../shared/widgets/country_picker.dart';
 import '../../../shared/widgets/ig_buttons.dart';
 import '../../../shared/widgets/ig_logo.dart';
 import '../../auth/data/auth_service.dart';
@@ -38,8 +40,24 @@ class AccountScreen extends StatefulWidget {
 
 class _AccountScreenState extends State<AccountScreen> {
   late final Future<String> _dob = UserRepository.instance.birthDate();
+  late String _country = widget.profile.country;
 
   UserProfile get p => widget.profile;
+
+  Future<void> _changeCountry() async {
+    final code = await showCountryPicker(context, current: _country);
+    if (code == null || code == _country || !mounted) return;
+    final old = _country;
+    setState(() => _country = code);
+    try {
+      await UserRepository.instance.setCountry(code);
+      if (mounted) _snack(context, 'Country updated');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _country = old);
+      _snack(context, friendlyError(e));
+    }
+  }
 
   Future<void> _resetPassword() async {
     try {
@@ -139,6 +157,16 @@ class _AccountScreenState extends State<AccountScreen> {
                       Clipboard.setData(ClipboardData(text: p.email));
                       _snack(context, 'Email copied');
                     },
+            ),
+            SettingsTile(
+              key: const ValueKey('account-country'),
+              icon: Icons.public,
+              title: 'Country',
+              subtitle: _country.isEmpty
+                  ? 'Not set · tap to choose'
+                  : '${flagOf(_country)}  '
+                        '${countryName(_country).isEmpty ? _country : countryName(_country)}',
+              onTap: _changeCountry,
             ),
             FutureBuilder<String>(
               future: _dob,
@@ -606,6 +634,22 @@ class AboutScreen extends StatelessWidget {
               subtitle: 'github.com/${AppInfo.githubRepo}',
               onTap: () => openLink(context, AppInfo.releasesPage),
             ),
+            ValueListenableBuilder<List<String>>(
+              valueListenable: AppSettings.instance.errorLog,
+              builder: (context, log, _) => SettingsTile(
+                key: const ValueKey('about-errors'),
+                icon: Icons.bug_report_outlined,
+                title: 'Error log',
+                subtitle: log.isEmpty
+                    ? 'No errors'
+                    : '${log.length} saved · send it to us if something breaks',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const ErrorLogScreen(),
+                  ),
+                ),
+              ),
+            ),
             SettingsTile(
               icon: Icons.article_outlined,
               title: 'Open-source licenses',
@@ -619,6 +663,102 @@ class AboutScreen extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+// ============================================================== Error log
+
+/// Errors saved on this phone (newest first). Copy or email them.
+class ErrorLogScreen extends StatelessWidget {
+  const ErrorLogScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = AppSettings.instance;
+    return ValueListenableBuilder<List<String>>(
+      valueListenable: settings.errorLog,
+      builder: (context, log, _) {
+        final text = log.join('\n\n');
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Error log'),
+            actions: [
+              if (log.isNotEmpty)
+                IconButton(
+                  tooltip: 'Clear',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: settings.clearErrors,
+                ),
+            ],
+          ),
+          body: log.isEmpty
+              ? const Center(
+                  child: Text(
+                    'No errors saved 🎉',
+                    style: TextStyle(color: AppColors.textSecondary),
+                  ),
+                )
+              : Column(
+                  children: [
+                    Expanded(
+                      child: ListView.separated(
+                        padding: const EdgeInsets.all(14),
+                        itemCount: log.length,
+                        separatorBuilder: (context, i) =>
+                            const Divider(color: AppColors.border),
+                        itemBuilder: (context, i) => SelectableText(
+                          log[i],
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ),
+                    SafeArea(
+                      top: false,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 6, 14, 10),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: IgOutlineButton(
+                                label: 'Copy',
+                                icon: Icons.copy,
+                                height: 44,
+                                onPressed: () {
+                                  Clipboard.setData(ClipboardData(text: text));
+                                  _snack(context, 'Error log copied');
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: IgPrimaryButton(
+                                label: 'Email us',
+                                icon: Icons.mail_outline,
+                                height: 44,
+                                onPressed: () => openEmail(
+                                  context,
+                                  to: AppInfo.supportEmail,
+                                  subject:
+                                      'InstantGram error log (v${AppInfo.version})',
+                                  body: text.length > 6000
+                                      ? text.substring(0, 6000)
+                                      : text,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+        );
+      },
     );
   }
 }

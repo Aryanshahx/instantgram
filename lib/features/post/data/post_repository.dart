@@ -61,7 +61,9 @@ class PostRepository {
     'commentsCount': 0,
     'repostsCount': 0,
     'viewsCount': 0,
+    'uniqueViews': 0,
     'sharesCount': 0,
+    'savesCount': 0,
     'pinned': false,
     'audience': o.audience,
     'hideLikes': o.hideLikes,
@@ -71,95 +73,119 @@ class PostRepository {
     'createdAt': FieldValue.serverTimestamp(),
   };
 
-  /// Photo post with 1-10 photos (first one is the cover).
-  Future<void> createPhotos({
-    required List<PhotoUpload> photos,
-    required String caption,
-    PostOptions options = const PostOptions(),
-    ValueChanged<double>? onProgress,
-  }) async {
-    if (photos.isEmpty) throw ArgumentError('No photos');
-    final me = await UserRepository.instance.me();
-    final items = <MediaItem>[];
-    final n = photos.length;
-    for (var i = 0; i < n; i++) {
-      final up = await MediaService.instance.upload(
-        photos[i].file,
-        kind: MediaKind.post,
-        onProgress: (v) => onProgress?.call((i + v) / n * 0.97),
-      );
-      items.add(
-        MediaItem(url: up.url, key: up.key, aspectRatio: photos[i].aspectRatio),
-      );
-    }
-    final ref = _posts.doc();
-    final batch = _db.batch();
-    batch.set(ref, {
-      ..._base(me, options, caption),
-      'type': Post.photo,
-      'mediaUrl': items.first.url,
-      'mediaKey': items.first.key,
-      'aspectRatio': items.first.aspectRatio,
-      'media': items.map((m) => m.toMap()).toList(),
-    });
-    batch.update(_db.collection('users').doc(me.uid), {
-      'postsCount': FieldValue.increment(1),
-    });
-    if (options.alsoMoment) {
-      StoryRepository.instance.addSharedToBatch(
-        batch,
-        me: me,
-        url: items.first.url,
-        isVideo: false,
-        postId: ref.id,
-        audience: options.audience,
-      );
-    }
-    await batch.commit();
-    onProgress?.call(1);
-  }
+  /// Most items one post / clip may have (Firestore rules allow 200).
+  static const int maxItems = 200;
 
-  /// Clip: one video (+ optional cover image).
-  Future<void> createClip({
-    required File video,
-    required double aspectRatio,
+  /// Creates a post or clip with any mix of photos and videos.
+  /// [cover] = clip cover chosen by the user (else the first video frame).
+  /// [audio] = music that plays in a loop.
+  Future<void> createPost({
+    required String type,
+    required List<PostUpload> items,
     required String caption,
-    File? thumb,
-    VideoEdits edits = const VideoEdits(),
-    int durationMs = 0,
+    File? cover,
+    PickedAudio? audio,
     PostOptions options = const PostOptions(),
     ValueChanged<double>? onProgress,
   }) async {
-    final me = await UserRepository.instance.me();
-    final media = await MediaService.instance.upload(
-      video,
-      kind: MediaKind.clip,
-      onProgress: (v) => onProgress?.call(v * (thumb == null ? 0.97 : 0.9)),
-    );
-    UploadedMedia? cover;
-    if (thumb != null) {
-      try {
-        cover = await MediaService.instance.upload(
-          thumb,
-          kind: MediaKind.thumb,
-          onProgress: (v) => onProgress?.call(0.9 + v * 0.07),
-        );
-      } catch (_) {
-        cover = null; // cover is optional
-      }
+    if (items.isEmpty) throw ArgumentError('Nothing to share');
+    if (items.length > maxItems) {
+      throw StateError('You can share up to $maxItems photos and videos');
     }
+    final me = await UserRepository.instance.me();
+
+    // ---- upload everything (progress by file size)
+    final jobs = <(File, MediaKind)>[];
+    for (final it in items) {
+      // the folder only depends on the file type, so this also works
+      // with older servers (videos -> clip, photos -> post)
+      jobs.add((it.file, it.isVideo ? MediaKind.clip : MediaKind.post));
+      final t = it.thumb;
+      if (it.isVideo && t != null) jobs.add((t, MediaKind.thumb));
+    }
+    if (cover != null) jobs.add((cover, MediaKind.thumb));
+    if (audio != null) jobs.add((audio.file, MediaKind.audio));
+    final sizes = <int>[];
+    for (final j in jobs) {
+      sizes.add(await j.$1.length().catchError((Object _) => 1));
+    }
+    final total = sizes.fold<int>(0, (a, b) => a + b).clamp(1, 1 << 62);
+    var done = 0;
+    final uploaded = <UploadedMedia?>[];
+    for (var i = 0; i < jobs.length; i++) {
+      final (file, kind) = jobs[i];
+      final base = done;
+      final optional = kind == MediaKind.thumb;
+      try {
+        uploaded.add(
+          await MediaService.instance.upload(
+            file,
+            kind: kind,
+            onProgress: (v) =>
+                onProgress?.call((base + sizes[i] * v) / total * 0.97),
+          ),
+        );
+      } catch (e) {
+        if (!optional) {
+          if (kind == MediaKind.audio) {
+            throw StateError('Could not upload the music ($e)');
+          }
+          rethrow;
+        }
+        uploaded.add(null); // a cover is optional
+      }
+      done += sizes[i];
+    }
+
+    // ---- build the media list
+    var u = 0;
+    final media = <MediaItem>[];
+    for (final it in items) {
+      final main = uploaded[u++]!;
+      UploadedMedia? thumb;
+      if (it.isVideo && it.thumb != null) thumb = uploaded[u++];
+      media.add(
+        MediaItem(
+          url: main.url,
+          key: main.key,
+          aspectRatio: safeAspect(it.aspectRatio),
+          isVideo: it.isVideo,
+          thumbUrl: thumb?.url ?? '',
+          thumbKey: thumb?.key ?? '',
+          durationMs: it.isVideo ? it.durationMs : 0,
+          edits: it.isVideo ? it.edits : const VideoEdits(),
+        ),
+      );
+    }
+    final coverUp = cover != null ? uploaded[u++] : null;
+    final audioUp = audio != null ? uploaded[u++] : null;
+
+    final first = media.first;
+    final firstItem = items.first;
+    // cover for grids: chosen cover, else the first item's image
+    final coverUrl = coverUp?.url ?? first.coverUrl;
+    final coverKey = coverUp?.key ?? (first.isVideo ? first.thumbKey : '');
+
     final ref = _posts.doc();
     final batch = _db.batch();
     batch.set(ref, {
       ..._base(me, options, caption),
-      'type': Post.clip,
-      'mediaUrl': media.url,
-      'mediaKey': media.key,
-      'aspectRatio': aspectRatio,
-      if (cover != null) 'thumbUrl': cover.url,
-      if (cover != null) 'thumbKey': cover.key,
-      if (durationMs > 0) 'durationMs': durationMs,
-      ...edits.toMap(),
+      'type': type,
+      'mediaUrl': first.url,
+      'mediaKey': first.key,
+      'aspectRatio': first.aspectRatio,
+      'media': media.map((m) => m.toMap()).toList(),
+      'itemCount': media.length,
+      if (coverUrl.isNotEmpty) 'thumbUrl': coverUrl,
+      if (coverKey.isNotEmpty) 'thumbKey': coverKey,
+      // older app versions read these for a clip's first video
+      if (first.isVideo && first.durationMs > 0) 'durationMs': first.durationMs,
+      if (first.isVideo) ...firstItem.edits.toMap(),
+      if (audioUp != null) ...{
+        'audioUrl': audioUp.url,
+        'audioKey': audioUp.key,
+        'audioName': audio!.name,
+      },
     });
     batch.update(_db.collection('users').doc(me.uid), {
       'postsCount': FieldValue.increment(1),
@@ -168,12 +194,12 @@ class PostRepository {
       StoryRepository.instance.addSharedToBatch(
         batch,
         me: me,
-        url: media.url,
-        isVideo: true,
+        url: first.url,
+        isVideo: first.isVideo,
         postId: ref.id,
         audience: options.audience,
-        edits: edits,
-        durationMs: durationMs,
+        edits: first.edits,
+        durationMs: first.durationMs,
       );
     }
     await batch.commit();
@@ -330,15 +356,33 @@ class PostRepository {
       .snapshots()
       .map((s) => s.exists);
 
-  Future<void> setSaved(Post post, bool save) {
+  /// Save / unsave (+ keeps savesCount in step for Analytics).
+  Future<void> setSaved(Post post, bool save) async {
     final ref = _db
         .collection('users')
         .doc(_me)
         .collection('saved')
         .doc(post.id);
-    return save
-        ? ref.set({'createdAt': FieldValue.serverTimestamp()})
-        : ref.delete();
+    final exists = (await ref.get()).exists;
+    if (exists == save) return;
+    final batch = _db.batch();
+    if (save) {
+      batch.set(ref, {'createdAt': FieldValue.serverTimestamp()});
+    } else {
+      batch.delete(ref);
+    }
+    batch.update(_posts.doc(post.id), {
+      'savesCount': FieldValue.increment(save ? 1 : -1),
+    });
+    try {
+      await batch.commit();
+    } on FirebaseException catch (e) {
+      if (e.code != 'permission-denied' && e.code != 'not-found') rethrow;
+      // old rules / deleted post: still save it for you
+      save
+          ? await ref.set({'createdAt': FieldValue.serverTimestamp()})
+          : await ref.delete();
+    }
   }
 
   Stream<bool> isReposted(String postId) => _db
@@ -427,17 +471,104 @@ class PostRepository {
   }
 
   // ---------------- Views ----------------
+  //
+  // One view doc per account: posts/{pid}/views/{uid}.
+  // viewsCount goes up only when that doc is created, and never for the
+  // author. The doc keeps simple facts for the author's Analytics
+  // (follower?, country, age range, language, where it was seen, watch time).
 
-  final Set<String> _viewed = {};
+  final Set<String> _sessionViewed = {};
+  final Map<String, int> _sentWatch = {};
+  String? _ageGroup;
 
-  /// Counts one view per app session (+ adds it to History).
-  Future<void> addView(Post post) async {
-    if (_viewed.contains(post.id)) return;
-    _viewed.add(post.id);
+  /// Counts a view (once per account) + adds it to History.
+  Future<void> addView(Post post, {String source = ViewSource.other}) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    if (!_sessionViewed.add(post.id)) return; // once per app run
     AppSettings.instance.addHistory(post.id, isClip: post.isClip);
+    if (post.authorId == uid) return; // your own views don't count
+    final ref = _posts.doc(post.id).collection('views').doc(uid);
     try {
-      await _posts.doc(post.id).update({'viewsCount': FieldValue.increment(1)});
+      var known = AppSettings.instance.hasViewed(post.id);
+      if (!known) known = (await ref.get()).exists;
+      if (known) {
+        AppSettings.instance.markViewed(post.id);
+        await ref.update({
+          'count': FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        return;
+      }
+      final batch = _db.batch();
+      batch.set(ref, {
+        ...await _viewerInfo(post.authorId),
+        'source': ViewSource.normalize(source),
+        'count': 1,
+        'watchMs': 0,
+        'completed': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      batch.update(_posts.doc(post.id), {
+        'uniqueViews': FieldValue.increment(1),
+      });
+      await batch.commit();
+      AppSettings.instance.markViewed(post.id);
+    } catch (e) {
+      debugPrint('addView failed: $e');
+    }
+  }
+
+  /// Saves how long a video was watched (only goes up).
+  Future<void> reportWatch(
+    Post post, {
+    required int watchMs,
+    required bool completed,
+  }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || post.authorId == uid || watchMs <= 0) return;
+    final ms = watchMs.clamp(0, 6 * 60 * 60 * 1000);
+    final prev = _sentWatch[post.id] ?? 0;
+    if (ms <= prev && !completed) return;
+    _sentWatch[post.id] = ms > prev ? ms : prev;
+    try {
+      await _posts.doc(post.id).collection('views').doc(uid).update({
+        'watchMs': ms > prev ? ms : prev,
+        if (completed) 'completed': true,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // no view doc yet (offline) -> skip
+    }
+  }
+
+  Future<Map<String, dynamic>> _viewerInfo(String authorId) async {
+    var country = '', language = '';
+    try {
+      final me = await UserRepository.instance.meCached();
+      country = me.country;
+      language = me.language;
     } catch (_) {}
+    if (_ageGroup == null) {
+      try {
+        final d = DateTime.tryParse(await UserRepository.instance.birthDate());
+        _ageGroup = d == null ? '' : ageGroupOf(ageOn(d, DateTime.now()));
+      } catch (_) {
+        _ageGroup = '';
+      }
+    }
+    return {
+      'follower': _filter.isFollowing(authorId),
+      if (country.isNotEmpty) 'country': country,
+      if (language.isNotEmpty) 'language': language,
+      if (_ageGroup!.isNotEmpty) 'ageGroup': _ageGroup,
+    };
+  }
+
+  /// Author only: every view doc of one post (for Analytics).
+  Future<List<Map<String, dynamic>>> viewDocs(String postId) async {
+    final s = await _posts.doc(postId).collection('views').limit(5000).get();
+    return s.docs.map((d) => d.data()).toList();
   }
 
   // ---------------- Shares ----------------
@@ -472,8 +603,65 @@ class PostOptions {
 }
 
 /// One edited photo ready to upload.
-class PhotoUpload {
-  const PhotoUpload(this.file, this.aspectRatio);
+/// One photo or video to upload.
+class PostUpload {
+  const PostUpload({
+    required this.file,
+    required this.isVideo,
+    required this.aspectRatio,
+    this.edits = const VideoEdits(),
+    this.durationMs = 0,
+    this.thumb,
+  });
+
   final File file;
+  final bool isVideo;
   final double aspectRatio;
+  final VideoEdits edits;
+  final int durationMs;
+
+  /// Video cover frame (already filtered).
+  final File? thumb;
 }
+
+/// Where a view came from (for Analytics).
+class ViewSource {
+  ViewSource._();
+  static const String feed = 'feed';
+  static const String clips = 'clips';
+  static const String profile = 'profile';
+  static const String explore = 'explore';
+  static const String other = 'other';
+
+  static const List<String> all = [feed, clips, profile, explore, other];
+
+  static String normalize(String s) => all.contains(s) ? s : other;
+
+  static String label(String s) => switch (s) {
+    feed => 'Discover',
+    clips => 'Clips',
+    profile => 'Profile',
+    explore => 'Explore and search',
+    _ => 'Other (shares, notifications)',
+  };
+}
+
+/// Age -> age range used in Analytics.
+String ageGroupOf(int age) {
+  if (age < 13) return '';
+  if (age < 18) return '13-17';
+  if (age < 25) return '18-24';
+  if (age < 35) return '25-34';
+  if (age < 45) return '35-44';
+  if (age < 55) return '45-54';
+  return '55+';
+}
+
+const List<String> kAgeGroups = [
+  '13-17',
+  '18-24',
+  '25-34',
+  '35-44',
+  '45-54',
+  '55+',
+];

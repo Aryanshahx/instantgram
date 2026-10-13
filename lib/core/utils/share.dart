@@ -10,8 +10,9 @@ Future<void> sharePost(Post post) async {
   final caption = post.caption.isEmpty ? '' : '"${post.caption}"\n';
   final res = await SharePlus.instance.share(
     ShareParams(
-      text: 'Check out this $what by @${post.authorUsername} on InstantGram\n'
-          '$caption${post.mediaUrl}',
+      text:
+          'Check out this $what by @${post.authorUsername} on InstantGram\n'
+          '$caption${post.coverUrl.isNotEmpty ? post.coverUrl : post.mediaUrl}',
     ),
   );
   if (res.status != ShareResultStatus.dismissed) {
@@ -22,7 +23,8 @@ Future<void> sharePost(Post post) async {
 Future<void> shareProfile(UserProfile user) {
   return SharePlus.instance.share(
     ShareParams(
-      text: 'Follow @${user.username} on InstantGram 📸'
+      text:
+          'Follow @${user.username} on InstantGram 📸'
           '${user.website.isNotEmpty ? '\n${user.website}' : ''}',
     ),
   );

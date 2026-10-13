@@ -5,12 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../core/services/media_service.dart';
+import '../../../core/services/music_player.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/errors.dart';
 import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/widgets/ig_buttons.dart';
+import '../../../shared/widgets/media_view.dart';
 import '../../editor/bake_filter.dart';
 import '../../editor/edit_models.dart';
 import '../../editor/filters.dart';
@@ -19,14 +21,23 @@ import '../../stories/data/story_repository.dart';
 import '../data/post_repository.dart';
 
 export '../../editor/edit_models.dart' show ComposeMode, EditedMedia;
+export '../../../shared/widgets/media_view.dart' show PageDots;
 
 /// Share screen (after the editor): big preview, caption, cover,
 /// audience, "also share to moment" and hidden counts.
 class CreatePostScreen extends StatefulWidget {
-  const CreatePostScreen({super.key, required this.items, required this.mode});
+  const CreatePostScreen({
+    super.key,
+    required this.items,
+    required this.mode,
+    this.audio,
+  });
 
   final List<EditedMedia> items;
   final ComposeMode mode;
+
+  /// Music picked in the editor (posts and clips).
+  final PickedAudio? audio;
 
   @override
   State<CreatePostScreen> createState() => _CreatePostScreenState();
@@ -55,8 +66,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   bool get _isClip => widget.mode == ComposeMode.clip;
   bool get _isStory => widget.mode == ComposeMode.story;
 
+  /// Clip whose first item is a video -> it gets a cover.
+  bool get _hasCover => _isClip && widget.items.first.isVideo;
+
+  /// One-video clip -> big cover preview (else a swipeable preview).
+  bool get _singleVideoClip => _hasCover && widget.items.length == 1;
+
+  bool _musicPlaying = false;
+  static const String _kMusic = 'share-preview';
+
   @override
   void dispose() {
+    MusicPlayer.instance.stop(_kMusic);
     _caption.dispose();
     _pages.dispose();
     super.dispose();
@@ -130,27 +151,33 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     try {
       final items = widget.items;
+      MusicPlayer.instance.stop(_kMusic);
       switch (widget.mode) {
         case ComposeMode.photo:
-          await PostRepository.instance.createPhotos(
-            photos: [for (final m in items) PhotoUpload(m.file, m.aspectRatio)],
-            caption: _caption.text,
-            options: _options,
-            onProgress: onProgress,
-          );
         case ComposeMode.clip:
-          final v = items.first;
-          var thumb = _cover;
-          if (thumb == null && v.preview != null) {
-            thumb = await bakeFilter(v.preview!, v.edits.filter);
+          final uploads = <PostUpload>[];
+          for (final m in items) {
+            File? thumb;
+            if (m.isVideo && m.preview != null) {
+              thumb = await bakeFilter(m.preview!, m.edits.filter);
+            }
+            uploads.add(
+              PostUpload(
+                file: m.file,
+                isVideo: m.isVideo,
+                aspectRatio: m.aspectRatio,
+                edits: m.edits,
+                durationMs: m.durationMs,
+                thumb: thumb,
+              ),
+            );
           }
-          await PostRepository.instance.createClip(
-            video: v.file,
-            aspectRatio: v.aspectRatio,
+          await PostRepository.instance.createPost(
+            type: _isClip ? Post.clip : Post.photo,
+            items: uploads,
             caption: _caption.text,
-            thumb: thumb,
-            edits: v.edits,
-            durationMs: v.durationMs,
+            cover: _hasCover ? _cover : null,
+            audio: widget.audio,
             options: _options,
             onProgress: onProgress,
           );
@@ -267,7 +294,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         Positioned(
           left: 10,
           bottom: 10,
-          child: _Pill(
+          child: MediaPill(
             icon: m.edits.muted ? Icons.volume_off : Icons.videocam,
             text: durationLabel(m.durationMs),
           ),
@@ -278,7 +305,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   Widget _preview(double height) {
     final items = widget.items;
-    if (_isClip) {
+    if (_singleVideoClip) {
       final v = items.first;
       final Widget img;
       if (_cover != null) {
@@ -313,7 +340,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   Positioned(
                     left: 10,
                     top: 10,
-                    child: _Pill(
+                    child: MediaPill(
                       icon: Icons.image_outlined,
                       text: _cover == null
                           ? 'Cover'
@@ -325,7 +352,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   Positioned(
                     right: 10,
                     top: 10,
-                    child: _Pill(
+                    child: MediaPill(
                       icon: v.edits.muted ? Icons.volume_off : Icons.videocam,
                       text: durationLabel(v.durationMs),
                     ),
@@ -361,7 +388,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             Positioned(
               right: 28,
               top: 12,
-              child: _Pill(text: '${_page + 1}/${items.length}'),
+              child: MediaPill(text: '${_page + 1}/${items.length}'),
             ),
             Positioned(
               left: 0,
@@ -371,6 +398,45 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _musicRow(PickedAudio a) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Container(
+        key: const ValueKey('share-music'),
+        padding: const EdgeInsets.only(left: 12),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.music_note, color: AppColors.lime, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                a.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            IconButton(
+              tooltip: _musicPlaying ? 'Pause' : 'Play',
+              onPressed: () {
+                setState(() => _musicPlaying = !_musicPlaying);
+                _musicPlaying
+                    ? MusicPlayer.instance.play(_kMusic, a.file.path)
+                    : MusicPlayer.instance.stop(_kMusic);
+              },
+              icon: Icon(_musicPlaying ? Icons.pause : Icons.play_arrow),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -441,7 +507,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 padding: const EdgeInsets.only(top: 4, bottom: 16),
                 children: [
                   _preview(previewH),
-                  if (_isClip) ...[
+                  if (widget.audio != null) _musicRow(widget.audio!),
+                  if (_hasCover) ...[
                     const SizedBox(height: 10),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -760,68 +827,6 @@ class _CoverPickerScreenState extends State<CoverPickerScreen> {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// Small dark pill label.
-class _Pill extends StatelessWidget {
-  const _Pill({required this.text, this.icon});
-  final String text;
-  final IconData? icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 14, color: Colors.white),
-            const SizedBox(width: 4),
-          ],
-          Text(
-            text,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Carousel dots.
-class PageDots extends StatelessWidget {
-  const PageDots({super.key, required this.count, required this.index});
-  final int count;
-  final int index;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        for (var i = 0; i < count; i++)
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            margin: const EdgeInsets.symmetric(horizontal: 2.5),
-            width: i == index ? 16 : 6,
-            height: 6,
-            decoration: BoxDecoration(
-              color: i == index ? AppColors.lime : Colors.white54,
-              borderRadius: BorderRadius.circular(3),
-            ),
-          ),
-      ],
     );
   }
 }

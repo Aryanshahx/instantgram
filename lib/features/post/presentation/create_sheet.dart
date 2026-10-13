@@ -34,13 +34,13 @@ Future<void> showCreateSheet(BuildContext context) {
               _CreateOption(
                 icon: Icons.grid_view_rounded,
                 title: 'Post',
-                subtitle: 'Share up to 10 photos on your profile',
+                subtitle: 'Photos and videos on your profile',
                 onTap: () => start(ComposeMode.photo),
               ),
               _CreateOption(
                 icon: Icons.smart_display_outlined,
                 title: 'Clip',
-                subtitle: 'Share a short video (up to 90s)',
+                subtitle: 'Short videos and photos, full screen',
                 onTap: () => start(ComposeMode.clip),
               ),
               _CreateOption(
@@ -58,32 +58,11 @@ Future<void> showCreateSheet(BuildContext context) {
 }
 
 /// Pick media -> editor -> share screen.
+/// Posts and clips can mix photos and videos (no limit).
 Future<void> startCompose(BuildContext context, ComposeMode mode) async {
-  final kind = switch (mode) {
-    ComposeMode.photo => PickKind.photos,
-    ComposeMode.clip => PickKind.video,
-    ComposeMode.story => PickKind.mixed,
-  };
-  var media = await MediaService.instance.pickForCreate(context, kind);
+  final kind = mode == ComposeMode.story ? PickKind.moment : PickKind.mixed;
+  final media = await MediaService.instance.pickForCreate(context, kind);
   if (media.isEmpty || !context.mounted) return;
-  // posts = photos only, clips = one video only
-  if (mode == ComposeMode.photo) {
-    media = media.where((m) => !m.isVideo).toList();
-  } else if (mode == ComposeMode.clip) {
-    media = media.where((m) => m.isVideo).take(1).toList();
-  }
-  if (media.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          mode == ComposeMode.clip
-              ? 'Clips need a video'
-              : 'Posts need photos (use Clip for videos)',
-        ),
-      ),
-    );
-    return;
-  }
   await openEditor(context, media, mode);
 }
 

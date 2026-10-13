@@ -12,6 +12,10 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys();
     }
     function delta(f) { return request.resource.data[f] - resource.data[f]; }
+    // same, but a missing old value counts as 0 (fields added in v0.5.0)
+    function delta0(f) {
+      return request.resource.data.get(f, 0) - resource.data.get(f, 0);
+    }
     // Counter unchanged, or moved by exactly +1 / -1
     function stepOk(f) {
       return !changed().hasAny([f])
@@ -31,21 +35,27 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if signedIn();
       allow create: if signedIn() && me() == uid
-        && request.resource.data.uid == uid;
+        && request.resource.data.uid == uid
+        && (!('country' in request.resource.data)
+            || (request.resource.data.country is string
+                && request.resource.data.country.size() <= 3));
       allow update: if signedIn() && (
         // Owner edits profile. uid / username / email can't change.
         (me() == uid
           && changed().hasOnly(['name', 'bio', 'website', 'photoUrl', 'photoKey',
                                 'coverUrl', 'coverKey', 'postsCount',
                                 'followingCount', 'followersCount',
-                                'language', 'isPrivate'])
+                                'language', 'isPrivate', 'country'])
           && stepOk('postsCount') && stepOk('followingCount')
           && stepOk('followersCount')
           && (!changed().hasAny(['isPrivate'])
               || request.resource.data.isPrivate is bool)
           && (!changed().hasAny(['language'])
               || (request.resource.data.language is string
-                  && request.resource.data.language.size() <= 8)))
+                  && request.resource.data.language.size() <= 8))
+          && (!changed().hasAny(['country'])
+              || (request.resource.data.country is string
+                  && request.resource.data.country.size() <= 3)))
         ||
         // Someone follows / unfollows: followersCount +-1 with matching doc
         (changed().hasOnly(['followersCount']) && followOk(uid))
@@ -152,6 +162,8 @@ service cloud.firestore {
         && request.resource.data.commentsCount == 0
         && request.resource.data.repostsCount == 0
         && request.resource.data.viewsCount == 0
+        && request.resource.data.get('uniqueViews', 0) == 0
+        && request.resource.data.get('savesCount', 0) == 0
         && request.resource.data.get('sharesCount', 0) == 0
         && tagsOk() && optionsOk();
       allow update: if signedIn() && (
@@ -161,11 +173,12 @@ service cloud.firestore {
                                 'hideReposts', 'hideShares'])
           && tagsOk() && optionsOk())
         ||
+        // (the old 'viewsCount' is frozen: views are 'uniqueViews' now)
         (changed().hasOnly(['likesCount', 'commentsCount', 'repostsCount',
-                            'viewsCount', 'sharesCount'])
+                            'sharesCount', 'savesCount', 'uniqueViews'])
           && stepOk('likesCount') && stepOk('commentsCount')
-          && stepOk('repostsCount') && stepOk('viewsCount')
-          && shareOk() && likeOk() && repostOk())
+          && stepOk('repostsCount')
+          && shareOk() && likeOk() && repostOk() && saveOk() && viewOk())
       );
       allow delete: if signedIn() && resource.data.authorId == me();
 
@@ -177,11 +190,13 @@ service cloud.firestore {
               && request.resource.data.tags.size() <= 30);
       }
 
-      // audience, photos (max 10), filter, cover, hidden counts
+      // audience, photos/videos (max 200), filter, cover, music, hidden counts
       function optionsOk() {
         let d = request.resource.data;
         return (!('audience' in d) || d.audience in ['everyone', 'followers', 'only_me'])
-          && (!('media' in d) || (d.media is list && d.media.size() >= 1 && d.media.size() <= 10))
+          && (!('media' in d) || (d.media is list && d.media.size() >= 1 && d.media.size() <= 200))
+          && (!('audioUrl' in d) || d.audioUrl is string)
+          && (!('audioName' in d) || (d.audioName is string && d.audioName.size() <= 200))
           && (!('filter' in d) || (d.filter is list && d.filter.size() == 20))
           && (!('thumbUrl' in d) || d.thumbUrl is string)
           && (!('hideLikes' in d) || d.hideLikes is bool)
@@ -201,6 +216,20 @@ service cloud.firestore {
           || (delta('likesCount') == 1 && existsAfter(l) && !exists(l))
           || (delta('likesCount') == -1 && !existsAfter(l) && exists(l));
       }
+      // savesCount must match your saved doc
+      function saveOk() {
+        let s = /databases/$(database)/documents/users/$(request.auth.uid)/saved/$(pid);
+        return !changed().hasAny(['savesCount'])
+          || (delta0('savesCount') == 1 && existsAfter(s) && !exists(s))
+          || (delta0('savesCount') == -1 && !existsAfter(s) && exists(s));
+      }
+      // uniqueViews +1 only together with YOUR first view doc (not the author)
+      function viewOk() {
+        let v = /databases/$(database)/documents/posts/$(pid)/views/$(request.auth.uid);
+        return !changed().hasAny(['uniqueViews'])
+          || (delta0('uniqueViews') == 1 && existsAfter(v) && !exists(v)
+              && resource.data.authorId != me());
+      }
       // repostsCount must match your repost doc
       function repostOk() {
         let r = /databases/$(database)/documents/users/$(request.auth.uid)/reposts/$(pid);
@@ -213,6 +242,42 @@ service cloud.firestore {
       function blockedByPostAuthor() {
         let author = get(/databases/$(database)/documents/posts/$(pid)).data.authorId;
         return blockedBy(author, request.auth.uid);
+      }
+
+      // One doc per viewer: totals for the author's Analytics.
+      match /views/{uid} {
+        allow read: if signedIn() && (me() == uid
+          || get(/databases/$(database)/documents/posts/$(pid)).data.authorId == me());
+        allow create: if signedIn() && me() == uid
+          && get(/databases/$(database)/documents/posts/$(pid)).data.authorId != me()
+          && request.resource.data.keys().hasOnly(['follower', 'country', 'language',
+                'ageGroup', 'source', 'count', 'watchMs', 'completed', 'createdAt'])
+          && request.resource.data.count == 1
+          && request.resource.data.watchMs == 0
+          && request.resource.data.completed == false
+          && request.resource.data.get('follower', false) is bool
+          && request.resource.data.get('country', '') is string
+          && request.resource.data.get('country', '').size() <= 3
+          && request.resource.data.get('language', '') is string
+          && request.resource.data.get('language', '').size() <= 8
+          && request.resource.data.get('ageGroup', '') is string
+          && request.resource.data.get('ageGroup', '').size() <= 8
+          && request.resource.data.get('source', '') is string
+          && request.resource.data.get('source', '').size() <= 12
+          // the post's counter goes up in the same write
+          && getAfter(/databases/$(database)/documents/posts/$(pid)).data.get('uniqueViews', 0)
+             == get(/databases/$(database)/documents/posts/$(pid)).data.get('uniqueViews', 0) + 1;
+        allow update: if signedIn() && me() == uid
+          && changed().hasOnly(['count', 'watchMs', 'completed', 'updatedAt'])
+          && (!changed().hasAny(['count'])
+              || (request.resource.data.count is int && delta('count') == 1))
+          && (!changed().hasAny(['watchMs'])
+              || (request.resource.data.watchMs is int
+                  && request.resource.data.watchMs >= resource.data.watchMs
+                  && request.resource.data.watchMs <= 21600000))
+          && (!changed().hasAny(['completed'])
+              || request.resource.data.completed is bool);
+        allow delete: if false;
       }
 
       match /likes/{uid} {

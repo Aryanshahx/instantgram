@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/countries.dart';
 import '../../../core/constants/languages.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/time_ago.dart';
 import '../../profile/data/user_repository.dart';
+import '../../../shared/widgets/country_picker.dart';
 import '../../../shared/widgets/language_picker.dart';
 import '../../../shared/widgets/glow_background.dart';
 import '../../../shared/widgets/ig_buttons.dart';
@@ -12,8 +14,12 @@ import '../../../shared/widgets/ig_logo.dart';
 import '../../../shared/widgets/ig_text_field.dart';
 import '../data/auth_service.dart';
 
+/// Create account, step 2 (after [ChooseLanguageScreen]).
 class SignupScreen extends StatefulWidget {
-  const SignupScreen({super.key});
+  const SignupScreen({super.key, this.language = ''});
+
+  /// Language chosen on the first screen.
+  final String language;
 
   @override
   State<SignupScreen> createState() => _SignupScreenState();
@@ -27,9 +33,29 @@ class _SignupScreenState extends State<SignupScreen> {
   final _passCtrl = TextEditingController();
   final _dobCtrl = TextEditingController();
   final _langCtrl = TextEditingController();
+  final _countryCtrl = TextEditingController();
   DateTime? _dob;
-  String _lang = '';
+  late String _lang = widget.language;
+  String _country = '';
   bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_lang.isNotEmpty) {
+      _langCtrl.text = languageByCode(_lang)?.label ?? _lang;
+    }
+  }
+
+  Future<void> _pickCountry() async {
+    FocusScope.of(context).unfocus();
+    final code = await showCountryPicker(context, current: _country);
+    if (code == null) return;
+    setState(() {
+      _country = code;
+      _countryCtrl.text = '${flagOf(code)}  ${countryName(code)}';
+    });
+  }
 
   Future<void> _pickDob() async {
     FocusScope.of(context).unfocus();
@@ -67,6 +93,7 @@ class _SignupScreenState extends State<SignupScreen> {
     _passCtrl.dispose();
     _dobCtrl.dispose();
     _langCtrl.dispose();
+    _countryCtrl.dispose();
     super.dispose();
   }
 
@@ -82,6 +109,7 @@ class _SignupScreenState extends State<SignupScreen> {
         password: _passCtrl.text,
         birthDate: _dob!,
         language: _lang,
+        country: _country,
       );
       AppSettings.instance.setLanguage(_lang);
       if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
@@ -133,7 +161,7 @@ class _SignupScreenState extends State<SignupScreen> {
                     ),
                     const SizedBox(height: 12),
                     const Text(
-                      'Join InstantGram and share your moments.',
+                      'Step 2 of 2 · join InstantGram and share your moments.',
                       style: TextStyle(
                         fontSize: 16,
                         color: AppColors.textSecondary,
@@ -221,11 +249,24 @@ class _SignupScreenState extends State<SignupScreen> {
                       validator: (_) =>
                           _lang.isEmpty ? 'Choose your language' : null,
                     ),
+                    const SizedBox(height: 14),
+                    IgTextField(
+                      key: const ValueKey('country'),
+                      hint: 'Country',
+                      icon: Icons.public,
+                      controller: _countryCtrl,
+                      readOnly: true,
+                      onTap: _pickCountry,
+                      trailing: Icons.expand_more,
+                      validator: (_) =>
+                          _country.isEmpty ? 'Choose your country' : null,
+                    ),
                     const Padding(
                       padding: EdgeInsets.fromLTRB(8, 8, 8, 0),
                       child: Text(
                         'Your date of birth is private. It is used to check '
-                        'that you are $kMinAge or older.',
+                        'that you are $kMinAge or older. Your country and age '
+                        'range only appear as totals in post Analytics.',
                         style: TextStyle(
                           fontSize: 12.5,
                           color: AppColors.textSecondary,

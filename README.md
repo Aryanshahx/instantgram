@@ -16,30 +16,37 @@ An Instagram-like app built with **Flutter**.
 2. API checks the token, file type and size, then returns a signed Tigris link (valid 10 min).
 3. App uploads the file straight to Tigris and saves the public URL in Firestore.
 
-## Features (v0.4)
-- Sign up / log in (email or username)
+## Features (v0.5)
+- Sign up: choose language first, then name, date of birth and country
+- Log in with email or username
 - Feed of people you follow (everyone's latest posts when you follow nobody yet)
-- Photo posts and Clips (short videos) stay forever; Moments disappear after 24h
+- Posts and Clips (any mix of photos and videos, no limit) stay forever;
+  Moments disappear after 24h
 - Likes (double-tap too), comments, reposts, saves, share
-- Pin / delete your posts, clip insights, dashboard with real stats
+- Hold your own post / clip: Analytics (overview, engagement, audience) and Pin
+- Views count once per account (not your own); dashboard with real stats
 - Follow / unfollow, followers & following lists
 - Search: people, clips and #hashtags
 - Direct messages
 - Notifications (likes, comments, follows, reposts)
 - Edit profile, profile photo and cover
-- Create: many photos per post, clips (video) and moments (photo or video)
-- Editor: filters, adjust, crop, text, video trim, mute, cover from video or gallery
+- Create: posts and clips with many photos and videos, moments (photo or video)
+- Editor: filters, adjust, crop, text, video trim, mute, cover from video or gallery,
+  music from your phone (mp3 / m4a)
+- Discover: media at its real shape (no crop), videos and music play when in view,
+  pull to refresh (also on your profile)
 - Post options: audience (Everyone / Followers / Only me), hide like/comment/repost/share counts
 - Private accounts with follow requests, block, remove followers
 - Moments ring on avatars everywhere (tap to watch)
 - Settings: account, history, manage time, privacy, blocked, accessibility (text size,
-  reduce motion), 40 languages, about, privacy policy, terms, app update, log out,
+  reduce motion), 40 languages, country, about + error log, privacy policy and terms
+  (privacypolicy.md / termsofuse.md), app update, log out,
   delete account request by email
 - Reports go by email to techlabs.hyper@gmail.com
 
 ## Download the APK
 - **Every push to `main`** → Actions tab → latest run → *Artifacts* → `InstantGram-apk-N`
-- **Releases** → push a tag like `v0.4.0` → APK appears under *Releases*
+- **Releases** → push a tag like `v0.5.0` → APK appears under *Releases*
 
 ## Setup
 ### Firebase

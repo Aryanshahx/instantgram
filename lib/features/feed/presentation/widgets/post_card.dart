@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../insights/owner_sheet.dart';
+
 import '../../../../core/services/content_filter.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/errors.dart';
@@ -8,18 +10,24 @@ import '../../../../core/utils/time_ago.dart';
 import '../../../../shared/models/post.dart';
 import '../../../../shared/navigation.dart';
 import '../../../../shared/widgets/avatar.dart';
-import '../../../../shared/widgets/net_image.dart';
-import '../../../../shared/widgets/post_grid.dart';
+import '../../../../shared/widgets/media_view.dart';
 import '../../../post/data/post_repository.dart';
 import '../../../post/presentation/comments_sheet.dart';
-import '../../../post/presentation/create_post_screen.dart' show PageDots;
 import '../../../post/presentation/post_menu.dart';
 
 class PostCard extends StatefulWidget {
-  const PostCard({super.key, required this.post, this.onDeleted});
+  const PostCard({
+    super.key,
+    required this.post,
+    this.onDeleted,
+    this.source = ViewSource.feed,
+  });
 
   final Post post;
   final VoidCallback? onDeleted;
+
+  /// Where it is shown (for Analytics).
+  final String source;
 
   @override
   State<PostCard> createState() => _PostCardState();
@@ -37,7 +45,6 @@ class _PostCardState extends State<PostCard>
   bool? _likedOverride;
   int _likeDelta = 0;
   bool _busy = false;
-  int _photo = 0; // carousel page
 
   @override
   void didUpdateWidget(covariant PostCard old) {
@@ -91,7 +98,6 @@ class _PostCardState extends State<PostCard>
   @override
   Widget build(BuildContext context) {
     final p = widget.post;
-    final ratio = p.aspectRatio.clamp(0.8, 1.91);
     final mine = p.authorId == ContentFilter.instance.uid;
 
     return StreamBuilder<bool>(
@@ -112,10 +118,11 @@ class _PostCardState extends State<PostCard>
                   GestureDetector(
                     onTap: () => openProfile(context, p.authorId),
                     child: Avatar(
-                        url: p.authorPhotoUrl,
-                        name: p.authorUsername,
-                        size: 38,
-                        uid: p.authorId),
+                      url: p.authorPhotoUrl,
+                      name: p.authorUsername,
+                      size: 38,
+                      uid: p.authorId,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -131,8 +138,11 @@ class _PostCardState extends State<PostCard>
                     ),
                   ),
                   if (p.pinned)
-                    const Icon(Icons.push_pin,
-                        size: 18, color: AppColors.textSecondary),
+                    const Icon(
+                      Icons.push_pin,
+                      size: 18,
+                      color: AppColors.textSecondary,
+                    ),
                   IconButton(
                     onPressed: () =>
                         showPostMenu(context, p, onDeleted: widget.onDeleted),
@@ -141,85 +151,45 @@ class _PostCardState extends State<PostCard>
                 ],
               ),
             ),
-            // Media
-            GestureDetector(
-              onTap: p.isClip ? () => openPost(context, [p], 0) : null,
+            // Media (real shape, autoplay, swipe)
+            PostMedia(
+              post: p,
+              onTap: p.isClip
+                  ? () => openPost(context, [p], 0, source: ViewSource.feed)
+                  : null,
               onDoubleTap: () {
                 _heart.forward(from: 0);
                 _setLiked(serverLiked, true);
               },
-              child: AspectRatio(
-                aspectRatio: p.isClip ? 4 / 5 : ratio,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (p.isClip)
-                      ClipCover(post: p, big: true)
-                    else if (p.isMulti)
-                      PageView.builder(
-                        itemCount: p.photos.length,
-                        onPageChanged: (i) => setState(() => _photo = i),
-                        itemBuilder: (context, i) =>
-                            NetImage(p.photos[i].url),
-                      )
-                    else
-                      NetImage(p.mediaUrl),
-                    if (p.isMulti) ...[
-                      Positioned(
-                        right: 10,
-                        top: 10,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 9, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.6),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            '${_photo + 1}/${p.photos.length}',
-                            style: const TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.w700),
+              onLongPress: p.authorId == ContentFilter.instance.uid
+                  ? () => showOwnerQuickSheet(context, p)
+                  : null,
+              onSeen: () => _repo.addView(p, source: widget.source),
+              onWatched: (ms, done) =>
+                  _repo.reportWatch(p, watchMs: ms, completed: done),
+              overlay: IgnorePointer(
+                child: Center(
+                  child: AnimatedBuilder(
+                    animation: _heart,
+                    builder: (context, _) {
+                      final t = _heart.value;
+                      if (t == 0 || t == 1) return const SizedBox.shrink();
+                      final scale = t < 0.3
+                          ? t / 0.3 * 1.2
+                          : 1.2 - (t - 0.3) * 0.3;
+                      return Opacity(
+                        opacity: t < 0.7 ? 1 : (1 - t) / 0.3,
+                        child: Transform.scale(
+                          scale: scale,
+                          child: const Icon(
+                            Icons.favorite,
+                            size: 110,
+                            color: Colors.white,
                           ),
                         ),
-                      ),
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 10,
-                        child: IgnorePointer(
-                          child: PageDots(
-                              count: p.photos.length, index: _photo),
-                        ),
-                      ),
-                    ],
-                    if (p.isClip)
-                      Center(
-                        child: Icon(
-                          Icons.play_circle_fill,
-                          size: 72,
-                          color: Colors.white.withValues(alpha: 0.85),
-                        ),
-                      ),
-                    Center(
-                      child: AnimatedBuilder(
-                        animation: _heart,
-                        builder: (context, _) {
-                          final t = _heart.value;
-                          if (t == 0 || t == 1) return const SizedBox.shrink();
-                          final scale =
-                              t < 0.3 ? t / 0.3 * 1.2 : 1.2 - (t - 0.3) * 0.3;
-                          return Opacity(
-                            opacity: t < 0.7 ? 1 : (1 - t) / 0.3,
-                            child: Transform.scale(
-                              scale: scale,
-                              child: const Icon(Icons.favorite,
-                                  size: 110, color: Colors.white),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
+                      );
+                    },
+                  ),
                 ),
               ),
             ),
@@ -263,7 +233,9 @@ class _PostCardState extends State<PostCard>
                     Text(
                       compactCount(p.sharesCount),
                       style: const TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w700),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   const Spacer(),
                   StreamBuilder<bool>(
@@ -300,7 +272,9 @@ class _PostCardState extends State<PostCard>
                       '${compactCount(p.repostsCount)} '
                       '${p.repostsCount == 1 ? 'repost' : 'reposts'}',
                       style: const TextStyle(
-                          fontSize: 12.5, color: AppColors.textSecondary),
+                        fontSize: 12.5,
+                        color: AppColors.textSecondary,
+                      ),
                     ),
                   if (p.caption.isNotEmpty) ...[
                     const SizedBox(height: 4),
@@ -309,8 +283,7 @@ class _PostCardState extends State<PostCard>
                         children: [
                           TextSpan(
                             text: '${p.authorUsername} ',
-                            style:
-                                const TextStyle(fontWeight: FontWeight.w700),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                           TextSpan(text: p.caption),
                         ],
@@ -325,8 +298,8 @@ class _PostCardState extends State<PostCard>
                         p.hideComments && !mine
                             ? 'View comments'
                             : p.commentsCount == 1
-                                ? 'View 1 comment'
-                                : 'View all ${p.commentsCount} comments',
+                            ? 'View 1 comment'
+                            : 'View all ${p.commentsCount} comments',
                         style: const TextStyle(color: AppColors.textSecondary),
                       ),
                     ),

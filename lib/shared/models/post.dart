@@ -1,7 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-DateTime _date(Object? v) =>
-    v is Timestamp ? v.toDate() : DateTime.now();
+DateTime _date(Object? v) => v is Timestamp
+    ? v.toDate()
+    : v is DateTime
+    ? v
+    : DateTime.now();
 int _int(Object? v) => v is num ? v.toInt() : 0;
 String _str(Object? v) => v is String ? v : '';
 
@@ -27,10 +30,10 @@ class Audience {
   static const List<String> all = [everyone, followers, onlyMe];
 
   static String label(String a) => switch (a) {
-        followers => 'Followers',
-        onlyMe => 'Only me',
-        _ => 'Everyone',
-      };
+    followers => 'Followers',
+    onlyMe => 'Only me',
+    _ => 'Everyone',
+  };
 
   static String normalize(Object? v) =>
       v is String && all.contains(v) ? v : everyone;
@@ -61,41 +64,95 @@ class VideoEdits {
   bool get hasTrim => trimStartMs > 0 || trimEndMs > 0;
 
   Map<String, dynamic> toMap() => {
-        if (trimStartMs > 0) 'trimStartMs': trimStartMs,
-        if (trimEndMs > 0) 'trimEndMs': trimEndMs,
-        if (filter != null) 'filter': filter,
-        if (muted) 'muteAudio': true,
-      };
+    if (trimStartMs > 0) 'trimStartMs': trimStartMs,
+    if (trimEndMs > 0) 'trimEndMs': trimEndMs,
+    if (filter != null) 'filter': filter,
+    if (muted) 'muteAudio': true,
+  };
 
   factory VideoEdits.fromMap(Map<String, dynamic> m) => VideoEdits(
-        trimStartMs: _int(m['trimStartMs']),
-        trimEndMs: _int(m['trimEndMs']),
-        filter: _matrix(m['filter']),
-        muted: _bool(m['muteAudio']),
-      );
+    trimStartMs: _int(m['trimStartMs']),
+    trimEndMs: _int(m['trimEndMs']),
+    filter: _matrix(m['filter']),
+    muted: _bool(m['muteAudio']),
+  );
 }
 
-/// One photo of a (multi-photo) post.
+/// One photo or video inside a post or clip.
+/// Old posts stored only photos here (no `type`).
 class MediaItem {
-  const MediaItem({required this.url, this.key = '', this.aspectRatio = 1});
+  const MediaItem({
+    required this.url,
+    this.key = '',
+    this.aspectRatio = 1,
+    this.isVideo = false,
+    this.thumbUrl = '',
+    this.thumbKey = '',
+    this.durationMs = 0,
+    this.edits = const VideoEdits(),
+  });
+
+  static const String photo = 'photo';
+  static const String video = 'video';
+
   final String url;
   final String key;
-  final double aspectRatio;
 
-  Map<String, dynamic> toMap() =>
-      {'url': url, 'key': key, 'aspectRatio': aspectRatio};
+  /// width / height (always a safe, finite number > 0).
+  final double aspectRatio;
+  final bool isVideo;
+
+  /// Video cover image ('' = none).
+  final String thumbUrl;
+  final String thumbKey;
+
+  /// Video length after trim (0 = unknown).
+  final int durationMs;
+
+  /// Video trim / filter / mute.
+  final VideoEdits edits;
+
+  /// Image to show in grids / while a video loads.
+  String get coverUrl => isVideo ? thumbUrl : url;
+
+  Map<String, dynamic> toMap() => {
+    'type': isVideo ? video : photo,
+    'url': url,
+    'key': key,
+    'aspectRatio': aspectRatio,
+    if (thumbUrl.isNotEmpty) 'thumbUrl': thumbUrl,
+    if (thumbKey.isNotEmpty) 'thumbKey': thumbKey,
+    if (durationMs > 0) 'durationMs': durationMs,
+    if (isVideo && edits.toMap().isNotEmpty) 'edits': edits.toMap(),
+  };
 
   static MediaItem? fromMap(Object? v) {
     if (v is! Map) return null;
     final url = v['url'];
     if (url is! String || url.isEmpty) return null;
-    final ar = v['aspectRatio'];
+    final e = v['edits'];
     return MediaItem(
       url: url,
-      key: v['key'] is String ? v['key'] as String : '',
-      aspectRatio: ar is num && ar > 0 ? ar.toDouble() : 1,
+      key: _str(v['key']),
+      aspectRatio: safeAspect(v['aspectRatio']),
+      isVideo: v['type'] == video,
+      thumbUrl: _str(v['thumbUrl']),
+      thumbKey: _str(v['thumbKey']),
+      durationMs: _int(v['durationMs']),
+      edits: e is Map
+          ? VideoEdits.fromMap(Map<String, dynamic>.from(e))
+          : const VideoEdits(),
     );
   }
+}
+
+/// Any stored aspect ratio -> a finite number between 0.2 and 5 (1 if bad).
+/// (NaN / infinity / 0 would crash the layout.)
+double safeAspect(Object? v) {
+  if (v is! num) return 1;
+  final d = v.toDouble();
+  if (d.isNaN || d.isInfinite || d <= 0) return 1;
+  return d.clamp(0.2, 5.0);
 }
 
 /// A photo post or a clip (short video).
@@ -126,6 +183,11 @@ class Post {
     this.hideComments = false,
     this.hideReposts = false,
     this.hideShares = false,
+    this.durationMs = 0,
+    this.audioUrl = '',
+    this.audioKey = '',
+    this.audioName = '',
+    this.savesCount = 0,
   });
 
   static const String photo = 'photo';
@@ -149,7 +211,7 @@ class Post {
   final bool pinned;
   final DateTime createdAt;
 
-  /// All photos of a photo post (at least the cover).
+  /// All photos / videos (new posts). Use [items] to read them.
   final List<MediaItem> media;
 
   /// Clip cover image ('' = none).
@@ -166,21 +228,64 @@ class Post {
   final bool hideReposts;
   final bool hideShares;
 
-  bool get isClip => type == clip;
-  bool get isMulti => !isClip && media.length > 1;
+  /// Video length (old single-video clips).
+  final int durationMs;
 
-  /// Photos to show (falls back to the single mediaUrl).
-  List<MediaItem> get photos => media.isNotEmpty
-      ? media
-      : [MediaItem(url: mediaUrl, key: mediaKey, aspectRatio: aspectRatio)];
+  /// Music picked in the editor ('' = none). Plays in a loop.
+  final String audioUrl;
+  final String audioKey;
+  final String audioName;
+
+  final int savesCount;
+
+  bool get isClip => type == clip;
+  bool get hasMusic => audioUrl.isNotEmpty;
+
+  /// Every photo / video, in order (works for old and new posts).
+  List<MediaItem> get items {
+    if (media.isNotEmpty) return media;
+    if (isClip) {
+      return [
+        MediaItem(
+          url: mediaUrl,
+          key: mediaKey,
+          aspectRatio: aspectRatio,
+          isVideo: true,
+          thumbUrl: thumbUrl,
+          thumbKey: thumbKey,
+          durationMs: durationMs,
+          edits: edits,
+        ),
+      ];
+    }
+    return [MediaItem(url: mediaUrl, key: mediaKey, aspectRatio: aspectRatio)];
+  }
+
+  bool get isMulti => items.length > 1;
+  bool get hasVideo => items.any((m) => m.isVideo);
+
+  /// First item is a video (shows a play icon in grids).
+  bool get startsWithVideo => items.isNotEmpty && items.first.isVideo;
+
+  /// Image for grids, notifications and sharing ('' = none).
+  String get coverUrl {
+    if (thumbUrl.isNotEmpty) return thumbUrl;
+    for (final m in items) {
+      if (m.coverUrl.isNotEmpty) return m.coverUrl;
+    }
+    return '';
+  }
 
   /// Every storage key used by this post (for delete).
   List<String> get allKeys => {
-        if (mediaKey.isNotEmpty) mediaKey,
-        for (final m in media)
-          if (m.key.isNotEmpty) m.key,
-        if (thumbKey.isNotEmpty) thumbKey,
-      }.toList();
+    if (mediaKey.isNotEmpty) mediaKey,
+    for (final m in media) ...[
+      if (m.key.isNotEmpty) m.key,
+      if (m.thumbKey.isNotEmpty) m.thumbKey,
+    ],
+    if (thumbKey.isNotEmpty) thumbKey,
+    if (audioKey.isNotEmpty) audioKey,
+  }.toList();
 
   factory Post.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
       Post.fromMap(doc.id, doc.data() ?? const <String, dynamic>{});
@@ -189,9 +294,9 @@ class Post {
     final ar = m['aspectRatio'];
     final media = m['media'] is List
         ? (m['media'] as List)
-            .map(MediaItem.fromMap)
-            .whereType<MediaItem>()
-            .toList()
+              .map(MediaItem.fromMap)
+              .whereType<MediaItem>()
+              .toList()
         : const <MediaItem>[];
     return Post(
       id: id,
@@ -202,11 +307,13 @@ class Post {
       mediaUrl: _str(m['mediaUrl']),
       mediaKey: _str(m['mediaKey']),
       caption: _str(m['caption']),
-      aspectRatio: ar is num && ar > 0 ? ar.toDouble() : 1,
+      aspectRatio: safeAspect(ar),
       likesCount: _int(m['likesCount']),
       commentsCount: _int(m['commentsCount']),
       repostsCount: _int(m['repostsCount']),
-      viewsCount: _int(m['viewsCount']),
+      // one view per account (v0.5.0+). The old 'viewsCount' was wrong
+      // (it counted your own views and every app restart), so it isn't used.
+      viewsCount: _int(m['uniqueViews']),
       pinned: m['pinned'] == true,
       createdAt: _date(m['createdAt']),
       media: media,
@@ -219,6 +326,11 @@ class Post {
       hideComments: _bool(m['hideComments']),
       hideReposts: _bool(m['hideReposts']),
       hideShares: _bool(m['hideShares']),
+      durationMs: _int(m['durationMs']),
+      audioUrl: _str(m['audioUrl']),
+      audioKey: _str(m['audioKey']),
+      audioName: _str(m['audioName']),
+      savesCount: _int(m['savesCount']),
     );
   }
 }

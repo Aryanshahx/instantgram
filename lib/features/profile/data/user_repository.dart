@@ -242,6 +242,12 @@ class UserRepository {
     await _users.doc(myUid).update({'isPrivate': on});
   }
 
+  /// Your country (ISO code like 'IN').
+  Future<void> setCountry(String code) async {
+    _clearMeCache();
+    await _users.doc(myUid).update({'country': code});
+  }
+
   Future<void> setLanguage(String code) async {
     _clearMeCache();
     await _users.doc(myUid).update({'language': code});

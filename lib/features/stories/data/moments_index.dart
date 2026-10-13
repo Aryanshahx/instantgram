@@ -13,8 +13,9 @@ class MomentsIndex {
   static final MomentsIndex instance = MomentsIndex._();
 
   /// All visible moment groups (newest first).
-  final ValueNotifier<List<StoryGroup>> groups =
-      ValueNotifier(const <StoryGroup>[]);
+  final ValueNotifier<List<StoryGroup>> groups = ValueNotifier(
+    const <StoryGroup>[],
+  );
 
   Map<String, StoryGroup> _byAuthor = const {};
   StreamSubscription<List<StoryGroup>>? _sub;

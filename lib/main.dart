@@ -4,12 +4,14 @@ import 'package:flutter/services.dart';
 
 import 'app.dart';
 import 'core/services/app_settings.dart';
+import 'core/services/error_reporter.dart';
 import 'firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await AppSettings.instance.load(); // text size, language, history…
+  ErrorReporter.install(); // readable error boxes + Error log
 
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(

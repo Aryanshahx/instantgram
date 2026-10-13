@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -9,19 +10,31 @@ import '../theme/app_colors.dart';
 import 'api_client.dart';
 
 /// What the file is used for (decides the folder in Tigris + size limits).
-enum MediaKind { post, clip, story, avatar, cover, thumb }
+enum MediaKind { post, clip, story, avatar, cover, thumb, audio }
 
 /// What the create flow may pick.
 enum PickKind {
-  /// Posts: one or more photos (max 10).
-  photos,
-
-  /// Clips: exactly one video.
-  video,
-
-  /// Moments: photos and/or videos (max 10).
+  /// Posts and clips: any number of photos and videos.
   mixed,
+
+  /// Moments: photos and/or videos (videos up to 60 s).
+  moment,
 }
+
+/// A music file picked from the phone.
+class PickedAudio {
+  const PickedAudio(this.file, this.name);
+  final File file;
+
+  /// File name without the extension (shown to people).
+  final String name;
+}
+
+/// Music file types we accept.
+const Set<String> kAudioExtensions = {'mp3', 'm4a', 'aac', 'wav', 'ogg'};
+
+/// Max music file size (same limit as the server).
+const int kMaxAudioBytes = 20 * 1024 * 1024;
 
 /// A picked file from the gallery or camera.
 class PickedMedia {
@@ -32,8 +45,7 @@ class PickedMedia {
 
 bool isVideoPath(String path) {
   final ext = path.split('.').last.toLowerCase();
-  return const {'mp4', 'mov', 'webm', '3gp', 'mkv', 'm4v', 'avi'}
-      .contains(ext);
+  return const {'mp4', 'mov', 'webm', '3gp', 'mkv', 'm4v', 'avi'}.contains(ext);
 }
 
 class UploadedMedia {
@@ -61,6 +73,11 @@ class MediaService {
     '3gp': 'video/3gpp',
     'mkv': 'video/x-matroska',
     'm4v': 'video/mp4',
+    'mp3': 'audio/mpeg',
+    'm4a': 'audio/mp4',
+    'aac': 'audio/aac',
+    'wav': 'audio/wav',
+    'ogg': 'audio/ogg',
   };
 
   String contentTypeFor(String path) {
@@ -81,8 +98,10 @@ class MediaService {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined,
-                  color: AppColors.lime),
+              leading: const Icon(
+                Icons.photo_library_outlined,
+                color: AppColors.lime,
+              ),
               title: Text(video ? 'Choose video' : 'Choose from gallery'),
               onTap: () => Navigator.pop(ctx, ImageSource.gallery),
             ),
@@ -115,17 +134,14 @@ class MediaService {
       return x == null ? null : File(x.path);
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open picker: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not open picker: $e')));
       }
       return null;
     }
   }
 
-  static const int maxItems = 10;
-
-  /// Create flow picker: Gallery (many) or Camera.
+  /// Create flow picker: Gallery (any number) or Camera.
   Future<List<PickedMedia>> pickForCreate(
     BuildContext context,
     PickKind kind,
@@ -137,32 +153,31 @@ class MediaService {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined,
-                  color: AppColors.lime),
-              title: Text(switch (kind) {
-                PickKind.photos => 'Choose photos',
-                PickKind.video => 'Choose video',
-                PickKind.mixed => 'Choose photos or videos',
-              }),
-              subtitle: kind == PickKind.video
-                  ? null
-                  : const Text('You can pick up to $maxItems'),
+              key: const ValueKey('pick-gallery'),
+              leading: const Icon(
+                Icons.photo_library_outlined,
+                color: AppColors.lime,
+              ),
+              title: const Text('Choose photos or videos'),
+              subtitle: const Text('Pick as many as you like'),
               onTap: () => Navigator.pop(ctx, 'gallery'),
             ),
-            if (kind != PickKind.video)
-              ListTile(
-                leading: const Icon(Icons.photo_camera_outlined,
-                    color: AppColors.lime),
-                title: const Text('Take photo'),
-                onTap: () => Navigator.pop(ctx, 'photo'),
+            ListTile(
+              leading: const Icon(
+                Icons.photo_camera_outlined,
+                color: AppColors.lime,
               ),
-            if (kind != PickKind.photos)
-              ListTile(
-                leading:
-                    const Icon(Icons.videocam_outlined, color: AppColors.lime),
-                title: const Text('Record video'),
-                onTap: () => Navigator.pop(ctx, 'video'),
+              title: const Text('Take photo'),
+              onTap: () => Navigator.pop(ctx, 'photo'),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.videocam_outlined,
+                color: AppColors.lime,
               ),
+              title: const Text('Record video'),
+              onTap: () => Navigator.pop(ctx, 'video'),
+            ),
             const SizedBox(height: 8),
           ],
         ),
@@ -178,48 +193,63 @@ class MediaService {
             maxWidth: 2048,
             imageQuality: 92,
           );
-          return x == null ? const [] : [PickedMedia(File(x.path), isVideo: false)];
+          return x == null
+              ? const []
+              : [PickedMedia(File(x.path), isVideo: false)];
         case 'video':
           final x = await _picker.pickVideo(
             source: ImageSource.camera,
-            maxDuration: Duration(seconds: kind == PickKind.mixed ? 60 : 90),
+            maxDuration: Duration(seconds: kind == PickKind.moment ? 60 : 90),
           );
-          return x == null ? const [] : [PickedMedia(File(x.path), isVideo: true)];
+          return x == null
+              ? const []
+              : [PickedMedia(File(x.path), isVideo: true)];
       }
-      // gallery
-      switch (kind) {
-        case PickKind.photos:
-          final xs = await _picker.pickMultiImage(
-            maxWidth: 2048,
-            imageQuality: 92,
-            limit: maxItems,
-          );
-          return xs
-              .take(maxItems)
-              .map((x) => PickedMedia(File(x.path), isVideo: false))
-              .toList();
-        case PickKind.video:
-          final x = await _picker.pickVideo(source: ImageSource.gallery);
-          return x == null ? const [] : [PickedMedia(File(x.path), isVideo: true)];
-        case PickKind.mixed:
-          final xs = await _picker.pickMultipleMedia(
-            maxWidth: 2048,
-            imageQuality: 92,
-            limit: maxItems,
-          );
-          return xs
-              .take(maxItems)
-              .map((x) => PickedMedia(File(x.path), isVideo: isVideoPath(x.path)))
-              .toList();
-      }
+      // gallery: photos and videos together, no limit
+      final xs = await _picker.pickMultipleMedia(
+        maxWidth: 2048,
+        imageQuality: 92,
+      );
+      return xs
+          .map((x) => PickedMedia(File(x.path), isVideo: isVideoPath(x.path)))
+          .toList();
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open picker: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not open picker: $e')));
       }
       return const [];
     }
+  }
+
+  /// Music from phone storage (mp3, m4a, aac, wav, ogg). Null = cancelled.
+  /// Throws a [StateError] with a friendly message when the file is not ok.
+  Future<PickedAudio?> pickAudio() async {
+    final f = await FilePicker.pickFile(type: FileType.audio);
+    if (f == null) return null;
+    final name = f.name;
+    final dot = name.lastIndexOf('.');
+    final ext = dot < 0 ? '' : name.substring(dot + 1).toLowerCase();
+    if (!kAudioExtensions.contains(ext)) {
+      throw StateError('Please pick an MP3, M4A, AAC, WAV or OGG file');
+    }
+    File file;
+    final path = f.path;
+    if (path != null && path.isNotEmpty && File(path).existsSync()) {
+      file = File(path);
+    } else {
+      // content:// file -> copy it to a temp file
+      final bytes = await f.readAsBytes();
+      final dir = await Directory.systemTemp.createTemp('ig_audio');
+      file = File(
+        '${dir.path}/music_${DateTime.now().millisecondsSinceEpoch}.$ext',
+      );
+      await file.writeAsBytes(bytes, flush: true);
+    }
+    if (await file.length() > kMaxAudioBytes) {
+      throw StateError('Music file is too big (max 20 MB)');
+    }
+    return PickedAudio(file, audioTitle(name));
   }
 
   /// One photo from the gallery (used for clip covers).
@@ -266,8 +296,7 @@ class MediaService {
     }
     await request.sink.close();
 
-    final response =
-        await responseFuture.timeout(const Duration(minutes: 10));
+    final response = await responseFuture.timeout(const Duration(minutes: 10));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final body = await response.stream.bytesToString();
       throw ApiException(_storageError(response.statusCode, body));
@@ -280,7 +309,8 @@ class MediaService {
 
   /// Turns a Tigris XML error into a short, readable message.
   static String _storageError(int status, String body) {
-    final code = RegExp(r'<Code>([^<]+)</Code>').firstMatch(body)?.group(1) ?? '';
+    final code =
+        RegExp(r'<Code>([^<]+)</Code>').firstMatch(body)?.group(1) ?? '';
     switch (code) {
       case 'NoSuchBucket':
         return 'Upload failed: storage bucket not found. '
@@ -308,4 +338,15 @@ class MediaService {
       await ApiClient.instance.post('/api/delete-media', {'key': key});
     } catch (_) {}
   }
+}
+
+/// "My Song (Remix).mp3" -> "My Song (Remix)"
+String audioTitle(String fileName) {
+  final slash = fileName.lastIndexOf('/');
+  var n = slash < 0 ? fileName : fileName.substring(slash + 1);
+  final dot = n.lastIndexOf('.');
+  if (dot > 0) n = n.substring(0, dot);
+  n = n.replaceAll('_', ' ').trim();
+  if (n.isEmpty) return 'Music';
+  return n.length > 60 ? '${n.substring(0, 60)}…' : n;
 }

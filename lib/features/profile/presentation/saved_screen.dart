@@ -40,7 +40,8 @@ class _SavedScreenState extends State<SavedScreen> {
               final posts = f.data!;
               return PostGrid(
                 posts: posts,
-                onTap: (i) => openPost(context, posts, i),
+                onTap: (i) =>
+                    openPost(context, posts, i, source: ViewSource.other),
                 emptyIcon: Icons.bookmark_border,
                 emptyTitle: 'Nothing saved yet',
                 emptySubtitle: 'Tap the bookmark on a post to save it.',

@@ -4,11 +4,12 @@ import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env, HttpError, requireEnv } from './http.js';
 
-export const KINDS = ['post', 'clip', 'story', 'avatar', 'cover', 'thumb'];
+export const KINDS = ['post', 'clip', 'story', 'avatar', 'cover', 'thumb', 'audio'];
 
 const MB = 1024 * 1024;
 export const MAX_IMAGE = 15 * MB;
 export const MAX_VIDEO = 150 * MB;
+export const MAX_AUDIO = 20 * MB;
 
 const TYPES = {
   'image/jpeg': 'jpg',
@@ -21,7 +22,17 @@ const TYPES = {
   'video/webm': 'webm',
   'video/3gpp': '3gp',
   'video/x-matroska': 'mkv',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'audio/x-m4a': 'm4a',
+  'audio/aac': 'aac',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+  'audio/ogg': 'ogg',
 };
+
+// Posts, clips and moments: photos AND videos (v0.5.0). Music: 'audio' only.
+const VIDEO_KINDS = ['post', 'clip', 'story'];
 
 let client;
 function s3() {
@@ -50,13 +61,16 @@ export async function createUpload({ uid, kind, contentType, size }) {
   const ext = TYPES[contentType];
   if (!ext) throw new HttpError(400, `File type not allowed: ${contentType}`);
   const isVideo = contentType.startsWith('video/');
-  if (isVideo && kind !== 'clip' && kind !== 'story') {
-    throw new HttpError(400, 'Videos are only allowed for clips');
+  const isAudio = contentType.startsWith('audio/');
+  if (isVideo && !VIDEO_KINDS.includes(kind)) {
+    throw new HttpError(400, 'Videos are only allowed in posts, clips and moments');
   }
-  if (kind === 'clip' && !isVideo) throw new HttpError(400, 'A clip must be a video');
+  if (isAudio !== (kind === 'audio')) {
+    throw new HttpError(400, 'Music must be an audio file');
+  }
   const n = Number(size);
   if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'Bad file size');
-  const max = isVideo ? MAX_VIDEO : MAX_IMAGE;
+  const max = isAudio ? MAX_AUDIO : isVideo ? MAX_VIDEO : MAX_IMAGE;
   if (n > max) throw new HttpError(413, `File too big (max ${max / MB} MB)`);
 
   const key = `${kind}/${uid}/${Date.now()}-${randomUUID()}.${ext}`;

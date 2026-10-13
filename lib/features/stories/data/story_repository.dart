@@ -21,15 +21,15 @@ class StoryRepository {
       _db.collection('stories');
 
   Map<String, dynamic> _base(UserProfile me, String audience) => {
-        'authorId': me.uid,
-        'authorUsername': me.username,
-        'authorPhotoUrl': me.photoUrl,
-        'audience': audience,
-        'createdAt': FieldValue.serverTimestamp(),
-        'expiresAt': Timestamp.fromDate(
-          DateTime.now().add(const Duration(hours: 24)),
-        ),
-      };
+    'authorId': me.uid,
+    'authorUsername': me.username,
+    'authorPhotoUrl': me.photoUrl,
+    'audience': audience,
+    'createdAt': FieldValue.serverTimestamp(),
+    'expiresAt': Timestamp.fromDate(
+      DateTime.now().add(const Duration(hours: 24)),
+    ),
+  };
 
   /// Upload one photo or video moment.
   Future<void> create(
@@ -41,8 +41,11 @@ class StoryRepository {
     ValueChanged<double>? onProgress,
   }) async {
     final me = await UserRepository.instance.me();
-    final media = await MediaService.instance
-        .upload(file, kind: MediaKind.story, onProgress: onProgress);
+    final media = await MediaService.instance.upload(
+      file,
+      kind: MediaKind.story,
+      onProgress: onProgress,
+    );
     await _stories.add({
       ..._base(me, audience),
       'type': isVideo ? Story.video : Story.photo,
@@ -107,6 +110,7 @@ List<StoryGroup> groupStories(List<Story> stories) {
     return StoryGroup(e.key, e.value);
   }).toList();
   groups.sort(
-      (a, b) => b.stories.last.createdAt.compareTo(a.stories.last.createdAt));
+    (a, b) => b.stories.last.createdAt.compareTo(a.stories.last.createdAt),
+  );
   return groups;
 }

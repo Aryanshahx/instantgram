@@ -4,9 +4,8 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/models/user_profile.dart';
-import '../../../shared/navigation.dart';
 import '../../../shared/widgets/async_views.dart';
-import '../../../shared/widgets/net_image.dart';
+import '../../insights/post_insights_screen.dart';
 import '../../../shared/widgets/post_grid.dart';
 import '../../post/data/post_repository.dart';
 import '../../profile/data/user_repository.dart';
@@ -50,12 +49,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
             final likes = sum((p) => p.likesCount);
             final comments = sum((p) => p.commentsCount);
             final reposts = sum((p) => p.repostsCount);
-            final views =
-                posts.where((p) => p.isClip).fold(0, (a, p) => a + p.viewsCount);
+            // views of ALL posts and clips (one per account, not yours)
+            final views = sum((p) => p.viewsCount);
             final clips = posts.where((p) => p.isClip).length;
             final top = [...posts]
-              ..sort((a, b) => (b.likesCount + b.commentsCount)
-                  .compareTo(a.likesCount + a.commentsCount));
+              ..sort(
+                (a, b) => (b.likesCount + b.commentsCount).compareTo(
+                  a.likesCount + a.commentsCount,
+                ),
+              );
             final avg = posts.isEmpty ? 0 : (likes / posts.length).round();
 
             return ListView(
@@ -76,12 +78,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   children: [
                     _Card('Followers', me.followersCount, Icons.people),
                     _Card('Following', me.followingCount, Icons.person_add_alt),
-                    _Card('Posts', posts.length - clips, Icons.grid_view_rounded),
+                    _Card(
+                      'Posts',
+                      posts.length - clips,
+                      Icons.grid_view_rounded,
+                    ),
                     _Card('Clips', clips, Icons.smart_display),
                     _Card('Total likes', likes, Icons.favorite),
                     _Card('Comments', comments, Icons.chat_bubble),
                     _Card('Reposts', reposts, Icons.repeat),
-                    _Card('Clip views', views, Icons.play_arrow_rounded),
+                    _Card('Views', views, Icons.visibility_outlined),
                   ],
                 ),
                 const SizedBox(height: 14),
@@ -93,7 +99,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.trending_up, color: Colors.black, size: 30),
+                      const Icon(
+                        Icons.trending_up,
+                        color: Colors.black,
+                        size: 30,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -120,15 +130,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   for (final p in top.take(5))
                     ListTile(
                       contentPadding: EdgeInsets.zero,
-                      onTap: () => openPost(context, [p], 0),
+                      onTap: () => openPostInsights(context, p),
                       leading: ClipRRect(
                         borderRadius: BorderRadius.circular(10),
                         child: SizedBox(
                           width: 54,
                           height: 54,
-                          child: p.isClip
-                              ? ClipCover(post: p)
-                              : NetImage(p.mediaUrl),
+                          child: ClipCover(post: p),
                         ),
                       ),
                       title: Text(
@@ -141,7 +149,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                       subtitle: Text(
                         '♥ ${compactCount(p.likesCount)}   💬 ${compactCount(p.commentsCount)}'
-                        '${p.isClip ? '   ▶ ${compactCount(p.viewsCount)}' : ''}',
+                        '   👁 ${compactCount(p.viewsCount)}',
                         style: const TextStyle(color: AppColors.textSecondary),
                       ),
                       trailing: Text(
@@ -184,7 +192,10 @@ class _Card extends StatelessWidget {
             children: [
               Text(
                 compactCount(value < 0 ? 0 : value),
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
               Text(
                 label,
