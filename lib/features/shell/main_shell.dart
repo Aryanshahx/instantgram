@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/services/calls.dart';
 import '../../core/services/deep_links.dart';
 import '../../core/services/media_prefetch.dart';
+import '../profile/data/user_repository.dart';
 import '../profile/presentation/open_username.dart';
 import '../profile/data/famous_index.dart';
 import '../reels/data/clips_warmup.dart';
@@ -66,6 +68,18 @@ class _MainShellState extends State<MainShell> {
     DeepLinks.instance.start((name) {
       if (mounted) openUsername(context, name);
     });
+    unawaited(_startCalls());
+  }
+
+  /// v0.9: voice + video calls (receive calls, open an accepted one).
+  Future<void> _startCalls() async {
+    try {
+      final me = await UserRepository.instance.meCached();
+      await Calls.instance.signIn(uid: widget.uid, username: me.username);
+      if (mounted) Calls.instance.openAcceptedCall();
+    } catch (e) {
+      debugPrint('calls: $e');
+    }
   }
 
   void _onShared(UploadTask t) {

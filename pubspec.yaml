@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.8.0+1
+version: 0.9.1+2
 
 environment:
   sdk: ^3.12.2
@@ -37,19 +37,19 @@ dependencies:
   firebase_core: ^4.15.0
   firebase_auth: ^6.7.0
   cloud_firestore: ^6.10.0
-  cached_network_image: ^4.0.3
+  cached_network_image: ^3.4.1
   video_player: ^2.14.1
   flutter_staggered_grid_view: ^0.7.0
   image_picker: ^1.2.4
   http: ^1.6.0
-  share_plus: ^13.3.1
+  share_plus: ^12.0.2
   shared_preferences: ^2.5.6
   url_launcher: ^6.3.3
   volume_controller: ^3.7.1
   flutter_video_thumbnail_plus: ^1.0.7
   image: ^4.12.0
   visibility_detector: ^0.4.0+2
-  file_picker: ^13.1.0
+  file_picker: 10.3.8
   just_audio: ^0.10.6
   flutter_cache_manager: ^3.4.5
   image_picker_android: ^0.8.13+25
@@ -61,6 +61,12 @@ dependencies:
   app_links: ^7.2.2
   path_provider: ^2.1.6
   flutter_foreground_task: ^11.0.3
+  zego_uikit_prebuilt_call: ^4.24.5
+  zego_uikit: ^2.29.3
+  zego_uikit_signaling_plugin: ^2.8.22
+  record: ^7.1.2
+  geolocator: ^14.0.1
+  geocoding: ^5.0.0
 
 dev_dependencies:
   flutter_test:

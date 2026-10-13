@@ -46,3 +46,8 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+// v0.9: incoming calls ring when the app is closed (FCM)
+dependencies {
+    implementation("im.zego:zpns-fcm:2.8.0")
+}

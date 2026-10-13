@@ -694,16 +694,16 @@ void main() {
       expect(asked.last, 'cat');
       await t.tap(find.byKey(const ValueKey('gif-1')));
       await t.pumpAndSettle();
-      expect(got?.gif?.url, 'https://media.giphy.test/1.webp');
+      expect(got?.gif.url, 'https://media.giphy.test/1.webp');
     });
 
-    testWidgets('no GIPHY key -> gallery only', (t) async {
+    testWidgets('no GIPHY key -> message (v0.9: no gallery)', (t) async {
       GifSearch.debugPost = (body) async =>
           throw const ApiException('off', statusCode: 503);
       await t.pumpWidget(_app(const GifPickerSheet()));
       await t.pumpAndSettle();
       expect(find.byKey(const ValueKey('gif-off')), findsOneWidget);
-      expect(find.text('Choose a GIF'), findsOneWidget);
+      expect(find.text('Choose a GIF'), findsNothing);
     });
   });
 

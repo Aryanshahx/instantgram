@@ -19,6 +19,8 @@ import '../../editor/filters.dart';
 import '../../editor/video_frames.dart';
 import '../data/post_repository.dart';
 import '../data/upload_queue.dart';
+import 'create_sheet.dart' show ComposeReply;
+import 'my_post_picker.dart' show ReplyStickerChip;
 
 export '../../editor/edit_models.dart' show ComposeMode, EditedMedia;
 export '../../../shared/widgets/media_view.dart' show PageDots;
@@ -62,6 +64,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   double? _progress; // null = not uploading
   String? _error;
+
+  /// v0.9: this clip / post answers a comment (sticker on it).
+  ReplyRef? _reply = ComposeReply.pending;
 
   bool get _isClip => widget.mode == ComposeMode.clip;
   bool get _isStory => widget.mode == ComposeMode.story;
@@ -185,6 +190,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         coverPath: !_isStory && _hasCover ? _cover?.path : null,
         audioPath: _isStory ? null : widget.audio?.file.path,
         audioName: _isStory ? '' : (widget.audio?.name ?? ''),
+        replyTo: _isStory ? null : _reply,
       );
       if (!mounted) return;
       final messenger = ScaffoldMessenger.of(context);
@@ -525,6 +531,23 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     ),
                   ],
                   const SizedBox(height: 12),
+                  if (!_isStory && _reply != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 8, 10),
+                      child: Row(
+                        children: [
+                          Flexible(child: ReplyStickerChip(reply: _reply!)),
+                          IconButton(
+                            key: const ValueKey('reply-sticker-remove'),
+                            tooltip: 'Remove',
+                            onPressed: uploading
+                                ? null
+                                : () => setState(() => _reply = null),
+                            icon: const Icon(Icons.close, size: 18),
+                          ),
+                        ],
+                      ),
+                    ),
                   if (!_isStory)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),

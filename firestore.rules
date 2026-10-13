@@ -344,12 +344,19 @@ service cloud.firestore {
         }
         function commentOk(d) {
           let hasPic = d.get('imageUrl', '') != '' || d.get('gifUrl', '') != '';
+          // v0.9: answered with a post / clip
+          let hasRef = d.get('refPostId', '') != '';
           return d.keys().hasOnly(['authorId', 'authorUsername', 'authorPhotoUrl',
                   'text', 'createdAt', 'parentId', 'replyToUsername',
                   'imageUrl', 'imageKey', 'imageW', 'imageH',
-                  'gifUrl', 'gifW', 'gifH', 'likesCount', 'repliesCount'])
+                  'gifUrl', 'gifW', 'gifH', 'likesCount', 'repliesCount',
+                  'refPostId', 'refPostType', 'refThumb', 'refAuthor'])
             && d.text is string && d.text.size() <= 1000
-            && (d.text.size() > 0 || hasPic)
+            && (d.text.size() > 0 || hasPic || hasRef)
+            && d.get('refPostId', '') is string && d.get('refPostId', '').size() <= 60
+            && d.get('refPostType', '') in ['', 'photo', 'clip']
+            && d.get('refThumb', '') is string && d.get('refThumb', '').size() <= 600
+            && d.get('refAuthor', '') is string && d.get('refAuthor', '').size() <= 40
             && d.get('parentId', '') is string && d.get('parentId', '').size() <= 40
             && d.get('replyToUsername', '') is string
             && d.get('replyToUsername', '').size() <= 40
@@ -400,13 +407,51 @@ service cloud.firestore {
         allow read: if signedIn() && me() in cid.split('_');
         allow create: if signedIn() && me() in cid.split('_')
           && request.resource.data.senderId == me()
-          && request.resource.data.text is string
-          && request.resource.data.text.size() > 0
-          && request.resource.data.text.size() <= 2000
+          && messageOk(request.resource.data)
           // nobody in the chat blocked you
           && !blockedBy(cid.split('_')[0], me())
           && !blockedBy(cid.split('_')[1], me());
-        allow update, delete: if false;
+        // v0.9: react (only your own emoji) or "delete for you"
+        allow update: if signedIn() && me() in cid.split('_')
+          && (reactOk() || hideOk());
+        // v0.9: "delete for everyone" = the sender removes it
+        allow delete: if signedIn() && resource.data.senderId == me();
+
+        function messageOk(d) {
+          let kind = d.get('kind', 'text');
+          let media = kind in ['image', 'gif', 'voice'];
+          return d.keys().hasOnly(['senderId', 'createdAt', 'text', 'kind',
+                  'postId', 'postType', 'postThumb', 'postAuthor', 'postCaption',
+                  'mediaUrl', 'mediaKey', 'width', 'height', 'durationMs',
+                  'lat', 'lng', 'address', 'replyTo', 'forwarded'])
+            && kind in ['text', 'post', 'image', 'gif', 'voice', 'location']
+            && d.text is string && d.text.size() <= 2000
+            && (kind != 'text' || d.text.size() > 0)
+            && (!media || (d.mediaUrl is string && d.mediaUrl.matches('https://.*')
+                           && d.mediaUrl.size() <= 600))
+            && (kind != 'location' || (d.lat is number && d.lng is number
+                  && d.lat >= -90 && d.lat <= 90 && d.lng >= -180 && d.lng <= 180))
+            && d.get('address', '') is string && d.get('address', '').size() <= 300
+            && (!('replyTo' in d) || (d.replyTo is map
+                  && d.replyTo.keys().hasOnly(['id', 'senderId', 'text'])
+                  && d.replyTo.text is string && d.replyTo.text.size() <= 300))
+            && d.get('forwarded', false) is bool;
+        }
+        function reactOk() {
+          let old = resource.data.get('reactions', {});
+          let now = request.resource.data.get('reactions', {});
+          return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+            && now is map
+            && now.diff(old).affectedKeys().hasOnly([me()])
+            && (!(me() in now) || (now[me()] is string && now[me()].size() <= 16));
+        }
+        function hideOk() {
+          let old = resource.data.get('hiddenFor', []);
+          let now = request.resource.data.get('hiddenFor', []);
+          return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hiddenFor'])
+            && now is list && now.size() == old.size() + 1
+            && now.hasAll(old) && now.hasAll([me()]) && !old.hasAll([me()]);
+        }
       }
     }
   }

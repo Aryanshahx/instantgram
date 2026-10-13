@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/services/gif_search.dart';
@@ -17,27 +18,198 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/net_image.dart';
 import '../../profile/data/user_repository.dart';
 import '../data/post_repository.dart';
+import 'create_sheet.dart';
 import 'gif_picker.dart';
+import 'my_post_picker.dart';
 
 /// Most used emojis, shown above the comment box (tap = add).
 const kCommentEmojis = ['❤️', '🙌', '🔥', '👏', '😢', '😍', '😮', '😂'];
 
-Future<void> showComments(BuildContext context, Post post) {
+/// Comments panel (v0.9): opens at 60 % of the screen, drag it up to full
+/// screen or down to close.
+///
+/// [onSheetTop] gets where the panel's top edge is (pixels from the top of
+/// the screen; null = closed). Clips use it to show the video small above
+/// the panel and to pause it when the panel is full screen. With
+/// [onSheetTop] the area above the panel is not darkened.
+Future<void> showComments(
+  BuildContext context,
+  Post post, {
+  ValueChanged<double?>? onSheetTop,
+}) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    useSafeArea: true,
-    builder: (_) => CommentsSheet(post: post),
-  );
+    useSafeArea: false,
+    showDragHandle: false,
+    enableDrag: false,
+    backgroundColor: Colors.transparent,
+    elevation: 0,
+    barrierColor: onSheetTop != null ? Colors.transparent : null,
+    builder: (_) => CommentsPanel(post: post, onSheetTop: onSheetTop),
+  ).whenComplete(() => onSheetTop?.call(null));
+}
+
+/// Draggable comments panel: 60 % -> full screen, or down to close.
+class CommentsPanel extends StatefulWidget {
+  const CommentsPanel({
+    super.key,
+    required this.post,
+    this.onSheetTop,
+    this.stream,
+    this.myUid,
+  });
+
+  final Post post;
+  final ValueChanged<double?>? onSheetTop;
+
+  /// Tests.
+  final Stream<List<Comment>>? stream;
+  final String? myUid;
+
+  static const double half = 0.6;
+  static const double min = 0.25;
+
+  @override
+  State<CommentsPanel> createState() => _CommentsPanelState();
+}
+
+class _CommentsPanelState extends State<CommentsPanel> {
+  final _dsc = DraggableScrollableController();
+  final _topInset = ValueNotifier<double>(0);
+  double _extent = CommentsPanel.half;
+  double _avail = 0;
+  bool _full = false;
+  Animation<double>? _routeAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _report());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // follow the open / close slide, so the video grows back smoothly
+    final a = ModalRoute.of(context)?.animation;
+    if (a != _routeAnim) {
+      _routeAnim?.removeListener(_report);
+      _routeAnim = a;
+      a?.addListener(_report);
+    }
+  }
+
+  @override
+  void dispose() {
+    _routeAnim?.removeListener(_report);
+    _dsc.dispose();
+    _topInset.dispose();
+    super.dispose();
+  }
+
+  void _report() {
+    if (!mounted || _avail <= 0) return;
+    final top = _avail * (1 - _extent);
+    final a = Easing.legacyDecelerate.transform(
+      (_routeAnim?.value ?? 1).clamp(0.0, 1.0),
+    );
+    widget.onSheetTop?.call(_avail - (_avail - top) * a);
+    final pad = MediaQuery.paddingOf(context).top;
+    _topInset.value = (pad - top).clamp(0.0, pad);
+    final full = top < 1;
+    if (full != _full) setState(() => _full = full);
+  }
+
+  bool _onExtent(DraggableScrollableNotification n) {
+    _extent = n.extent;
+    _report();
+    return false;
+  }
+
+  void _drag(DragUpdateDetails d) {
+    if (!_dsc.isAttached || _avail <= 0) return;
+    _dsc.jumpTo(
+      (_dsc.size - d.delta.dy / _avail).clamp(CommentsPanel.min, 1.0),
+    );
+  }
+
+  void _dragEnd(DragEndDetails d) {
+    if (!_dsc.isAttached) return;
+    final v = d.primaryVelocity ?? 0; // + = down
+    final size = _dsc.size;
+    double target;
+    if (v > 800) {
+      target = size > CommentsPanel.half + 0.05
+          ? CommentsPanel.half
+          : CommentsPanel.min;
+    } else if (v < -800) {
+      target = 1.0;
+    } else if (size < (CommentsPanel.min + CommentsPanel.half) / 2) {
+      target = CommentsPanel.min;
+    } else if (size < (CommentsPanel.half + 1) / 2) {
+      target = CommentsPanel.half;
+    } else {
+      target = 1.0;
+    }
+    _dsc.animateTo(
+      target,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final kb = MediaQuery.viewInsetsOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: kb),
+      child: LayoutBuilder(
+        builder: (context, box) {
+          if (box.maxHeight != _avail) {
+            _avail = box.maxHeight;
+            WidgetsBinding.instance.addPostFrameCallback((_) => _report());
+          }
+          return NotificationListener<DraggableScrollableNotification>(
+            onNotification: _onExtent,
+            child: DraggableScrollableSheet(
+              controller: _dsc,
+              expand: false,
+              initialChildSize: CommentsPanel.half,
+              minChildSize: CommentsPanel.min,
+              maxChildSize: 1,
+              snap: true,
+              snapSizes: const [CommentsPanel.half],
+              shouldCloseOnMinExtent: true,
+              builder: (context, scroll) => Material(
+                key: const ValueKey('comments-panel'),
+                color: AppColors.surface,
+                clipBehavior: Clip.antiAlias,
+                borderRadius: BorderRadius.vertical(
+                  top: Radius.circular(_full ? 0 : 22),
+                ),
+                child: CommentsSheet(
+                  post: widget.post,
+                  stream: widget.stream,
+                  myUid: widget.myUid,
+                  scrollController: scroll,
+                  onHeaderDrag: _drag,
+                  onHeaderDragEnd: _dragEnd,
+                  topInset: _topInset,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 }
 
 /// Picture waiting to be sent with the next comment.
 class _Draft {
   _Draft.file(File this.file, {required this.isGif}) : gif = null;
-  _Draft.gif(PickedGif g)
-    : file = g.file,
-      gif = g.gif,
-      isGif = true;
+  _Draft.gif(PickedGif g) : file = null, gif = g.gif, isGif = true;
 
   final File? file;
   final GifResult? gif;
@@ -50,11 +222,23 @@ class CommentsSheet extends StatefulWidget {
     required this.post,
     this.stream,
     this.myUid,
+    this.scrollController,
+    this.onHeaderDrag,
+    this.onHeaderDragEnd,
+    this.topInset,
   });
   final Post post;
 
   /// Tests: who is signed in.
   final String? myUid;
+
+  /// From the draggable panel (null = fixed height sheet).
+  final ScrollController? scrollController;
+  final GestureDragUpdateCallback? onHeaderDrag;
+  final GestureDragEndCallback? onHeaderDragEnd;
+
+  /// Space for the status bar when the panel is full screen.
+  final ValueListenable<double>? topInset;
 
   /// Tests pass their own comments.
   final Stream<List<Comment>>? stream;
@@ -71,6 +255,9 @@ class _CommentsSheetState extends State<CommentsSheet> {
   bool _sending = false;
   Comment? _replyTo;
   _Draft? _draft;
+
+  /// v0.9: one of your clips / posts sent with the comment.
+  Post? _linked;
   final Set<String> _expanded = {};
 
   /// Replies shown before "View more replies".
@@ -123,7 +310,10 @@ class _CommentsSheetState extends State<CommentsSheet> {
     try {
       final f = await MediaService.instance.pickGalleryImage(maxWidth: 1440);
       if (f != null && mounted) {
-        setState(() => _draft = _Draft.file(f, isGif: false));
+        setState(() {
+          _draft = _Draft.file(f, isGif: false);
+          _linked = null;
+        });
       }
     } catch (e) {
       if (mounted) _snack(friendlyError(e));
@@ -132,7 +322,37 @@ class _CommentsSheetState extends State<CommentsSheet> {
 
   Future<void> _pickGif() async {
     final g = await showGifPicker(context);
-    if (g != null && mounted) setState(() => _draft = _Draft.gif(g));
+    if (g != null && mounted) {
+      setState(() {
+        _draft = _Draft.gif(g);
+        _linked = null;
+      });
+    }
+  }
+
+  /// v0.9: answer with one of your clips / posts, or make a new one.
+  Future<void> _replyWith() async {
+    final reply = _replyTo;
+    final how = await showReplyWithSheet(context, to: reply?.authorUsername);
+    if (how == null || !mounted) return;
+    if (how == ReplyWith.mine) {
+      final p = await showMyPostPicker(context);
+      if (p != null && mounted) {
+        setState(() {
+          _linked = p;
+          _draft = null;
+        });
+      }
+      return;
+    }
+    final ref = reply != null
+        ? ReplyRef.fromComment(widget.post, reply)
+        : ReplyRef.toPost(widget.post);
+    await startCompose(
+      context,
+      how == ReplyWith.newClip ? ComposeMode.clip : ComposeMode.photo,
+      reply: ref,
+    );
   }
 
   static Future<(int, int)> _size(File f) async {
@@ -151,10 +371,11 @@ class _CommentsSheetState extends State<CommentsSheet> {
   Future<void> _send() async {
     var text = _ctrl.text.trim();
     final draft = _draft;
+    final linked = _linked;
     final reply = _replyTo;
     // "@name " alone is not a comment
     if (reply != null && text == '@${reply.authorUsername}') text = '';
-    if ((text.isEmpty && draft == null) || _sending) return;
+    if ((text.isEmpty && draft == null && linked == null) || _sending) return;
     setState(() => _sending = true);
     try {
       CommentPicture? pic;
@@ -186,11 +407,13 @@ class _CommentsSheetState extends State<CommentsSheet> {
         text,
         replyTo: reply,
         picture: pic,
+        linked: linked,
       );
       _ctrl.clear();
       if (mounted) {
         setState(() {
           _draft = null;
+          _linked = null;
           _replyTo = null;
           if (reply != null) {
             _expanded.add(reply.isReply ? reply.parentId : reply.id);
@@ -257,85 +480,127 @@ class _CommentsSheetState extends State<CommentsSheet> {
     return out;
   }
 
+  Widget _header() {
+    final inset = widget.topInset;
+    final drag = widget.onHeaderDrag != null;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragUpdate: widget.onHeaderDrag,
+      onVerticalDragEnd: widget.onHeaderDragEnd,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (inset != null)
+            ValueListenableBuilder<double>(
+              valueListenable: inset,
+              builder: (context, v, _) => SizedBox(height: v),
+            ),
+          if (drag)
+            Container(
+              margin: const EdgeInsets.only(top: 8, bottom: 6),
+              width: 38,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.textHint,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          const Padding(
+            padding: EdgeInsets.only(bottom: 6),
+            child: Text(
+              'Comments',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Loading / empty / error inside the panel's scroll view (so dragging
+  /// there still moves the panel).
+  Widget _filler(Widget child) => ListView(
+    controller: widget.scrollController,
+    children: [SizedBox(height: 260, child: Center(child: child))],
+  );
+
   @override
   Widget build(BuildContext context) {
     final me = widget.myUid ?? UserRepository.instance.myUid;
     final canModerate = widget.post.authorId == me;
+    final body = Column(
+      children: [
+        _header(),
+        Expanded(
+          child: StreamBuilder<List<Comment>>(
+            stream: _stream,
+            builder: (context, snap) {
+              if (snap.hasError) return _filler(ErrorView(error: snap.error));
+              if (!snap.hasData) return _filler(const LoadingView());
+              final rows = _rows(snap.data!);
+              if (rows.isEmpty) {
+                return _filler(
+                  const EmptyState(
+                    icon: Icons.chat_bubble_outline,
+                    title: 'No comments yet',
+                    subtitle: 'Start the conversation.',
+                  ),
+                );
+              }
+              return ListView.builder(
+                controller: widget.scrollController,
+                padding: const EdgeInsets.only(bottom: 8),
+                itemCount: rows.length,
+                itemBuilder: (context, i) {
+                  final r = rows[i];
+                  if (r is _MoreReplies) {
+                    return Padding(
+                      padding: const EdgeInsets.only(left: 62, bottom: 6),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          key: ValueKey('more-replies-${r.parentId}'),
+                          onPressed: () =>
+                              setState(() => _expanded.add(r.parentId)),
+                          child: Text(
+                            'View ${r.count} more '
+                            '${r.count == 1 ? 'reply' : 'replies'}',
+                            style: const TextStyle(
+                              color: AppColors.textSecondary,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                  final c = r as Comment;
+                  return CommentTile(
+                    key: ValueKey('comment-${c.id}'),
+                    postId: widget.post.id,
+                    comment: c,
+                    canDelete: c.authorId == me || canModerate,
+                    onReply: () => _reply(c),
+                    onDelete: () => _delete(c),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        _composer(),
+      ],
+    );
+    if (widget.scrollController != null) return body;
+    // old fixed sheet (tests, simple use)
     return SizedBox(
       height: MediaQuery.of(context).size.height * 0.75,
       child: Padding(
         padding: EdgeInsets.only(
           bottom: MediaQuery.of(context).viewInsets.bottom,
         ),
-        child: Column(
-          children: [
-            const Text(
-              'Comments',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 8),
-            const Divider(height: 1),
-            Expanded(
-              child: StreamBuilder<List<Comment>>(
-                stream: _stream,
-                builder: (context, snap) {
-                  if (snap.hasError) return ErrorView(error: snap.error);
-                  if (!snap.hasData) return const LoadingView();
-                  final rows = _rows(snap.data!);
-                  if (rows.isEmpty) {
-                    return const Center(
-                      child: EmptyState(
-                        icon: Icons.chat_bubble_outline,
-                        title: 'No comments yet',
-                        subtitle: 'Start the conversation.',
-                      ),
-                    );
-                  }
-                  return ListView.builder(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    itemCount: rows.length,
-                    itemBuilder: (context, i) {
-                      final r = rows[i];
-                      if (r is _MoreReplies) {
-                        return Padding(
-                          padding: const EdgeInsets.only(left: 62, bottom: 6),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton(
-                              key: ValueKey('more-replies-${r.parentId}'),
-                              onPressed: () =>
-                                  setState(() => _expanded.add(r.parentId)),
-                              child: Text(
-                                '—— View ${r.count} more '
-                                '${r.count == 1 ? 'reply' : 'replies'}',
-                                style: const TextStyle(
-                                  color: AppColors.textSecondary,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      }
-                      final c = r as Comment;
-                      return CommentTile(
-                        key: ValueKey('comment-${c.id}'),
-                        postId: widget.post.id,
-                        comment: c,
-                        canDelete: c.authorId == me || canModerate,
-                        onReply: () => _reply(c),
-                        onDelete: () => _delete(c),
-                      );
-                    },
-                  );
-                },
-              ),
-            ),
-            const Divider(height: 1),
-            _composer(),
-          ],
-        ),
+        child: body,
       ),
     );
   }
@@ -346,7 +611,8 @@ class _CommentsSheetState extends State<CommentsSheet> {
     final draft = _draft;
     final reply = _replyTo;
     final canSend =
-        !_sending && (_ctrl.text.trim().isNotEmpty || draft != null);
+        !_sending &&
+        (_ctrl.text.trim().isNotEmpty || draft != null || _linked != null);
     return SafeArea(
       top: false,
       child: Column(
@@ -398,6 +664,35 @@ class _CommentsSheetState extends State<CommentsSheet> {
               ],
             ),
           ),
+          if (_linked != null)
+            Padding(
+              key: const ValueKey('linked-draft'),
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+              child: Row(
+                children: [
+                  LinkedPostCard(
+                    thumb: _linked!.coverUrl,
+                    author: _linked!.authorUsername,
+                    isClip: _linked!.isClip,
+                    width: 46,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _linked!.isClip ? 'Your clip' : 'Your post',
+                    style: const TextStyle(color: AppColors.textSecondary),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    key: const ValueKey('linked-remove'),
+                    tooltip: 'Remove',
+                    onPressed: _sending
+                        ? null
+                        : () => setState(() => _linked = null),
+                    icon: const Icon(Icons.close, size: 20),
+                  ),
+                ],
+              ),
+            ),
           if (draft != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
@@ -437,12 +732,12 @@ class _CommentsSheetState extends State<CommentsSheet> {
                   onTap: _sending ? null : _pickGif,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 3,
+                      horizontal: 7,
+                      vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: AppColors.textPrimary, width: 1.6),
+                      color: AppColors.surfaceHigh,
+                      borderRadius: BorderRadius.circular(7),
                     ),
                     child: const Text(
                       'GIF',
@@ -453,7 +748,12 @@ class _CommentsSheetState extends State<CommentsSheet> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                IconButton(
+                  key: const ValueKey('comment-reply-with'),
+                  tooltip: 'Reply with a clip or post',
+                  onPressed: _sending ? null : _replyWith,
+                  icon: const Icon(Icons.video_library_outlined, size: 23),
+                ),
                 Expanded(
                   child: TextField(
                     key: const ValueKey('comment-input'),
@@ -478,13 +778,18 @@ class _CommentsSheetState extends State<CommentsSheet> {
                         horizontal: 16,
                         vertical: 11,
                       ),
+                      // v0.9: no outline (no white lines)
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
-                        borderSide: const BorderSide(color: AppColors.border),
+                        borderSide: BorderSide.none,
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
-                        borderSide: const BorderSide(color: AppColors.border),
+                        borderSide: BorderSide.none,
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
                       ),
                     ),
                   ),
@@ -595,9 +900,8 @@ class _CommentTileState extends State<CommentTile> {
     } catch (e) {
       if (mounted) {
         setState(() => _optimistic = null);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(friendlyError(e))));
       }
     }
   }
@@ -682,6 +986,17 @@ class _CommentTileState extends State<CommentTile> {
                             ),
                           ),
                         ),
+                      if (c.hasRef)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: LinkedPostCard(
+                            key: ValueKey('comment-ref-${c.id}'),
+                            thumb: c.refThumb,
+                            author: c.refAuthor,
+                            isClip: c.refPostType == Post.clip,
+                            onTap: () => openPostById(context, c.refPostId),
+                          ),
+                        ),
                       Row(
                         children: [
                           TextButton(
@@ -711,8 +1026,7 @@ class _CommentTileState extends State<CommentTile> {
                                   horizontal: 0,
                                 ),
                                 minimumSize: const Size(44, 30),
-                                tapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                 foregroundColor: AppColors.textSecondary,
                               ),
                               onPressed: widget.onDelete,

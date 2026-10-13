@@ -1,25 +1,20 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../../../core/services/gif_search.dart';
-import '../../../core/services/media_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/errors.dart';
 import '../../../shared/widgets/net_image.dart';
 
-/// What was chosen in the GIF picker: a GIPHY GIF or a gallery GIF file.
+/// The GIF chosen in the picker (GIPHY).
 class PickedGif {
-  const PickedGif.search(GifResult this.gif) : file = null;
-  const PickedGif.file(File this.file) : gif = null;
+  const PickedGif.search(this.gif);
 
-  final GifResult? gif;
-  final File? file;
+  final GifResult gif;
 }
 
-/// GIF search (GIPHY) + "From gallery" (v0.8 comments).
+/// GIF search (GIPHY) for comments and chats. v0.9: no gallery button.
 Future<PickedGif?> showGifPicker(BuildContext context) =>
     showModalBottomSheet<PickedGif>(
       context: context,
@@ -99,30 +94,6 @@ class _GifPickerSheetState extends State<GifPickerSheet> {
     }
   }
 
-  Future<void> _fromGallery() async {
-    try {
-      var f = await MediaService.instance.pickGalleryGif();
-      if (f == null) return;
-      if (!f.path.toLowerCase().endsWith('.gif')) {
-        final dir = await getTemporaryDirectory();
-        f = await f.copy(
-          '${dir.path}/gif_${DateTime.now().millisecondsSinceEpoch}.gif',
-        );
-      }
-      if (await f.length() > 15 * 1024 * 1024) {
-        throw const FormatException('This GIF is too big (max 15 MB)');
-      }
-      if (mounted) Navigator.pop(context, PickedGif.file(f));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e is FormatException ? e.message : friendlyError(e)),
-        ),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return SizedBox(
@@ -159,13 +130,6 @@ class _GifPickerSheetState extends State<GifPickerSheet> {
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    key: const ValueKey('gif-gallery'),
-                    onPressed: _fromGallery,
-                    icon: const Icon(Icons.photo_library_outlined, size: 18),
-                    label: const Text('Gallery'),
                   ),
                 ],
               ),
@@ -208,15 +172,9 @@ class _GifPickerSheetState extends State<GifPickerSheet> {
               ),
               const SizedBox(height: 4),
               const Text(
-                'You can send a GIF from your gallery.',
+                'It works after the GIPHY key is added in Vercel.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: AppColors.textSecondary),
-              ),
-              const SizedBox(height: 14),
-              FilledButton.icon(
-                onPressed: _fromGallery,
-                icon: const Icon(Icons.photo_library_outlined),
-                label: const Text('Choose a GIF'),
               ),
             ],
           ),

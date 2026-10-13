@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/config/app_info.dart';
 import '../../../core/constants/languages.dart';
 import '../../../core/services/app_settings.dart';
+import '../../../core/services/calls.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/email.dart';
 import '../../../shared/models/user_profile.dart';
@@ -305,6 +306,7 @@ Future<void> confirmLogout(BuildContext context) async {
   );
   if (ok != true || !context.mounted) return;
   Navigator.of(context).popUntil((r) => r.isFirst);
+  await Calls.instance.signOut(); // v0.9: no calls for this phone any more
   await AuthService.instance.signOut();
 }
 

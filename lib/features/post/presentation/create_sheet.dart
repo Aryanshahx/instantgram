@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/services/media_service.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../shared/models/post.dart';
 import '../../editor/edit_models.dart';
 import '../../editor/media_editor_screen.dart';
 
@@ -59,11 +60,27 @@ Future<void> showCreateSheet(BuildContext context) {
 
 /// Pick media -> editor -> share screen.
 /// Posts and clips can mix photos and videos (no limit).
-Future<void> startCompose(BuildContext context, ComposeMode mode) async {
+/// v0.9: [reply] = the new clip / post answers a comment.
+Future<void> startCompose(
+  BuildContext context,
+  ComposeMode mode, {
+  ReplyRef? reply,
+}) async {
   final kind = mode == ComposeMode.story ? PickKind.moment : PickKind.mixed;
-  final media = await MediaService.instance.pickForCreate(context, kind);
-  if (media.isEmpty || !context.mounted) return;
-  await openEditor(context, media, mode);
+  ComposeReply.pending = mode == ComposeMode.story ? null : reply;
+  try {
+    final media = await MediaService.instance.pickForCreate(context, kind);
+    if (media.isEmpty || !context.mounted) return;
+    await openEditor(context, media, mode);
+  } finally {
+    ComposeReply.pending = null;
+  }
+}
+
+/// The comment the clip / post being made answers (v0.9).
+class ComposeReply {
+  ComposeReply._();
+  static ReplyRef? pending;
 }
 
 class _CreateOption extends StatelessWidget {

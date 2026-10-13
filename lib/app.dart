@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'core/constants/app_constants.dart';
 import 'core/navigation/page_cover.dart';
+import 'core/services/calls.dart';
 import 'core/services/app_settings.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/auth_gate.dart';
@@ -18,6 +19,8 @@ class InstantGramApp extends StatelessWidget {
     return MaterialApp(
       title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
+      // v0.9: call screens open on this navigator
+      navigatorKey: Calls.instance.navigatorKey,
       theme: AppTheme.dark,
       darkTheme: AppTheme.dark,
       themeMode: ThemeMode.dark,

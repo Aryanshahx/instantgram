@@ -1,5 +1,11 @@
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/painting.dart' show decodeImageFromList;
+
+import '../../../core/services/gif_search.dart';
+import '../../../core/services/media_service.dart';
 
 import '../../../shared/models/post.dart';
 import '../../../shared/models/user_profile.dart';
@@ -27,6 +33,12 @@ class ChatRepository {
       .snapshots()
       .map((s) => s.docs.map(Chat.fromDoc).toList());
 
+  /// One chat (pinned message…). null = no messages yet.
+  Stream<Chat?> chat(String chatId) => _chats
+      .doc(chatId)
+      .snapshots()
+      .map((d) => d.exists ? Chat.fromDoc(d) : null);
+
   Stream<List<Message>> messages(String chatId) => _chats
       .doc(chatId)
       .collection('messages')
@@ -35,19 +47,179 @@ class ChatRepository {
       .snapshots()
       .map((s) => s.docs.map(Message.fromDoc).toList());
 
-  Future<void> send(UserProfile other, String text) async {
+  Future<void> send(
+    UserProfile other,
+    String text, {
+    MessageQuote? replyTo,
+  }) async {
     final t = text.trim();
     if (t.isEmpty) return;
-    await _write(
-      ChatPerson(
-        uid: other.uid,
-        username: other.username,
-        photoUrl: other.photoUrl,
-      ),
-      {'text': t},
-      t,
-    );
+    await _write(ChatPerson.of(other), {
+      'text': t,
+      if (replyTo != null) 'replyTo': replyTo.toMap(),
+    }, t);
   }
+
+  // ------------------------------------------------------------ v0.9 media
+
+  /// Photo from the phone (uploaded to Tigris first).
+  Future<void> sendImage(
+    ChatPerson other,
+    File file, {
+    MessageQuote? replyTo,
+    void Function(double)? onProgress,
+  }) async {
+    var w = 0, h = 0;
+    try {
+      final img = await decodeImageFromList(await file.readAsBytes());
+      w = img.width;
+      h = img.height;
+      img.dispose();
+    } catch (_) {}
+    final up = await MediaService.instance.upload(
+      file,
+      kind: MediaKind.chat,
+      onProgress: onProgress,
+    );
+    await _write(other, {
+      'kind': Message.image,
+      'text': '',
+      'mediaUrl': up.url,
+      'mediaKey': up.key,
+      'width': w,
+      'height': h,
+      if (replyTo != null) 'replyTo': replyTo.toMap(),
+    }, '📷 Photo');
+  }
+
+  /// GIF from GIPHY (nothing to upload).
+  Future<void> sendGif(
+    ChatPerson other,
+    GifResult gif, {
+    MessageQuote? replyTo,
+  }) => _write(other, {
+    'kind': Message.gif,
+    'text': '',
+    'mediaUrl': gif.url,
+    'width': gif.width,
+    'height': gif.height,
+    if (replyTo != null) 'replyTo': replyTo.toMap(),
+  }, 'GIF');
+
+  /// Voice message (m4a).
+  Future<void> sendVoice(
+    ChatPerson other,
+    File file,
+    int durationMs, {
+    MessageQuote? replyTo,
+  }) async {
+    final up = await MediaService.instance.upload(file, kind: MediaKind.voice);
+    await _write(other, {
+      'kind': Message.voice,
+      'text': '',
+      'mediaUrl': up.url,
+      'mediaKey': up.key,
+      'durationMs': durationMs,
+      if (replyTo != null) 'replyTo': replyTo.toMap(),
+    }, '🎤 Voice message');
+  }
+
+  /// Where you are (not live): card with the address, opens Google Maps.
+  Future<void> sendLocation(
+    ChatPerson other, {
+    required double lat,
+    required double lng,
+    String address = '',
+    MessageQuote? replyTo,
+  }) {
+    final a = address.length > 300 ? address.substring(0, 300) : address;
+    return _write(other, {
+      'kind': Message.location,
+      'text': '',
+      'lat': lat,
+      'lng': lng,
+      'address': a,
+      if (replyTo != null) 'replyTo': replyTo.toMap(),
+    }, '📍 ${a.isEmpty ? 'Location' : a}');
+  }
+
+  /// Sends a copy of [m] to [to] (marked "Forwarded").
+  Future<void> forward(Message m, ChatPerson to) =>
+      _write(to, forwardFields(m), m.preview);
+
+  /// Fields of a forwarded copy (no reactions / reply / owner).
+  static Map<String, dynamic> forwardFields(Message m) => {
+    'kind': m.kind,
+    'text': m.text,
+    'forwarded': true,
+    if (m.isSharedPost) ...{
+      'postId': m.postId,
+      'postType': m.postType,
+      'postThumb': m.postThumb,
+      'postAuthor': m.postAuthor,
+      'postCaption': m.postCaption,
+    },
+    if (m.mediaUrl.isNotEmpty) 'mediaUrl': m.mediaUrl,
+    // the copy never owns the file (deleting it must not break this one)
+    if (m.width > 0) 'width': m.width,
+    if (m.height > 0) 'height': m.height,
+    if (m.durationMs > 0) 'durationMs': m.durationMs,
+    if (m.isLocation) ...{'lat': m.lat, 'lng': m.lng, 'address': m.address},
+  };
+
+  DocumentReference<Map<String, dynamic>> _msg(String chatId, String id) =>
+      _chats.doc(chatId).collection('messages').doc(id);
+
+  /// Your emoji on a message (null = remove yours).
+  Future<void> react(String chatId, String messageId, String? emoji) => _msg(
+    chatId,
+    messageId,
+  ).update({'reactions.$myUid': emoji ?? FieldValue.delete()});
+
+  /// "Delete for you": only you stop seeing it.
+  Future<void> hideForMe(String chatId, String messageId) =>
+      _msg(chatId, messageId).update({
+        'hiddenFor': FieldValue.arrayUnion([myUid]),
+      });
+
+  /// "Delete for everyone" (only your own messages).
+  Future<void> deleteForEveryone(String chatId, Message m) async {
+    await _msg(chatId, m.id).delete();
+    if (m.mediaKey.isNotEmpty) {
+      MediaService.instance.delete(m.mediaKey).ignore();
+    }
+    try {
+      final chatRef = _chats.doc(chatId);
+      final chat = await chatRef.get();
+      final pinned = chat.data()?['pinned'];
+      final last = await chatRef
+          .collection('messages')
+          .orderBy('createdAt', descending: true)
+          .limit(1)
+          .get();
+      final next = last.docs.isEmpty ? null : Message.fromDoc(last.docs.first);
+      final preview = next?.preview ?? '';
+      await chatRef.update({
+        'lastMessage': preview.length > 200
+            ? preview.substring(0, 200)
+            : preview,
+        'lastSenderId': next?.senderId ?? '',
+        if (pinned is Map && pinned['id'] == m.id)
+          'pinned': FieldValue.delete(),
+      });
+    } catch (_) {} // the message is gone; the list text can wait
+  }
+
+  /// Pins [m] at the top of the chat (one at a time).
+  Future<void> pin(String chatId, Message m) {
+    final t = m.preview;
+    return _chats.doc(chatId).update({
+      'pinned': {'id': m.id, 'text': t.length > 120 ? t.substring(0, 120) : t},
+    });
+  }
+
+  Future<void> unpin(String chatId) =>
+      _chats.doc(chatId).update({'pinned': FieldValue.delete()});
 
   /// Sends a post / clip into the chat (shown as a card that opens it).
   Future<void> sendPost(ChatPerson other, Post post) {
@@ -148,6 +320,9 @@ class ChatPerson {
 
   /// You chatted with them recently.
   final bool recent;
+
+  factory ChatPerson.of(UserProfile u) =>
+      ChatPerson(uid: u.uid, username: u.username, photoUrl: u.photoUrl);
 
   bool matches(String q) {
     final w = q.trim().toLowerCase().replaceFirst('@', '');

@@ -58,6 +58,21 @@ class MusicPlayer with WidgetsBindingObserver {
     }
   }
 
+  /// Pauses (keeps the song) if [ownerId] is the one playing.
+  void pause(String ownerId) {
+    if (_owner != ownerId) return;
+    _pausedByApp = false;
+    _player?.pause();
+  }
+
+  /// Continues after [pause].
+  void resume(String ownerId) {
+    final p = _player;
+    if (_owner != ownerId || p == null || p.playing) return;
+    p.setVolume(_volume);
+    p.play(); // don't await
+  }
+
   Future<void> setVolume(double v) async {
     _volume = v;
     await _player?.setVolume(v);

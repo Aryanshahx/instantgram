@@ -16,7 +16,9 @@ import { env, HttpError, requireEnv } from './http.js';
 /** Files never change (unique names) -> cache for a year. */
 export const CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
-export const KINDS = ['post', 'clip', 'story', 'avatar', 'cover', 'thumb', 'audio', 'comment'];
+// v0.9: 'chat' = photos / GIFs in chats, 'voice' = voice messages
+export const KINDS = ['post', 'clip', 'story', 'avatar', 'cover', 'thumb', 'audio', 'comment', 'chat', 'voice'];
+const AUDIO_KINDS = ['audio', 'voice'];
 
 const MB = 1024 * 1024;
 export const MAX_IMAGE = 15 * MB;
@@ -77,8 +79,8 @@ function checkUpload({ kind, contentType, size }) {
   if (isVideo && !VIDEO_KINDS.includes(kind)) {
     throw new HttpError(400, 'Videos are only allowed in posts, clips and moments');
   }
-  if (isAudio !== (kind === 'audio')) {
-    throw new HttpError(400, 'Music must be an audio file');
+  if (isAudio !== AUDIO_KINDS.includes(kind)) {
+    throw new HttpError(400, kind === 'voice' ? 'Voice messages must be audio' : 'Music must be an audio file');
   }
   const n = Number(size);
   if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'Bad file size');

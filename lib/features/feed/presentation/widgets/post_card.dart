@@ -14,6 +14,7 @@ import '../../../../shared/widgets/avatar.dart';
 import '../../../../shared/widgets/media_view.dart';
 import '../../../post/data/post_repository.dart';
 import '../../../post/presentation/comments_sheet.dart';
+import '../../../post/presentation/my_post_picker.dart' show ReplyStickerChip;
 import '../../../post/presentation/post_menu.dart';
 import '../../../../shared/widgets/bounce.dart';
 
@@ -288,6 +289,15 @@ class _PostCardState extends State<PostCard>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // v0.9: made as an answer to a comment
+                  if (p.replyTo != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: ReplyStickerChip(
+                        reply: p.replyTo!,
+                        onTap: () => openPostById(context, p.replyTo!.postId),
+                      ),
+                    ),
                   if (p.caption.isNotEmpty) ...[
                     Text.rich(
                       TextSpan(

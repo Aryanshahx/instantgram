@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../core/navigation/page_cover.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
 import '../../../core/services/media_prefetch.dart';
@@ -26,6 +28,7 @@ import '../../post/data/post_repository.dart';
 import '../data/clips_warmup.dart';
 import '../../post/presentation/comments_sheet.dart';
 import '../../post/presentation/create_sheet.dart';
+import '../../post/presentation/my_post_picker.dart' show ReplyStickerChip;
 import '../../post/presentation/post_menu.dart';
 import '../../profile/data/user_repository.dart';
 import '../../../core/services/video_cache.dart';
@@ -65,6 +68,7 @@ class _ClipsScreenState extends State<ClipsScreen> {
   bool _muted = false;
   double _volume = 1;
   bool _showTopBar = true;
+  bool _panelOpen = false; // comments open: no back button / title
   int _count = 0;
   final Set<String> _deleted = {};
   Stream<List<Post>>? _stream;
@@ -196,6 +200,9 @@ class _ClipsScreenState extends State<ClipsScreen> {
           onToggleMute: _toggleMute,
           onVolumeChanged: _setVolume,
           onFinished: _next,
+          onPanel: (open) {
+            if (mounted) setState(() => _panelOpen = open);
+          },
           onDeleted: () => setState(() => _deleted.add(clips[i].id)),
           source:
               widget.source ??
@@ -237,13 +244,15 @@ class _ClipsScreenState extends State<ClipsScreen> {
               right: 0,
               top: 0,
               child: IgnorePointer(
-                ignoring: !_showTopBar,
+                ignoring: !_showTopBar || _panelOpen,
                 child: AnimatedSlide(
-                  offset: _showTopBar ? Offset.zero : const Offset(0, -1),
+                  offset: _showTopBar && !_panelOpen
+                      ? Offset.zero
+                      : const Offset(0, -1),
                   duration: const Duration(milliseconds: 220),
                   curve: Curves.easeOut,
                   child: AnimatedOpacity(
-                    opacity: _showTopBar ? 1 : 0,
+                    opacity: _showTopBar && !_panelOpen ? 1 : 0,
                     duration: const Duration(milliseconds: 220),
                     child: SafeArea(
                       bottom: false,
@@ -322,6 +331,7 @@ class ClipPlayer extends StatefulWidget {
     this.autoScroll = false,
     this.onVolumeChanged,
     this.onFinished,
+    this.onPanel,
     this.onDeleted,
     this.source = ViewSource.clips,
   });
@@ -337,6 +347,9 @@ class ClipPlayer extends StatefulWidget {
   final VoidCallback onToggleMute;
   final ValueChanged<double>? onVolumeChanged;
   final VoidCallback? onFinished;
+
+  /// Comments opened (true) / closed (false).
+  final ValueChanged<bool>? onPanel;
   final VoidCallback? onDeleted;
 
   @override
@@ -358,7 +371,7 @@ class _Optimistic {
 }
 
 class _ClipPlayerState extends State<ClipPlayer>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, PageCoverAware {
   final _repo = PostRepository.instance;
 
   /// Player for the current item when it is a video (else null).
@@ -387,6 +400,29 @@ class _ClipPlayerState extends State<ClipPlayer>
 
   /// You paused it: nothing starts it again by itself (v0.8 fix).
   bool _userPaused = false;
+
+  /// Comments opened full screen: paused until they go down (v0.9).
+  bool _coverPaused = false;
+  bool get _mustStayPaused => _userPaused || _coverPaused || pageCovered;
+
+  /// A page opened on top (profile, camera for a reply…): pause, and play
+  /// again when it closes (v0.9).
+  @override
+  void onPageCoverChanged(bool covered) {
+    final music = widget.clip.hasMusic;
+    if (covered) {
+      _ctrl?.pause();
+      if (music) MusicPlayer.instance.pause(_musicOwner);
+    } else if (widget.active && !_userPaused && !_coverPaused) {
+      if (_isVideo && _ready) _play();
+      if (music) MusicPlayer.instance.resume(_musicOwner);
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// Top of the comments panel (null = closed). The video plays small
+  /// above it (v0.9).
+  final ValueNotifier<double?> _panelTop = ValueNotifier<double?>(null);
   String _openUrl = ''; // what the player plays (for the pool)
   StallWatch? _stall;
   Timer? _startTimer;
@@ -469,7 +505,7 @@ class _ClipPlayerState extends State<ClipPlayer>
           if (!mounted || _ctrl != c) return;
           setState(() => _ready = true);
           c.setVolume(_effectiveVolume);
-          if (widget.active && !_userPaused) _play();
+          if (widget.active && !_mustStayPaused) _play();
         })
         .catchError((Object _) {
           if (!mounted || _ctrl != c) return;
@@ -541,7 +577,7 @@ class _ClipPlayerState extends State<ClipPlayer>
       _ready = true;
       _failed = false;
     });
-    if (widget.active && playing && !_userPaused) {
+    if (widget.active && playing && !_mustStayPaused) {
       _play();
       if (_fast) c.setPlaybackSpeed(2);
     }
@@ -595,7 +631,7 @@ class _ClipPlayerState extends State<ClipPlayer>
   void _startActive() {
     _userPaused = false; // came back to it: plays again
     _repo.addView(widget.clip, source: widget.source);
-    if (widget.clip.hasMusic) {
+    if (widget.clip.hasMusic && !_coverPaused && !pageCovered) {
       MusicPlayer.instance.play(
         _musicOwner,
         widget.clip.audioUrl,
@@ -603,7 +639,7 @@ class _ClipPlayerState extends State<ClipPlayer>
       );
     }
     if (_isVideo) {
-      if (_ready) _play();
+      if (_ready && !_coverPaused && !pageCovered) _play();
     } else {
       _startPhotoTimer();
     }
@@ -659,7 +695,12 @@ class _ClipPlayerState extends State<ClipPlayer>
     final pos = v.position.inMilliseconds;
     final watched = pos - _startMs;
     if (watched > _maxWatch) _maxWatch = watched;
-    if (_userPaused) return;
+    if (_mustStayPaused) {
+      // v0.9: whatever started it (system, buffering, loop) -> stop again.
+      // Holding (2x) may play it for a moment.
+      if (v.isPlaying && !_fast) c.pause();
+      return;
+    }
     if (!_manualLoop || !widget.active || _finishedSent) return;
     final atEnd =
         pos >= _endOrTotal - 120 ||
@@ -719,6 +760,7 @@ class _ClipPlayerState extends State<ClipPlayer>
     if (widget.clip.hasMusic) MusicPlayer.instance.stop(_musicOwner);
     _itemPages.dispose();
     _heart.dispose();
+    _panelTop.dispose();
     super.dispose();
   }
 
@@ -727,15 +769,48 @@ class _ClipPlayerState extends State<ClipPlayer>
   void _togglePlay() {
     final c = _ctrl;
     if (!_ready || c == null) return;
+    final music = widget.clip.hasMusic;
     setState(() {
       if (c.value.isPlaying) {
         _userPaused = true;
         c.pause();
+        if (music) MusicPlayer.instance.pause(_musicOwner);
       } else {
         _userPaused = false;
         _play();
+        if (music) MusicPlayer.instance.resume(_musicOwner);
       }
     });
+  }
+
+  // ---------------- comments panel (v0.9) ----------------
+
+  Future<void> _openComments(Post c) async {
+    setState(() => _detailsOpen = false);
+    widget.onPanel?.call(true);
+    try {
+      await showComments(context, c, onSheetTop: _onSheetTop);
+    } finally {
+      _onSheetTop(null);
+      widget.onPanel?.call(false);
+    }
+  }
+
+  void _onSheetTop(double? top) {
+    if (!mounted) return;
+    _panelTop.value = top;
+    final full = top != null && top < 24;
+    if (full == _coverPaused) return;
+    _coverPaused = full;
+    final music = widget.clip.hasMusic;
+    if (full) {
+      _ctrl?.pause();
+      if (music) MusicPlayer.instance.pause(_musicOwner);
+    } else if (widget.active && !_userPaused && !pageCovered) {
+      if (_isVideo && _ready) _play();
+      if (music) MusicPlayer.instance.resume(_musicOwner);
+    }
+    setState(() {});
   }
 
   void _holdStart(LongPressStartDetails d) {
@@ -776,7 +851,7 @@ class _ClipPlayerState extends State<ClipPlayer>
     final c = _ctrl;
     if (c != null && _ready) {
       c.setPlaybackSpeed(1);
-      if (!_wasPlaying) c.pause();
+      if (!_wasPlaying || _mustStayPaused) c.pause();
     }
     setState(() {
       _fast = false;
@@ -819,40 +894,67 @@ class _ClipPlayerState extends State<ClipPlayer>
       initialData: widget.clip,
       builder: (context, snap) {
         final c = snap.data ?? widget.clip;
-        return Column(
-          children: [
-            Expanded(child: _videoArea(c)),
-            _CaptionBar(
-              post: c,
-              open: _detailsOpen,
-              onTap: () => setState(() => _detailsOpen = !_detailsOpen),
-            ),
-            // smooth bar: drag or tap to jump in the video
-            SizedBox(
-              height: 18,
-              child: _ready && _ctrl != null
-                  ? SmoothSeekBar(
-                      key: ValueKey(_ctrl),
-                      controller: _ctrl!,
-                      startMs: _startMs,
-                      endMs: _endMs,
-                    )
-                  : const Align(
-                      alignment: Alignment.bottomCenter,
-                      child: SizedBox(
-                        height: 3,
-                        width: double.infinity,
-                        child: ColoredBox(color: Color(0xFF3A3D44)),
-                      ),
-                    ),
-            ),
-          ],
+        return ValueListenableBuilder<double?>(
+          valueListenable: _panelTop,
+          builder: (context, top, _) => top == null ? _full(c) : _small(c, top),
         );
       },
     );
   }
 
-  Widget _videoArea(Post c) {
+  /// Comments open: the video plays small above the panel, no buttons.
+  Widget _small(Post c, double top) {
+    final pad = MediaQuery.paddingOf(context).top;
+    return ColoredBox(
+      key: const ValueKey('clip-small'),
+      color: Colors.black,
+      child: Stack(
+        children: [
+          Positioned(
+            left: 0,
+            right: 0,
+            top: pad,
+            height: math.max(0.0, top - pad),
+            child: _videoArea(c, small: true),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _full(Post c) {
+    return Column(
+      children: [
+        Expanded(child: _videoArea(c)),
+        _CaptionBar(
+          post: c,
+          open: _detailsOpen,
+          onTap: () => setState(() => _detailsOpen = !_detailsOpen),
+        ),
+        // smooth bar: drag or tap to jump in the video
+        SizedBox(
+          height: 18,
+          child: _ready && _ctrl != null
+              ? SmoothSeekBar(
+                  key: ValueKey(_ctrl),
+                  controller: _ctrl!,
+                  startMs: _startMs,
+                  endMs: _endMs,
+                )
+              : const Align(
+                  alignment: Alignment.bottomCenter,
+                  child: SizedBox(
+                    height: 3,
+                    width: double.infinity,
+                    child: ColoredBox(color: Color(0xFF3A3D44)),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _videoArea(Post c, {bool small = false}) {
     return StreamBuilder<bool>(
       stream: _likedStream,
       builder: (context, likeSnap) {
@@ -871,166 +973,201 @@ class _ClipPlayerState extends State<ClipPlayer>
               onLongPressEnd: (_) => _holdEnd(),
               onLongPressCancel: _holdEnd,
               child: _items.length == 1
-                  ? _media(c, 0)
+                  ? _media(c, 0, small: small)
                   : PageView.builder(
                       key: const ValueKey('clip-items'),
                       controller: _itemPages,
                       itemCount: _items.length,
                       onPageChanged: _goToItem,
-                      itemBuilder: (context, i) => _media(c, i),
+                      itemBuilder: (context, i) => _media(c, i, small: small),
                     ),
             ),
-            // 2) things that never catch touches
-            IgnorePointer(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  const Positioned(
-                    left: 0,
-                    right: 0,
-                    top: 0,
-                    height: 120,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Color(0x66000000), Colors.transparent],
+            if (small)
+              IgnorePointer(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (!_ready && !_failed && !kDisableVideoPlayback)
+                      const Center(child: CircularProgressIndicator()),
+                    if (_ready &&
+                        _ctrl != null &&
+                        !_ctrl!.value.isPlaying &&
+                        !_coverPaused)
+                      Center(
+                        child: Icon(
+                          Icons.play_arrow_rounded,
+                          size: 56,
+                          color: Colors.white.withValues(alpha: 0.8),
                         ),
                       ),
-                    ),
-                  ),
-                  const Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    height: 180,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Colors.transparent, Color(0x99000000)],
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (!_ready && !_failed && !kDisableVideoPlayback)
-                    const Center(child: CircularProgressIndicator()),
-                  if (_items.length > 1) ...[
-                    Positioned(
-                      right: 12,
-                      top: MediaQuery.of(context).padding.top + 14,
-                      child: MediaPill(text: '${_item + 1}/${_items.length}'),
-                    ),
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      top: MediaQuery.of(context).padding.top + 20,
-                      child: PageDots(count: _items.length, index: _item),
-                    ),
                   ],
-                  if (_failed)
-                    const Center(
-                      child: Text(
-                        "Couldn't load this clip",
-                        style: TextStyle(color: AppColors.textSecondary),
-                      ),
-                    ),
-                  if (_ready &&
-                      _ctrl != null &&
-                      !_ctrl!.value.isPlaying &&
-                      !_fast)
-                    Center(
-                      child: Icon(
-                        Icons.play_arrow_rounded,
-                        size: 80,
-                        color: Colors.white.withValues(alpha: 0.8),
-                      ),
-                    ),
-                  if (_fast)
-                    const Positioned(
-                      top: 64,
-                      left: 0,
-                      right: 0,
-                      child: Center(child: _SpeedPill()),
-                    ),
-                  if (_volumeMode)
-                    Positioned(
-                      // top-right, no background (v0.7)
-                      right: 14,
-                      top: MediaQuery.of(context).padding.top + 64,
-                      child: _VolumeHud(value: widget.volume),
-                    ),
-                  Center(child: _HeartBurst(animation: _heart)),
-                ],
-              ),
-            ),
-            // 3) buttons (top layer — no double-tap delay)
-            // buttons sit ABOVE the username row
-            Positioned(
-              right: 6,
-              bottom: 60,
-              child: _actions(c, liked, likedServer),
-            ),
-            Positioned(
-              left: 14,
-              bottom: 14,
-              right: 80,
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () {
-                    _ctrl?.pause();
-                    openProfile(context, c.authorId);
-                  },
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Avatar(
-                        url: c.authorPhotoUrl,
-                        name: c.authorUsername,
-                        size: 34,
-                        uid: c.authorId,
-                      ),
-                      const SizedBox(width: 10),
-                      Flexible(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              c.authorUsername,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                                shadows: [
-                                  Shadow(blurRadius: 6, color: Colors.black54),
-                                ],
-                              ),
-                            ),
-                            if (c.hasMusic) ...[
-                              const SizedBox(height: 3),
-                              MusicChip(name: c.audioName),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
                 ),
               ),
-            ),
+            if (!small) ..._overlays(c, liked, likedServer),
           ],
         );
       },
     );
   }
 
+  /// Gradients, indicators, buttons and the author row (full size only).
+  List<Widget> _overlays(Post c, bool liked, bool likedServer) {
+    return [
+      // 2) things that never catch touches
+      IgnorePointer(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              height: 120,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x66000000), Colors.transparent],
+                  ),
+                ),
+              ),
+            ),
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 180,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, Color(0x99000000)],
+                  ),
+                ),
+              ),
+            ),
+            if (!_ready && !_failed && !kDisableVideoPlayback)
+              const Center(child: CircularProgressIndicator()),
+            if (_items.length > 1) ...[
+              Positioned(
+                right: 12,
+                top: MediaQuery.of(context).padding.top + 14,
+                child: MediaPill(text: '${_item + 1}/${_items.length}'),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                top: MediaQuery.of(context).padding.top + 20,
+                child: PageDots(count: _items.length, index: _item),
+              ),
+            ],
+            if (_failed)
+              const Center(
+                child: Text(
+                  "Couldn't load this clip",
+                  style: TextStyle(color: AppColors.textSecondary),
+                ),
+              ),
+            if (_ready && _ctrl != null && !_ctrl!.value.isPlaying && !_fast)
+              Center(
+                child: Icon(
+                  Icons.play_arrow_rounded,
+                  size: 80,
+                  color: Colors.white.withValues(alpha: 0.8),
+                ),
+              ),
+            if (_fast)
+              const Positioned(
+                top: 64,
+                left: 0,
+                right: 0,
+                child: Center(child: _SpeedPill()),
+              ),
+            if (_volumeMode)
+              Positioned(
+                // top-right, no background (v0.7)
+                right: 14,
+                top: MediaQuery.of(context).padding.top + 64,
+                child: _VolumeHud(value: widget.volume),
+              ),
+            Center(child: _HeartBurst(animation: _heart)),
+          ],
+        ),
+      ),
+      // 3) buttons (top layer — no double-tap delay)
+      // buttons sit ABOVE the username row
+      Positioned(right: 6, bottom: 60, child: _actions(c, liked, likedServer)),
+      // v0.9: "Reply to @name's comment" sticker
+      if (c.replyTo != null)
+        Positioned(
+          left: 14,
+          bottom: c.hasMusic ? 74 : 60,
+          right: 80,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: ReplyStickerChip(
+              reply: c.replyTo!,
+              onTap: () => openPostById(context, c.replyTo!.postId),
+            ),
+          ),
+        ),
+      Positioned(
+        left: 14,
+        bottom: 14,
+        right: 80,
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              _ctrl?.pause();
+              openProfile(context, c.authorId);
+            },
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Avatar(
+                  url: c.authorPhotoUrl,
+                  name: c.authorUsername,
+                  size: 34,
+                  uid: c.authorId,
+                ),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        c.authorUsername,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          shadows: [
+                            Shadow(blurRadius: 6, color: Colors.black54),
+                          ],
+                        ),
+                      ),
+                      if (c.hasMusic) ...[
+                        const SizedBox(height: 3),
+                        MusicChip(name: c.audioName),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
   /// One photo or video of this clip.
-  Widget _media(Post c, int i) {
+  Widget _media(Post c, int i, {bool small = false}) {
     final m = _items[i];
     if (!m.isVideo) return MediaPhoto(url: m.url);
     final screen = MediaQuery.of(context).size;
@@ -1038,7 +1175,7 @@ class _ClipPlayerState extends State<ClipPlayer>
         screen.width / (screen.height <= 0 ? 1 : screen.height);
     // fill the screen when the shape is close, else show it whole
     final close = (m.aspectRatio - screenAspect).abs() / screenAspect < 0.2;
-    final fit = close ? BoxFit.cover : BoxFit.contain;
+    final fit = close && !small ? BoxFit.cover : BoxFit.contain;
     final ctrl = _ctrl;
     if (i != _item || !_ready || ctrl == null) {
       return ColoredBox(
@@ -1075,7 +1212,7 @@ class _ClipPlayerState extends State<ClipPlayer>
         _Action(
           icon: Icons.chat_bubble_outline,
           label: count(c.commentsCount, c.hideComments, 'Comment'),
-          onTap: () => showComments(context, c),
+          onTap: () => _openComments(c),
         ),
         StreamBuilder<bool>(
           stream: _repostedStream,

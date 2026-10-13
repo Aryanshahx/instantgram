@@ -12,7 +12,9 @@ import 'api_client.dart';
 import 'uploader.dart';
 
 /// What the file is used for (decides the folder in Tigris + size limits).
-enum MediaKind { post, clip, story, avatar, cover, thumb, audio, comment }
+/// What a file is for (folder on the server). v0.9: chat photos / GIFs
+/// and voice messages.
+enum MediaKind { post, clip, story, avatar, cover, thumb, audio, comment, chat, voice }
 
 /// What the create flow may pick.
 enum PickKind {
@@ -288,7 +290,8 @@ class MediaService {
   /// Music from phone storage (mp3, m4a, aac, wav, ogg). Null = cancelled.
   /// Throws a [StateError] with a friendly message when the file is not ok.
   Future<PickedAudio?> pickAudio() async {
-    final f = await FilePicker.pickFile(type: FileType.audio);
+    final res = await FilePicker.platform.pickFiles(type: FileType.audio);
+    final f = (res == null || res.files.isEmpty) ? null : res.files.first;
     if (f == null) return null;
     final name = f.name;
     final dot = name.lastIndexOf('.');
@@ -302,7 +305,9 @@ class MediaService {
       file = File(path);
     } else {
       // content:// file -> copy it to a temp file
-      final bytes = await f.readAsBytes();
+      final bytes = f.bytes ??
+          (f.xFile.path.isEmpty ? null : await f.xFile.readAsBytes());
+      if (bytes == null) throw StateError('Could not open this file');
       final dir = await Directory.systemTemp.createTemp('ig_audio');
       file = File(
         '${dir.path}/music_${DateTime.now().millisecondsSinceEpoch}.$ext',

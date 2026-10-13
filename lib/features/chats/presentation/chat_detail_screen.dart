@@ -1,21 +1,48 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
+
+import '../../../core/services/calls.dart';
 import '../../../core/services/content_filter.dart';
+import '../../../core/services/location_service.dart';
+import '../../../core/services/media_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/errors.dart';
-import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/models/user_profile.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/async_views.dart';
 import '../../../shared/widgets/avatar.dart';
-import '../../../shared/widgets/net_image.dart';
+import '../../post/presentation/gif_picker.dart';
 import '../data/chat_repository.dart';
+import 'message_widgets.dart';
 
+export 'message_widgets.dart' show SharedPostCard;
+
+/// One chat (v0.9): text, photos, GIFs, voice, location, reactions,
+/// reply (long-press or swipe right), forward, pin, delete, calls.
 class ChatDetailScreen extends StatefulWidget {
-  const ChatDetailScreen({super.key, required this.other});
+  const ChatDetailScreen({
+    super.key,
+    required this.other,
+    this.messages,
+    this.chat,
+    this.myUid,
+  });
 
   final UserProfile other;
+
+  /// Tests: replace Firestore.
+  final Stream<List<Message>>? messages;
+  final Stream<Chat?>? chat;
+  final String? myUid;
+
+  /// Longest voice message.
+  static const Duration maxVoice = Duration(minutes: 5);
 
   @override
   State<ChatDetailScreen> createState() => _ChatDetailScreenState();
@@ -23,40 +50,443 @@ class ChatDetailScreen extends StatefulWidget {
 
 class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final _ctrl = TextEditingController();
+  final _focus = FocusNode();
   final _repo = ChatRepository.instance;
-  late final Stream<List<Message>> _messages = _repo.messages(
-    _repo.chatIdWith(widget.other.uid),
-  );
+  late final String _me = widget.myUid ?? _repo.myUid;
+  late final String _chatId = _chatIdFor(_me, widget.other.uid);
+  late final Stream<List<Message>> _messages =
+      widget.messages ?? _repo.messages(_chatId);
+  late final Stream<Chat?> _chat = widget.chat ?? _repo.chat(_chatId);
+  late final ChatPerson _other = ChatPerson.of(widget.other);
+  final Map<String, GlobalKey> _keys = {};
+
   bool _sending = false;
+  String? _busyText; // "Sending photo…"
+  Message? _replyTo;
+  Chat? _chatNow;
+
+  // voice recording
+  AudioRecorder? _rec;
+  bool _recording = false;
+  DateTime? _recStart;
+  Timer? _recTimer;
+  Duration _recFor = Duration.zero;
+
+  static String _chatIdFor(String a, String b) {
+    final ids = [a, b]..sort();
+    return ids.join('_');
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl.addListener(_onText);
+  }
+
+  bool _hadText = false;
+  void _onText() {
+    final has = _ctrl.text.trim().isNotEmpty;
+    if (has != _hadText) setState(() => _hadText = has);
+  }
 
   @override
   void dispose() {
+    _recTimer?.cancel();
+    if (_recording) _rec?.cancel();
+    _rec?.dispose();
     _ctrl.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
-  Future<void> _send() async {
-    final text = _ctrl.text.trim();
-    if (text.isEmpty || _sending) return;
-    setState(() => _sending = true);
-    _ctrl.clear();
+  void _snack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  MessageQuote? get _quote {
+    final m = _replyTo;
+    if (m == null) return null;
+    final t = m.isSharedPost ? 'Post by @${m.postAuthor}' : m.preview;
+    return MessageQuote(
+      id: m.id,
+      senderId: m.senderId,
+      text: t.length > 300 ? t.substring(0, 300) : t,
+    );
+  }
+
+  void _reply(Message m) {
+    HapticFeedback.selectionClick();
+    setState(() => _replyTo = m);
+    _focus.requestFocus();
+  }
+
+  /// Runs a send; shows [label] while busy and clears the reply.
+  Future<void> _run(String? label, Future<void> Function() job) async {
+    if (_sending) return;
+    setState(() {
+      _sending = true;
+      _busyText = label;
+    });
     try {
-      await _repo.send(widget.other, text);
+      await job();
+      if (mounted) setState(() => _replyTo = null);
     } catch (e) {
-      _ctrl.text = text;
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(friendlyError(e))));
-      }
+      _snack(friendlyError(e));
     } finally {
-      if (mounted) setState(() => _sending = false);
+      if (mounted) {
+        setState(() {
+          _sending = false;
+          _busyText = null;
+        });
+      }
     }
   }
+
+  Future<void> _sendText() async {
+    final text = _ctrl.text.trim();
+    if (text.isEmpty || _sending) return;
+    final quote = _quote;
+    _ctrl.clear();
+    await _run(null, () async {
+      try {
+        await _repo.send(widget.other, text, replyTo: quote);
+      } catch (_) {
+        _ctrl.text = text;
+        rethrow;
+      }
+    });
+  }
+
+  // ------------------------------------------------------------- attach
+
+  Future<void> _attach() async {
+    final what = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      builder: (ctx) {
+        Widget option(String id, IconData icon, String label, Color color) {
+          return InkWell(
+            key: ValueKey('attach-$id'),
+            borderRadius: BorderRadius.circular(16),
+            onTap: () => Navigator.pop(ctx, id),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircleAvatar(
+                    radius: 27,
+                    backgroundColor: color,
+                    child: Icon(icon, color: Colors.black, size: 26),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    label,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                option('photo', Icons.photo_outlined, 'Photo', AppColors.lime),
+                option('gif', Icons.gif_box_outlined, 'GIF', AppColors.mint),
+                option(
+                  'location',
+                  Icons.location_on_outlined,
+                  'Location',
+                  const Color(0xFFFFB86B),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (!mounted || what == null) return;
+    switch (what) {
+      case 'photo':
+        await _sendPhoto();
+      case 'gif':
+        await _sendGif();
+      case 'location':
+        await _sendLocation();
+    }
+  }
+
+  Future<void> _sendPhoto() async {
+    final f = await MediaService.instance.pickGalleryImage();
+    if (f == null || !mounted) return;
+    final quote = _quote;
+    await _run(
+      'Sending photo…',
+      () => _repo.sendImage(_other, f, replyTo: quote),
+    );
+  }
+
+  Future<void> _sendGif() async {
+    final g = await showGifPicker(context);
+    if (g == null || !mounted) return;
+    final quote = _quote;
+    await _run(null, () => _repo.sendGif(_other, g.gif, replyTo: quote));
+  }
+
+  Future<void> _sendLocation() async {
+    setState(() => _busyText = 'Finding your location…');
+    PickedLocation loc;
+    try {
+      loc = await LocationService.instance.current();
+    } on LocationProblem catch (e) {
+      if (mounted) setState(() => _busyText = null);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          action: e.openSettings
+              ? SnackBarAction(
+                  label: 'Settings',
+                  onPressed: LocationService.instance.openSettings,
+                )
+              : null,
+        ),
+      );
+      return;
+    } catch (e) {
+      if (mounted) setState(() => _busyText = null);
+      _snack(friendlyError(e));
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _busyText = null);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Send your location?'),
+        content: Text(
+          loc.address.isNotEmpty
+              ? loc.address
+              : '${loc.lat.toStringAsFixed(5)}, ${loc.lng.toStringAsFixed(5)}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('location-send'),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final quote = _quote;
+    await _run(
+      null,
+      () => _repo.sendLocation(
+        _other,
+        lat: loc.lat,
+        lng: loc.lng,
+        address: loc.address,
+        replyTo: quote,
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------- voice
+
+  Future<void> _startRecording() async {
+    if (_sending || _recording) return;
+    final r = _rec ??= AudioRecorder();
+    try {
+      if (!await r.hasPermission()) {
+        _snack('Allow the microphone to send voice messages.');
+        return;
+      }
+      final dir = await getTemporaryDirectory();
+      final path =
+          '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await r.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 64000,
+          sampleRate: 44100,
+          numChannels: 1,
+        ),
+        path: path,
+      );
+    } catch (e) {
+      _snack("Couldn't record: ${friendlyError(e)}");
+      return;
+    }
+    HapticFeedback.mediumImpact();
+    _recStart = DateTime.now();
+    _recTimer?.cancel();
+    _recTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      if (!mounted) return;
+      final d = DateTime.now().difference(_recStart!);
+      setState(() => _recFor = d);
+      if (d >= ChatDetailScreen.maxVoice) _stopRecording(send: true);
+    });
+    setState(() {
+      _recording = true;
+      _recFor = Duration.zero;
+    });
+  }
+
+  Future<void> _stopRecording({required bool send}) async {
+    if (!_recording) return;
+    _recTimer?.cancel();
+    final ms = DateTime.now().difference(_recStart!).inMilliseconds;
+    setState(() => _recording = false);
+    final r = _rec;
+    if (r == null) return;
+    if (!send) {
+      await r.cancel();
+      return;
+    }
+    String? path;
+    try {
+      path = await r.stop();
+    } catch (_) {}
+    if (path == null || ms < 800) {
+      _snack('Too short. Tap the mic, talk, then tap send.');
+      return;
+    }
+    final file = File(path);
+    final quote = _quote;
+    await _run('Sending voice message…', () async {
+      try {
+        await _repo.sendVoice(_other, file, ms, replyTo: quote);
+      } finally {
+        file.delete().ignore();
+      }
+    });
+  }
+
+  // ------------------------------------------------------------ actions
+
+  Future<void> _menu(Message m) async {
+    final mine = m.senderId == _me;
+    final r = await showMessageMenu(
+      context,
+      message: m,
+      mine: mine,
+      pinned: _chatNow?.pinnedId == m.id,
+      myEmoji: m.reactions[_me],
+    );
+    if (r == null || !mounted) return;
+    try {
+      final emoji = r.emoji;
+      if (emoji != null) {
+        await _repo.react(_chatId, m.id, emoji.isEmpty ? null : emoji);
+        return;
+      }
+      switch (r.action!) {
+        case MessageAction.reply:
+          _reply(m);
+        case MessageAction.forward:
+          await showForwardSheet(context, send: (to) => _repo.forward(m, to));
+        case MessageAction.copy:
+          await Clipboard.setData(
+            ClipboardData(text: m.isLocation ? m.mapsUri.toString() : m.text),
+          );
+          _snack('Copied');
+        case MessageAction.pin:
+          await _repo.pin(_chatId, m);
+        case MessageAction.unpin:
+          await _repo.unpin(_chatId);
+        case MessageAction.deleteAll:
+          final ok = await _confirm(
+            'Delete for everyone?',
+            'This message will be removed for both of you.',
+          );
+          if (ok) await _repo.deleteForEveryone(_chatId, m);
+        case MessageAction.deleteMe:
+          await _repo.hideForMe(_chatId, m.id);
+      }
+    } catch (e) {
+      _snack(friendlyError(e));
+    }
+  }
+
+  Future<bool> _confirm(String title, String text) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(text),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            key: const ValueKey('confirm-delete'),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: AppColors.like),
+            ),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  Future<void> _reactionsTap(Message m) async {
+    if (m.reactions.containsKey(_me)) {
+      try {
+        await _repo.react(_chatId, m.id, null); // tap your emoji = remove
+      } catch (e) {
+        _snack(friendlyError(e));
+      }
+    } else {
+      await _menu(m);
+    }
+  }
+
+  Future<void> _call({required bool video}) async {
+    final o = widget.other;
+    try {
+      await Calls.instance.call(uid: o.uid, username: o.username, video: video);
+    } on CallsOff catch (e) {
+      _snack(e.toString());
+    } catch (e) {
+      _snack(friendlyError(e));
+    }
+  }
+
+  void _showPinned(String id) {
+    final ctx = _keys[id]?.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.5,
+        duration: const Duration(milliseconds: 300),
+      );
+    } else {
+      _snack('Scroll up to find this message.');
+    }
+  }
+
+  // ----------------------------------------------------------------- UI
 
   @override
   Widget build(BuildContext context) {
     final o = widget.other;
-    final me = _repo.myUid;
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
@@ -79,103 +509,110 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             ],
           ),
         ),
+        actions: [
+          IconButton(
+            key: const ValueKey('call-voice'),
+            tooltip: 'Voice call',
+            onPressed: () => _call(video: false),
+            icon: const Icon(Icons.call_outlined),
+          ),
+          IconButton(
+            key: const ValueKey('call-video'),
+            tooltip: 'Video call',
+            onPressed: () => _call(video: true),
+            icon: const Icon(Icons.videocam_outlined),
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
       body: Column(
         children: [
+          StreamBuilder<Chat?>(
+            stream: _chat,
+            builder: (context, snap) {
+              final chat = _chatNow = snap.data;
+              if (chat == null || chat.pinnedId.isEmpty) {
+                return const SizedBox.shrink();
+              }
+              return Material(
+                key: const ValueKey('pinned-bar'),
+                color: AppColors.surface,
+                child: InkWell(
+                  onTap: () => _showPinned(chat.pinnedId),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 6, 4, 6),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.push_pin,
+                          size: 18,
+                          color: AppColors.lime,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Pinned message',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.lime,
+                                ),
+                              ),
+                              Text(
+                                chat.pinnedText,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 13.5),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          key: const ValueKey('unpin'),
+                          tooltip: 'Unpin',
+                          onPressed: () => _repo
+                              .unpin(_chatId)
+                              .catchError(
+                                (Object e) => _snack(friendlyError(e)),
+                              ),
+                          icon: const Icon(Icons.close, size: 18),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
           Expanded(
             child: StreamBuilder<List<Message>>(
               stream: _messages,
               builder: (context, snap) {
                 if (snap.hasError) return ErrorView(error: snap.error);
                 if (!snap.hasData) return const LoadingView();
-                final msgs = snap.data!;
-                if (msgs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Avatar(
-                          url: o.photoUrl,
-                          name: o.username,
-                          size: 84,
-                          uid: o.uid,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          o.username,
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'Say hi 👋',
-                          style: TextStyle(color: AppColors.textSecondary),
-                        ),
-                      ],
-                    ),
-                  );
-                }
+                final msgs = snap.data!
+                    .where((m) => !m.hiddenForUid(_me))
+                    .toList();
+                if (msgs.isEmpty) return _hello(o);
                 return ListView.builder(
                   reverse: true,
                   padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                   itemCount: msgs.length,
                   itemBuilder: (context, i) {
                     final m = msgs[i];
-                    final mine = m.senderId == me;
-                    return Align(
-                      alignment: mine
-                          ? Alignment.centerRight
-                          : Alignment.centerLeft,
-                      child: Container(
-                        constraints: BoxConstraints(
-                          maxWidth: MediaQuery.of(context).size.width * 0.75,
-                        ),
-                        margin: const EdgeInsets.symmetric(vertical: 3),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: mine ? AppColors.lime : AppColors.surface,
-                          borderRadius: BorderRadius.only(
-                            topLeft: const Radius.circular(20),
-                            topRight: const Radius.circular(20),
-                            bottomLeft: Radius.circular(mine ? 20 : 6),
-                            bottomRight: Radius.circular(mine ? 6 : 20),
-                          ),
-                          border: mine
-                              ? null
-                              : Border.all(color: AppColors.border),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            if (m.isSharedPost)
-                              SharedPostCard(message: m, mine: mine)
-                            else
-                              Text(
-                                m.text,
-                                style: TextStyle(
-                                  fontSize: 14.5,
-                                  color: mine
-                                      ? Colors.black
-                                      : AppColors.textPrimary,
-                                ),
-                              ),
-                            const SizedBox(height: 2),
-                            Text(
-                              timeAgo(m.createdAt),
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: mine
-                                    ? Colors.black54
-                                    : AppColors.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
+                    return SwipeToReply(
+                      key: _keys.putIfAbsent(m.id, GlobalKey.new),
+                      onReply: () => _reply(m),
+                      child: MessageBubble(
+                        message: m,
+                        mine: m.senderId == _me,
+                        myUid: _me,
+                        otherName: o.username,
+                        onLongPress: () => _menu(m),
+                        onReactionsTap: () => _reactionsTap(m),
                       ),
                     );
                   },
@@ -197,131 +634,269 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               ),
             )
           else
-            SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 6, 8, 10),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _ctrl,
-                        minLines: 1,
-                        maxLines: 4,
-                        maxLength: 2000,
-                        textCapitalization: TextCapitalization.sentences,
-                        decoration: InputDecoration(
-                          counterText: '',
-                          hintText: 'Message…',
-                          hintStyle: const TextStyle(color: AppColors.textHint),
-                          filled: true,
-                          fillColor: AppColors.surface,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(26),
-                            borderSide: const BorderSide(
-                              color: AppColors.border,
-                            ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(26),
-                            borderSide: const BorderSide(
-                              color: AppColors.border,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(26),
-                            borderSide: const BorderSide(color: AppColors.lime),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Material(
-                      color: AppColors.lime,
-                      shape: const CircleBorder(),
-                      child: IconButton(
-                        onPressed: _sending ? null : _send,
-                        iconSize: 20,
-                        icon: const Icon(
-                          Icons.send_rounded,
-                          color: Colors.black,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            _composer(),
         ],
       ),
     );
   }
+
+  Widget _hello(UserProfile o) => Center(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Avatar(url: o.photoUrl, name: o.username, size: 84, uid: o.uid),
+        const SizedBox(height: 12),
+        Text(
+          o.username,
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Say hi 👋',
+          style: TextStyle(color: AppColors.textSecondary),
+        ),
+      ],
+    ),
+  );
+
+  Widget _composer() {
+    final reply = _replyTo;
+    return SafeArea(
+      top: false,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_busyText != null)
+            Padding(
+              key: const ValueKey('chat-busy'),
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    _busyText!,
+                    style: const TextStyle(color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+          if (reply != null)
+            Container(
+              key: const ValueKey('chat-replying'),
+              margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+              padding: const EdgeInsets.fromLTRB(12, 4, 2, 4),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.reply_rounded, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          reply.senderId == _me
+                              ? 'Replying to yourself'
+                              : 'Replying to ${widget.other.username}',
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.lime,
+                          ),
+                        ),
+                        Text(
+                          _quote!.text,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    key: const ValueKey('chat-reply-cancel'),
+                    tooltip: 'Cancel reply',
+                    onPressed: () => setState(() => _replyTo = null),
+                    icon: const Icon(Icons.close, size: 18),
+                  ),
+                ],
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(6, 6, 8, 10),
+            child: _recording ? _recordingRow() : _inputRow(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _inputRow() {
+    return Row(
+      children: [
+        IconButton(
+          key: const ValueKey('chat-attach'),
+          tooltip: 'Photo, GIF or location',
+          onPressed: _sending ? null : _attach,
+          icon: const Icon(Icons.add_circle_outline, size: 26),
+        ),
+        Expanded(
+          child: TextField(
+            key: const ValueKey('chat-input'),
+            controller: _ctrl,
+            focusNode: _focus,
+            minLines: 1,
+            maxLines: 4,
+            maxLength: 2000,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: InputDecoration(
+              counterText: '',
+              hintText: 'Message…',
+              hintStyle: const TextStyle(color: AppColors.textHint),
+              filled: true,
+              fillColor: AppColors.surface,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 10,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(26),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(26),
+                borderSide: BorderSide.none,
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(26),
+                borderSide: const BorderSide(color: AppColors.lime),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Material(
+          color: AppColors.lime,
+          shape: const CircleBorder(),
+          child: _hadText
+              ? IconButton(
+                  key: const ValueKey('chat-send'),
+                  tooltip: 'Send',
+                  onPressed: _sending ? null : _sendText,
+                  iconSize: 20,
+                  icon: const Icon(Icons.send_rounded, color: Colors.black),
+                )
+              : IconButton(
+                  key: const ValueKey('chat-mic'),
+                  tooltip: 'Voice message',
+                  onPressed: _sending ? null : _startRecording,
+                  iconSize: 22,
+                  icon: const Icon(Icons.mic_none_rounded, color: Colors.black),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _recordingRow() {
+    return Row(
+      key: const ValueKey('chat-recording'),
+      children: [
+        IconButton(
+          key: const ValueKey('voice-cancel'),
+          tooltip: 'Delete',
+          onPressed: () => _stopRecording(send: false),
+          icon: const Icon(Icons.delete_outline, color: AppColors.like),
+        ),
+        Expanded(
+          child: Container(
+            height: 44,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(26),
+            ),
+            child: Row(
+              children: [
+                const _RecDot(),
+                const SizedBox(width: 10),
+                Text(
+                  formatDuration(_recFor.inMilliseconds),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Flexible(
+                  child: Text(
+                    'Recording…',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: AppColors.textSecondary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Material(
+          color: AppColors.lime,
+          shape: const CircleBorder(),
+          child: IconButton(
+            key: const ValueKey('voice-send'),
+            tooltip: 'Send voice message',
+            onPressed: () => _stopRecording(send: true),
+            iconSize: 20,
+            icon: const Icon(Icons.send_rounded, color: Colors.black),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
-/// A post / clip someone shared in the chat. Tap = open it.
-class SharedPostCard extends StatelessWidget {
-  const SharedPostCard({super.key, required this.message, required this.mine});
+/// Blinking red dot while recording.
+class _RecDot extends StatefulWidget {
+  const _RecDot();
+  @override
+  State<_RecDot> createState() => _RecDotState();
+}
 
-  final Message message;
-  final bool mine;
+class _RecDotState extends State<_RecDot> with SingleTickerProviderStateMixin {
+  late final AnimationController _a = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 700),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _a.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final m = message;
-    final fg = mine ? Colors.black : AppColors.textPrimary;
-    return GestureDetector(
-      key: ValueKey('shared-post-${m.postId}'),
-      onTap: () => openPostById(context, m.postId),
-      child: SizedBox(
-        width: 190,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '@${m.postAuthor}',
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 13.5,
-                color: fg,
-              ),
-            ),
-            const SizedBox(height: 6),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: AspectRatio(
-                aspectRatio: m.postType == Post.clip ? 0.75 : 1,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    NetImage(m.postThumb),
-                    if (m.postType == Post.clip)
-                      const Positioned(
-                        right: 8,
-                        top: 8,
-                        child: Icon(
-                          Icons.smart_display,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            if (m.postCaption.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(
-                m.postCaption,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 13, color: fg),
-              ),
-            ],
-          ],
+    return FadeTransition(
+      opacity: Tween(begin: 0.3, end: 1.0).animate(_a),
+      child: Container(
+        width: 10,
+        height: 10,
+        decoration: const BoxDecoration(
+          color: Color(0xFFFF3B4E),
+          shape: BoxShape.circle,
         ),
       ),
     );

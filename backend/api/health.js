@@ -19,11 +19,17 @@ export default function handler(req, res) {
     JSON.stringify({
       ok: missing.length === 0,
       app: 'instantgram',
-      version: '0.3.1',
+      version: '0.9.0',
       bucket: bucket || null,
       firebaseProject: env('FIREBASE_PROJECT_ID') || null,
       missing,
       warnings,
+      // optional features (v0.9)
+      features: {
+        gifSearch: !!env('GIPHY_API_KEY'),
+        calls: !!(env('ZEGO_APP_ID') && env('ZEGO_APP_SIGN')),
+        callRingWhenClosed: !!env('ZEGO_RESOURCE_ID'),
+      },
     }),
   );
 }

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'app.dart';
 import 'core/services/media_service.dart';
 import 'core/services/app_settings.dart';
+import 'core/services/calls.dart';
 import 'core/services/error_reporter.dart';
 import 'core/services/video_cache.dart';
 import 'firebase_options.dart';
@@ -20,6 +21,8 @@ Future<void> main() async {
   // v0.8: videos are saved on the phone while they play (watch again =
   // no new download)
   unawaited(VideoCache.instance.start());
+  // v0.9: voice + video calls (an accepted call can open the app)
+  await Calls.instance.prepare();
 
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(

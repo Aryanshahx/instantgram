@@ -199,6 +199,7 @@ class Post {
     this.audioKey = '',
     this.audioName = '',
     this.savesCount = 0,
+    this.replyTo,
   });
 
   static const String photo = 'photo';
@@ -248,6 +249,9 @@ class Post {
   final String audioName;
 
   final int savesCount;
+
+  /// v0.9: this post / clip answers a comment (sticker on it).
+  final ReplyRef? replyTo;
 
   bool get isClip => type == clip;
   bool get hasMusic => audioUrl.isNotEmpty;
@@ -343,6 +347,83 @@ class Post {
       audioKey: _str(m['audioKey']),
       audioName: _str(m['audioName']),
       savesCount: _int(m['savesCount']),
+      replyTo: ReplyRef.fromMap(m['replyTo']),
+    );
+  }
+}
+
+/// v0.9: a post / clip made as an answer to a comment.
+class ReplyRef {
+  const ReplyRef({
+    required this.postId,
+    required this.commentId,
+    required this.username,
+    this.text = '',
+    this.parentId = '',
+    this.postAuthorId = '',
+  });
+
+  /// Post / clip the comment is under.
+  final String postId;
+  final String postAuthorId;
+
+  /// The comment answered (+ its first comment when it is a reply).
+  /// '' = answers the post / clip itself.
+  final String commentId;
+  final String parentId;
+
+  /// Who wrote the comment, and what (short).
+  final String username;
+  final String text;
+
+  /// Top comment the new reply hangs under.
+  String get threadId => parentId.isNotEmpty ? parentId : commentId;
+
+  bool get isComment => commentId.isNotEmpty;
+
+  /// Sticker text on the new post / clip.
+  String get label => isComment
+      ? "Reply to @$username's comment"
+      : 'Reply to @$username';
+
+  /// Answers the post / clip itself (not one comment).
+  static ReplyRef toPost(Post post) => ReplyRef(
+    postId: post.id,
+    postAuthorId: post.authorId,
+    commentId: '',
+    username: post.authorUsername,
+  );
+
+  static ReplyRef fromComment(Post post, Comment c) => ReplyRef(
+    postId: post.id,
+    postAuthorId: post.authorId,
+    commentId: c.id,
+    parentId: c.parentId,
+    username: c.authorUsername,
+    text: c.text.length > 120 ? '${c.text.substring(0, 120)}…' : c.text,
+  );
+
+  Map<String, dynamic> toMap() => {
+    'postId': postId,
+    'postAuthorId': postAuthorId,
+    'commentId': commentId,
+    'parentId': parentId,
+    'username': username,
+    'text': text,
+  };
+
+  static ReplyRef? fromMap(Object? v) {
+    if (v is! Map) return null;
+    final postId = _str(v['postId']);
+    final commentId = _str(v['commentId']);
+    if (postId.isEmpty) return null;
+    return ReplyRef(
+      postId: postId,
+      postAuthorId: _str(v['postAuthorId']),
+      commentId: commentId,
+      parentId: _str(v['parentId']),
+      username: _str(v['username']),
+      text: _str(v['text']),
     );
   }
 }
@@ -366,6 +447,10 @@ class Comment {
     this.gifH = 0,
     this.likesCount = 0,
     this.repliesCount = 0,
+    this.refPostId = '',
+    this.refPostType = '',
+    this.refThumb = '',
+    this.refAuthor = '',
   });
 
   final String id;
@@ -395,7 +480,14 @@ class Comment {
   final int likesCount;
   final int repliesCount;
 
+  /// v0.9: answered with a post / clip (card in the comment).
+  final String refPostId;
+  final String refPostType;
+  final String refThumb;
+  final String refAuthor;
+
   bool get isReply => parentId.isNotEmpty;
+  bool get hasRef => refPostId.isNotEmpty;
 
   /// Picture to show (photo or GIF), '' = text only.
   String get pictureUrl => gifUrl.isNotEmpty ? gifUrl : imageUrl;
@@ -429,6 +521,10 @@ class Comment {
     gifH: _int(m['gifH']),
     likesCount: _int(m['likesCount']),
     repliesCount: _int(m['repliesCount']),
+    refPostId: _str(m['refPostId']),
+    refPostType: _str(m['refPostType']),
+    refThumb: _str(m['refThumb']),
+    refAuthor: _str(m['refAuthor']),
   );
 }
 
@@ -524,6 +620,8 @@ class Chat {
     required this.lastMessage,
     required this.lastSenderId,
     required this.updatedAt,
+    this.pinnedId = '',
+    this.pinnedText = '',
   });
 
   final String id;
@@ -532,6 +630,10 @@ class Chat {
   final String lastMessage;
   final String lastSenderId;
   final DateTime updatedAt;
+
+  /// v0.9: pinned message (id + short text), '' = none.
+  final String pinnedId;
+  final String pinnedText;
 
   String otherUid(String me) =>
       members.firstWhere((m) => m != me, orElse: () => me);
@@ -544,16 +646,46 @@ class Chat {
   String usernameOf(String uid) => _str(_info(uid)['username']);
   String photoOf(String uid) => _str(_info(uid)['photoUrl']);
 
-  factory Chat.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final m = doc.data() ?? const <String, dynamic>{};
+  factory Chat.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
+      Chat.fromMap(doc.id, doc.data() ?? const <String, dynamic>{});
+
+  factory Chat.fromMap(String id, Map<String, dynamic> m) {
     final info = m['memberInfo'];
+    final pin = m['pinned'];
     return Chat(
-      id: doc.id,
+      id: id,
       members: List<String>.from((m['members'] as List?) ?? const []),
       memberInfo: info is Map<String, dynamic> ? info : const {},
       lastMessage: _str(m['lastMessage']),
       lastSenderId: _str(m['lastSenderId']),
       updatedAt: _date(m['updatedAt']),
+      pinnedId: pin is Map ? _str(pin['id']) : '',
+      pinnedText: pin is Map ? _str(pin['text']) : '',
+    );
+  }
+}
+
+/// Short version of a message you answer (shown above your reply).
+class MessageQuote {
+  const MessageQuote({
+    required this.id,
+    required this.senderId,
+    required this.text,
+  });
+  final String id;
+  final String senderId;
+  final String text;
+
+  Map<String, dynamic> toMap() => {'id': id, 'senderId': senderId, 'text': text};
+
+  static MessageQuote? fromMap(Object? v) {
+    if (v is! Map) return null;
+    final id = _str(v['id']);
+    if (id.isEmpty) return null;
+    return MessageQuote(
+      id: id,
+      senderId: _str(v['senderId']),
+      text: _str(v['text']),
     );
   }
 }
@@ -564,39 +696,155 @@ class Message {
     required this.senderId,
     required this.text,
     required this.createdAt,
+    this.kind = plain,
     this.postId = '',
     this.postType = '',
     this.postThumb = '',
     this.postAuthor = '',
     this.postCaption = '',
+    this.mediaUrl = '',
+    this.mediaKey = '',
+    this.width = 0,
+    this.height = 0,
+    this.durationMs = 0,
+    this.lat = 0,
+    this.lng = 0,
+    this.address = '',
+    this.replyTo,
+    this.reactions = const {},
+    this.hiddenFor = const [],
+    this.forwarded = false,
   });
+
+  // kinds (v0.9)
+  static const String plain = 'text';
+  static const String post = 'post';
+  static const String image = 'image';
+  static const String gif = 'gif';
+  static const String voice = 'voice';
+  static const String location = 'location';
 
   final String id;
   final String senderId;
+
+  /// Text, or the caption of a photo / GIF ('' allowed for media).
   final String text;
   final DateTime createdAt;
+  final String kind;
 
-  /// Shared post / clip (empty = normal text message).
+  /// Shared post / clip.
   final String postId;
   final String postType;
   final String postThumb;
   final String postAuthor;
   final String postCaption;
 
-  bool get isSharedPost => postId.isNotEmpty;
+  /// Photo / GIF / voice file.
+  final String mediaUrl;
+  final String mediaKey;
+  final int width;
+  final int height;
+  final int durationMs;
 
-  factory Message.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final m = doc.data() ?? const <String, dynamic>{};
+  /// Location.
+  final double lat;
+  final double lng;
+  final String address;
+
+  /// The message this one answers.
+  final MessageQuote? replyTo;
+
+  /// uid -> emoji
+  final Map<String, String> reactions;
+
+  /// "Delete for you": people who don't see it any more.
+  final List<String> hiddenFor;
+  final bool forwarded;
+
+  bool get isSharedPost => postId.isNotEmpty;
+  bool get isImage => kind == image;
+  bool get isGif => kind == gif;
+  bool get isVoice => kind == voice;
+  bool get isLocation => kind == location;
+
+  double get aspect {
+    if (width <= 0 || height <= 0) return 1;
+    return (width / height).clamp(0.5, 2.0);
+  }
+
+  /// Text for the chat list / reply quote.
+  String get preview {
+    switch (kind) {
+      case image:
+        return text.isNotEmpty ? '📷 $text' : '📷 Photo';
+      case gif:
+        return 'GIF';
+      case voice:
+        return '🎤 Voice message';
+      case location:
+        return '📍 ${address.isNotEmpty ? address : 'Location'}';
+      default:
+        return text;
+    }
+  }
+
+  /// Google Maps link for a location message.
+  Uri get mapsUri => Uri.parse(
+    'https://www.google.com/maps/search/?api=1&query=$lat,$lng',
+  );
+
+  bool hiddenForUid(String uid) => hiddenFor.contains(uid);
+
+  /// Reactions grouped: emoji -> how many (most first).
+  List<MapEntry<String, int>> get reactionCounts {
+    final m = <String, int>{};
+    for (final e in reactions.values) {
+      m[e] = (m[e] ?? 0) + 1;
+    }
+    final l = m.entries.toList()..sort((a, b) => b.value - a.value);
+    return l;
+  }
+
+  factory Message.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
+      Message.fromMap(doc.id, doc.data() ?? const <String, dynamic>{});
+
+  factory Message.fromMap(String id, Map<String, dynamic> m) {
+    final postId = _str(m['postId']);
+    var kind = _str(m['kind']);
+    if (kind.isEmpty) kind = postId.isNotEmpty ? post : plain;
+    final r = m['reactions'];
+    double d(Object? v) => v is num ? v.toDouble() : 0;
     return Message(
-      id: doc.id,
+      id: id,
       senderId: _str(m['senderId']),
       text: _str(m['text']),
       createdAt: _date(m['createdAt']),
-      postId: _str(m['postId']),
+      kind: kind,
+      postId: postId,
       postType: _str(m['postType']),
       postThumb: _str(m['postThumb']),
       postAuthor: _str(m['postAuthor']),
       postCaption: _str(m['postCaption']),
+      mediaUrl: _str(m['mediaUrl']),
+      mediaKey: _str(m['mediaKey']),
+      width: _int(m['width']),
+      height: _int(m['height']),
+      durationMs: _int(m['durationMs']),
+      lat: d(m['lat']),
+      lng: d(m['lng']),
+      address: _str(m['address']),
+      replyTo: MessageQuote.fromMap(m['replyTo']),
+      reactions: r is Map
+          ? {
+              for (final e in r.entries)
+                if (e.key is String && e.value is String)
+                  e.key as String: e.value as String,
+            }
+          : const {},
+      hiddenFor: m['hiddenFor'] is List
+          ? List<String>.from((m['hiddenFor'] as List).whereType<String>())
+          : const [],
+      forwarded: _bool(m['forwarded']),
     );
   }
 }

@@ -93,6 +93,7 @@ class PostRepository {
     UploadedMedia? audio,
     String audioName = '',
     PostOptions options = const PostOptions(),
+    ReplyRef? replyTo,
   }) async {
     if (media.isEmpty) throw ArgumentError('Nothing to share');
     if (media.length > maxItems) {
@@ -123,6 +124,8 @@ class PostRepository {
         'audioKey': audio.key,
         'audioName': audioName,
       },
+      // v0.9: made as an answer to a comment
+      if (replyTo != null) 'replyTo': replyTo.toMap(),
     });
     batch.update(_db.collection('users').doc(me.uid), {
       'postsCount': FieldValue.increment(1),
@@ -419,9 +422,10 @@ class PostRepository {
     String text, {
     Comment? replyTo,
     CommentPicture? picture,
+    Post? linked,
   }) async {
     final t = text.trim();
-    if (t.isEmpty && picture == null) return;
+    if (t.isEmpty && picture == null && linked == null) return;
     final me = await UserRepository.instance.meCached();
     final ref = _posts.doc(post.id);
     final batch = _db.batch();
@@ -438,6 +442,7 @@ class PostRepository {
       if (parentId.isNotEmpty) 'parentId': parentId,
       if (replyTo != null) 'replyToUsername': replyTo.authorUsername,
       ...?picture?.toMap(),
+      if (linked != null) ...linkedFields(linked),
     });
     batch.update(ref, {'commentsCount': FieldValue.increment(1)});
     if (parentId.isNotEmpty) {
@@ -451,9 +456,53 @@ class PostRepository {
       from: me,
       type: AppNotification.comment,
       post: post,
-      text: t.isNotEmpty ? t : (picture!.isGif ? 'sent a GIF' : 'sent a photo'),
+      text: t.isNotEmpty
+          ? t
+          : picture != null
+          ? (picture.isGif ? 'sent a GIF' : 'sent a photo')
+          : 'answered with a ${linked!.isClip ? 'clip' : 'post'}',
     );
     await batch.commit();
+  }
+
+  /// Card fields of a post / clip linked in a comment (v0.9).
+  static Map<String, dynamic> linkedFields(Post p) => {
+    'refPostId': p.id,
+    'refPostType': p.type,
+    'refThumb': p.coverUrl,
+    'refAuthor': p.authorUsername,
+  };
+
+  /// After a "reply with a new clip / post" is shared: adds the reply
+  /// comment that links to it (v0.9). Does nothing when the post or the
+  /// comment is gone.
+  Future<void> addLinkedReply(ReplyRef r, String newPostId) async {
+    final target = await _posts.doc(r.postId).get();
+    final made = await _posts.doc(newPostId).get();
+    if (!target.exists || !made.exists) return;
+    final post = Post.fromDoc(target);
+    final mine = Post.fromDoc(made);
+    final thread = r.isComment
+        ? await _posts
+              .doc(r.postId)
+              .collection('comments')
+              .doc(r.threadId)
+              .get()
+        : null;
+    if (thread == null || !thread.exists) {
+      await addComment(post, '', linked: mine);
+      return;
+    }
+    final replyTo = Comment(
+      id: r.commentId,
+      authorId: '',
+      authorUsername: r.username,
+      authorPhotoUrl: '',
+      text: r.text,
+      createdAt: DateTime.now(),
+      parentId: r.parentId,
+    );
+    await addComment(post, '', replyTo: replyTo, linked: mine);
   }
 
   Future<void> deleteComment(String postId, Comment c) async {

@@ -117,6 +117,7 @@ class UploadTask {
     this.audioPath,
     this.audioName = '',
     this.postId = '',
+    this.replyTo,
   });
 
   static const String post = 'post';
@@ -132,6 +133,10 @@ class UploadTask {
   final String? audioPath;
   final String audioName;
   String postId;
+
+  /// v0.9: answers a comment; after sharing, a reply comment links to it.
+  final ReplyRef? replyTo;
+  bool replyDone = false;
 
   UploadedMedia? cover;
   UploadedMedia? audio;
@@ -189,6 +194,8 @@ class UploadTask {
     'audioPath': audioPath,
     'audioName': audioName,
     'postId': postId,
+    'replyTo': replyTo?.toMap(),
+    'replyDone': replyDone,
     'cover': _media(cover),
     'audio': _media(audio),
     'status': status == UploadStatus.failed ? 'failed' : 'waiting',
@@ -221,7 +228,9 @@ class UploadTask {
           audioPath: m['audioPath'] as String?,
           audioName: (m['audioName'] as String?) ?? '',
           postId: (m['postId'] as String?) ?? '',
+          replyTo: ReplyRef.fromMap(m['replyTo']),
         )
+        ..replyDone = m['replyDone'] == true
         ..cover = _readMedia(m['cover'])
         ..audio = _readMedia(m['audio'])
         ..status = m['status'] == 'failed'
@@ -301,6 +310,7 @@ class UploadQueue extends ChangeNotifier {
     String? coverPath,
     String? audioPath,
     String audioName = '',
+    ReplyRef? replyTo,
   }) {
     if (items.isEmpty) throw ArgumentError('Nothing to share');
     final t = UploadTask(
@@ -312,6 +322,7 @@ class UploadQueue extends ChangeNotifier {
       coverPath: coverPath,
       audioPath: audioPath,
       audioName: audioName,
+      replyTo: replyTo,
     );
     _tasks.add(t);
     _save(now: true);
@@ -621,6 +632,7 @@ class UploadQueue extends ChangeNotifier {
         audio: t.audio,
         audioName: t.audioName,
         options: t.options,
+        replyTo: t.replyTo,
         media: [
           for (final m in t.items)
             MediaItem(
@@ -637,6 +649,17 @@ class UploadQueue extends ChangeNotifier {
             ),
         ],
       );
+      // v0.9: answer to a comment -> reply comment that links to it
+      final r = t.replyTo;
+      if (r != null && !t.replyDone) {
+        try {
+          await PostRepository.instance.addLinkedReply(r, t.postId);
+        } catch (e) {
+          debugPrint('upload: reply comment failed: $e'); // post is shared
+        }
+        t.replyDone = true;
+        _save(now: true);
+      }
     }
   }
 
