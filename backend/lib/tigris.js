@@ -4,6 +4,9 @@ import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env, HttpError, requireEnv } from './http.js';
 
+/** Files never change (unique names) -> cache for a year. */
+export const CACHE_CONTROL = 'public, max-age=31536000, immutable';
+
 export const KINDS = ['post', 'clip', 'story', 'avatar', 'cover', 'thumb', 'audio'];
 
 const MB = 1024 * 1024;
@@ -79,17 +82,20 @@ export async function createUpload({ uid, kind, contentType, size }) {
     Key: key,
     ContentType: contentType,
     ContentLength: n,
+    // every file name is unique and never changes -> phones and the
+    // Tigris CDN may keep it for a year (instant repeat loads)
+    CacheControl: CACHE_CONTROL,
   });
   const uploadUrl = await getSignedUrl(s3(), command, {
     expiresIn: 600,
     // make sure size + type are part of the signature
-    signableHeaders: new Set(['content-type', 'content-length']),
+    signableHeaders: new Set(['content-type', 'content-length', 'cache-control']),
   });
   return {
     uploadUrl,
     publicUrl: publicUrl(key),
     key,
-    headers: { 'Content-Type': contentType },
+    headers: { 'Content-Type': contentType, 'Cache-Control': CACHE_CONTROL },
   };
 }
 

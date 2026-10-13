@@ -11,7 +11,11 @@ class StoryBar extends StatelessWidget {
     required this.me,
     required this.myUid,
     required this.onAddStory,
+    this.allowed = const <String>{},
   });
+
+  /// Only moments from these people (I follow them or they are famous).
+  final Set<String> allowed;
 
   final UserProfile? me;
   final String myUid;
@@ -23,7 +27,7 @@ class StoryBar extends StatelessWidget {
     return ListenableBuilder(
       listenable: index.listenable,
       builder: (context, _) {
-        final ordered = index.ordered(first: myUid);
+        final ordered = index.rowGroups(myUid, allowed);
         final mine = ordered.where((g) => g.authorId == myUid).toList();
         final others = ordered.where((g) => g.authorId != myUid).toList();
 

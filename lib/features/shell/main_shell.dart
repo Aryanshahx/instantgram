@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../core/services/media_prefetch.dart';
+import '../profile/data/famous_index.dart';
+import '../reels/data/clips_warmup.dart';
+
 import '../../core/services/app_settings.dart';
 import '../../core/services/content_filter.dart';
 import '../../core/services/usage_tracker.dart';
@@ -34,6 +38,7 @@ class _MainShellState extends State<MainShell> {
   ];
 
   int _index = 0;
+  AppLifecycleListener? _life;
 
   @override
   void initState() {
@@ -41,6 +46,10 @@ class _MainShellState extends State<MainShell> {
     AppSettings.instance.load();
     ContentFilter.instance.start(widget.uid);
     MomentsIndex.instance.start();
+    FamousIndex.instance.start();
+    ClipsWarmup.instance.start();
+    // app in the background -> free the ready video players
+    _life = AppLifecycleListener(onHide: VideoPool.instance.clear);
     UsageTracker.instance
       ..onLimitReached = _limitReached
       ..start();
@@ -51,6 +60,10 @@ class _MainShellState extends State<MainShell> {
     UsageTracker.instance
       ..onLimitReached = null
       ..stop();
+    _life?.dispose();
+    ClipsWarmup.instance.stop();
+    FamousIndex.instance.stop();
+    VideoPool.instance.clear();
     MomentsIndex.instance.stop();
     ContentFilter.instance.stop();
     super.dispose();

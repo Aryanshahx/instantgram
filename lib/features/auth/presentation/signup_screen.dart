@@ -147,28 +147,29 @@ class _SignupScreenState extends State<SignupScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20),
-                    const IgLogo(size: 34),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 10),
+                    const IgLogo(size: 26),
+                    const SizedBox(height: 10),
                     const Text(
                       'Create your\naccount.',
                       style: TextStyle(
-                        fontSize: 42,
+                        fontSize: 28,
                         fontWeight: FontWeight.w800,
                         letterSpacing: -1.8,
                         height: 1.08,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 6),
                     const Text(
                       'Step 2 of 2 · join InstantGram and share your moments.',
                       style: TextStyle(
-                        fontSize: 16,
+                        fontSize: 14,
                         color: AppColors.textSecondary,
                       ),
                     ),
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 18),
                     IgTextField(
+                      height: 48,
                       hint: 'Full name',
                       icon: Icons.person_outline,
                       controller: _nameCtrl,
@@ -179,8 +180,9 @@ class _SignupScreenState extends State<SignupScreen> {
                           ? 'Enter your name'
                           : null,
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 10),
                     IgTextField(
+                      height: 48,
                       hint: 'Username',
                       icon: Icons.alternate_email,
                       controller: _userCtrl,
@@ -195,8 +197,9 @@ class _SignupScreenState extends State<SignupScreen> {
                         return null;
                       },
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 10),
                     IgTextField(
+                      height: 48,
                       hint: 'Email',
                       icon: Icons.mail_outline,
                       controller: _emailCtrl,
@@ -207,8 +210,9 @@ class _SignupScreenState extends State<SignupScreen> {
                           ? 'Enter a valid email'
                           : null,
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 10),
                     IgTextField(
+                      height: 48,
                       hint: 'Password',
                       icon: Icons.lock_outline,
                       controller: _passCtrl,
@@ -219,8 +223,9 @@ class _SignupScreenState extends State<SignupScreen> {
                           ? 'At least 6 characters'
                           : null,
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 10),
                     IgTextField(
+                      height: 48,
                       key: const ValueKey('dob'),
                       hint: 'Date of birth',
                       icon: Icons.cake_outlined,
@@ -237,8 +242,9 @@ class _SignupScreenState extends State<SignupScreen> {
                         return null;
                       },
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 10),
                     IgTextField(
+                      height: 48,
                       key: const ValueKey('language'),
                       hint: 'Language',
                       icon: Icons.translate,
@@ -249,8 +255,9 @@ class _SignupScreenState extends State<SignupScreen> {
                       validator: (_) =>
                           _lang.isEmpty ? 'Choose your language' : null,
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 10),
                     IgTextField(
+                      height: 48,
                       key: const ValueKey('country'),
                       hint: 'Country',
                       icon: Icons.public,
@@ -273,14 +280,16 @@ class _SignupScreenState extends State<SignupScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 28),
+                    const SizedBox(height: 18),
                     IgPrimaryButton(
+                      height: 46,
                       label: 'Sign up',
                       loading: _loading,
                       onPressed: _signup,
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 10),
                     IgOutlineButton(
+                      height: 46,
                       label: 'I already have an account',
                       onPressed: () => Navigator.of(context).maybePop(),
                     ),

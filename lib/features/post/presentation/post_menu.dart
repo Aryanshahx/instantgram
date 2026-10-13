@@ -102,7 +102,7 @@ Future<void> showPostMenu(
               title: const Text('Share'),
               onTap: () {
                 Navigator.pop(ctx);
-                sharePost(post);
+                sharePost(context, post);
               },
             ),
             if (!mine)

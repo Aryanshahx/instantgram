@@ -38,6 +38,38 @@ class ChatRepository {
   Future<void> send(UserProfile other, String text) async {
     final t = text.trim();
     if (t.isEmpty) return;
+    await _write(
+      ChatPerson(
+        uid: other.uid,
+        username: other.username,
+        photoUrl: other.photoUrl,
+      ),
+      {'text': t},
+      t,
+    );
+  }
+
+  /// Sends a post / clip into the chat (shown as a card that opens it).
+  Future<void> sendPost(ChatPerson other, Post post) {
+    final what = post.isClip ? 'clip' : 'post';
+    final text = 'Shared a $what by @${post.authorUsername}';
+    return _write(other, {
+      'text': text,
+      'postId': post.id,
+      'postType': post.type,
+      'postThumb': post.coverUrl,
+      'postAuthor': post.authorUsername,
+      'postCaption': post.caption.length > 120
+          ? post.caption.substring(0, 120)
+          : post.caption,
+    }, text);
+  }
+
+  Future<void> _write(
+    ChatPerson other,
+    Map<String, dynamic> message,
+    String preview,
+  ) async {
     final me = await UserRepository.instance.me();
     final chatRef = _chats.doc(chatIdWith(other.uid));
     final members = [me.uid, other.uid]..sort();
@@ -48,15 +80,79 @@ class ChatRepository {
         me.uid: {'username': me.username, 'photoUrl': me.photoUrl},
         other.uid: {'username': other.username, 'photoUrl': other.photoUrl},
       },
-      'lastMessage': t.length > 200 ? t.substring(0, 200) : t,
+      'lastMessage': preview.length > 200 ? preview.substring(0, 200) : preview,
       'lastSenderId': me.uid,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
     batch.set(chatRef.collection('messages').doc(), {
+      ...message,
       'senderId': me.uid,
-      'text': t,
       'createdAt': FieldValue.serverTimestamp(),
     });
     await batch.commit();
+  }
+
+  /// People to share with: recent chats first, then people I follow.
+  Future<List<ChatPerson>> shareTargets({int max = 150}) async {
+    final me = myUid;
+    final out = <String, ChatPerson>{};
+    try {
+      final chats = await _chats
+          .where('members', arrayContains: me)
+          .orderBy('updatedAt', descending: true)
+          .limit(40)
+          .get();
+      for (final c in chats.docs.map(Chat.fromDoc)) {
+        final o = c.otherUid(me);
+        if (o == me) continue;
+        out[o] = ChatPerson(
+          uid: o,
+          username: c.usernameOf(o),
+          photoUrl: c.photoOf(o),
+          recent: true,
+        );
+      }
+    } catch (_) {}
+    try {
+      final ids = await UserRepository.instance.followingIds(me).first;
+      final missing = ids.where((id) => !out.containsKey(id)).toList();
+      final users = await UserRepository.instance.usersByIds(
+        missing.take(max).toList(),
+      );
+      for (final u in users) {
+        out[u.uid] = ChatPerson(
+          uid: u.uid,
+          username: u.username,
+          photoUrl: u.photoUrl,
+          name: u.name,
+        );
+      }
+    } catch (_) {}
+    return out.values.take(max).toList();
+  }
+}
+
+/// Someone you can send a message / post to.
+class ChatPerson {
+  const ChatPerson({
+    required this.uid,
+    required this.username,
+    required this.photoUrl,
+    this.name = '',
+    this.recent = false,
+  });
+  final String uid;
+  final String username;
+  final String photoUrl;
+  final String name;
+
+  /// You chatted with them recently.
+  final bool recent;
+
+  bool matches(String q) {
+    final w = q.trim().toLowerCase().replaceFirst('@', '');
+    return w.isEmpty ||
+        username.toLowerCase().contains(w) ||
+        name.toLowerCase().contains(w);
   }
 }

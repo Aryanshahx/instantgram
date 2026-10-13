@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/services/media_prefetch.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/models/user_profile.dart';
@@ -10,7 +11,10 @@ import '../../notifications/data/notification_repository.dart';
 import '../../notifications/presentation/notifications_screen.dart';
 import '../../post/data/post_repository.dart';
 import '../../post/presentation/create_sheet.dart';
+import '../../profile/data/famous_index.dart';
 import '../../profile/data/user_repository.dart';
+import '../../search/presentation/find_people_screen.dart';
+import '../../stories/data/moments_index.dart';
 import 'widgets/post_card.dart';
 import 'widgets/story_bar.dart';
 
@@ -25,10 +29,15 @@ class HomeScreen extends StatelessWidget {
       stream: UserRepository.instance.watchUser(uid),
       builder: (context, meSnap) => StreamBuilder<List<String>>(
         stream: UserRepository.instance.followingIds(uid),
-        builder: (context, fSnap) {
-          final following = fSnap.data;
-          return _HomeFeed(me: meSnap.data, uid: uid, following: following);
-        },
+        builder: (context, fSnap) => ValueListenableBuilder<List<String>>(
+          valueListenable: FamousIndex.instance.ids,
+          builder: (context, famous, _) => _HomeFeed(
+            me: meSnap.data,
+            uid: uid,
+            following: fSnap.data,
+            famous: famous,
+          ),
+        ),
       ),
     );
   }
@@ -39,11 +48,15 @@ class _HomeFeed extends StatefulWidget {
     required this.me,
     required this.uid,
     required this.following,
+    this.famous = const <String>[],
   });
 
   final UserProfile? me;
   final String uid;
   final List<String>? following;
+
+  /// 10,000+ followers: always in the feed + moments row.
+  final List<String> famous;
 
   @override
   State<_HomeFeed> createState() => _HomeFeedState();
@@ -54,17 +67,22 @@ class _HomeFeedState extends State<_HomeFeed> {
   String _streamKey = '';
   int _refresh = 0;
 
-  /// Same stream until the people you follow change or you pull to refresh
-  /// (so the feed doesn't reload on every rebuild).
-  Stream<List<Post>>? _feedStream(bool discover) {
+  /// me + people I follow + famous people.
+  List<String>? get _authors {
     final f = widget.following;
     if (f == null) return null;
-    final key = '${discover ? 'all' : f.take(29).join(',')}#$_refresh';
+    return feedAuthors(widget.uid, f, widget.famous);
+  }
+
+  /// Same stream until the people change or you pull to refresh
+  /// (so the feed doesn't reload on every rebuild).
+  Stream<List<Post>>? _feedStream(List<String>? authors) {
+    if (authors == null) return null;
+    final sorted = [...authors]..sort();
+    final key = '${sorted.join(',')}#$_refresh';
     if (key != _streamKey || _stream == null) {
       _streamKey = key;
-      _stream = discover
-          ? PostRepository.instance.recent(limit: 40)
-          : PostRepository.instance.feed([widget.uid, ...f.take(29)]);
+      _stream = PostRepository.instance.feedFor(authors);
     }
     return _stream;
   }
@@ -78,10 +96,10 @@ class _HomeFeedState extends State<_HomeFeed> {
   Widget build(BuildContext context) {
     final me = widget.me;
     final uid = widget.uid;
-    final f = widget.following;
-    // Nobody followed yet -> show latest posts from everyone.
-    final bool discover = f != null && f.isEmpty;
-    final Stream<List<Post>>? stream = _feedStream(discover);
+    final authors = _authors;
+    final Stream<List<Post>>? stream = _feedStream(authors);
+    final allowed = <String>{...?authors};
+    if (authors != null) MomentsIndex.instance.setAllowed(allowed);
 
     return RefreshIndicator(
       key: const ValueKey('feed-refresh'),
@@ -126,23 +144,11 @@ class _HomeFeedState extends State<_HomeFeed> {
                 key: ValueKey('stories-$_refresh'),
                 me: me,
                 myUid: uid,
+                allowed: allowed,
                 onAddStory: () => startCompose(context, ComposeMode.story),
               ),
             ),
           ),
-          if (discover)
-            const SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(18, 0, 18, 8),
-                child: Text(
-                  'Latest from everyone · follow people to fill your feed',
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-            ),
           if (stream == null)
             const SliverToBoxAdapter(child: LoadingView())
           else
@@ -163,14 +169,31 @@ class _HomeFeedState extends State<_HomeFeed> {
                     child: Column(
                       children: [
                         const EmptyState(
-                          icon: Icons.photo_camera_outlined,
-                          title: 'No posts yet',
-                          subtitle: 'Share your first photo or clip.',
+                          icon: Icons.people_outline,
+                          title: 'Your feed is empty',
+                          subtitle:
+                              'Follow people to see their posts and moments '
+                              'here.',
                         ),
-                        FilledButton.icon(
-                          onPressed: () => showCreateSheet(context),
-                          icon: const Icon(Icons.add),
-                          label: const Text('Create'),
+                        Wrap(
+                          spacing: 10,
+                          children: [
+                            FilledButton.icon(
+                              key: const ValueKey('feed-find-people'),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => const FindPeopleScreen(),
+                                ),
+                              ),
+                              icon: const Icon(Icons.person_search, size: 18),
+                              label: const Text('Find people'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () => showCreateSheet(context),
+                              icon: const Icon(Icons.add, size: 18),
+                              label: const Text('Create'),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -178,7 +201,17 @@ class _HomeFeedState extends State<_HomeFeed> {
                 }
                 return SliverList.builder(
                   itemCount: posts.length,
-                  itemBuilder: (context, i) => PostCard(post: posts[i]),
+                  itemBuilder: (context, i) {
+                    // get the next posts' photos + first video ready
+                    MediaPrefetch.instance.ahead(
+                      posts,
+                      i,
+                      images: 2,
+                      videos: 1,
+                      mixWithOthers: (p) => p.hasMusic,
+                    );
+                    return PostCard(post: posts[i]);
+                  },
                 );
               },
             ),

@@ -122,6 +122,9 @@ class Avatar extends StatelessWidget {
 }
 
 /// Lime → mint glowing ring (grey when [seen]).
+/// Ring colour for moments you already watched.
+const Color kSeenRingColor = Color(0xFF8A8D96);
+
 class MomentRing extends StatelessWidget {
   const MomentRing({
     super.key,
@@ -143,16 +146,8 @@ class MomentRing extends StatelessWidget {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: seen ? null : AppColors.fabGradient,
-        color: seen ? const Color(0xFF3A3F4A) : null,
-        boxShadow: seen
-            ? null
-            : [
-                BoxShadow(
-                  color: AppColors.lime.withValues(alpha: 0.45),
-                  blurRadius: 10,
-                  spreadRadius: 0.5,
-                ),
-              ],
+        // seen moments keep a clear grey ring (no glow anywhere)
+        color: seen ? kSeenRingColor : null,
       ),
       child: Container(
         padding: EdgeInsets.all(gap),

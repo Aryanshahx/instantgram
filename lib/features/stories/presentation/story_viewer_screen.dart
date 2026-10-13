@@ -1,7 +1,9 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../core/services/app_settings.dart';
+import '../../../core/services/media_prefetch.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
@@ -80,18 +82,27 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     _videoError = false;
     old?.dispose();
 
+    _photoReady = false;
+    _prefetchNext();
     if (!st.isVideo) {
       _timer.duration = _photoTime;
-      if (!_paused) _timer.forward(from: 0);
       if (mounted) setState(() {});
+      // the 5 s only start when the photo is on screen
+      await _loadPhoto(st.mediaUrl);
+      if (!mounted || id != _loadId) return;
+      _photoReady = true;
+      if (!_paused) _timer.forward(from: 0);
       return;
     }
 
     if (mounted) setState(() {});
-    final c = VideoPlayerController.networkUrl(Uri.parse(st.mediaUrl));
+    final pooled = VideoPool.instance.take(st.mediaUrl);
+    final c =
+        pooled?.controller ??
+        VideoPlayerController.networkUrl(Uri.parse(st.mediaUrl));
     _video = c;
     try {
-      await c.initialize();
+      await (pooled?.ready ?? c.initialize());
       if (!mounted || id != _loadId) return;
       final e = st.edits;
       final total = c.value.duration.inMilliseconds;
@@ -115,6 +126,38 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     }
   }
 
+  bool _photoReady = false;
+
+  /// Waits until the photo is downloaded + decoded (max 8 s).
+  Future<void> _loadPhoto(String url) async {
+    if (url.isEmpty || NetImage.disableCache) return;
+    try {
+      await precacheImage(
+        CachedNetworkImageProvider(url),
+        context,
+      ).timeout(const Duration(seconds: 8));
+    } catch (_) {
+      // show it anyway; the timer must not get stuck
+    }
+  }
+
+  /// Gets the moment after this one ready (photo or video).
+  void _prefetchNext() {
+    Story? next;
+    if (_s < _group.stories.length - 1) {
+      next = _group.stories[_s + 1];
+    } else if (_g < widget.groups.length - 1) {
+      final g = widget.groups[_g + 1];
+      next = g.stories[_firstUnseen(g)];
+    }
+    if (next == null) return;
+    if (next.isVideo) {
+      VideoPool.instance.prefetch(next.mediaUrl);
+    } else {
+      MediaPrefetch.instance.image(next.mediaUrl);
+    }
+  }
+
   void _pause() {
     _paused = true;
     _timer.stop();
@@ -124,6 +167,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
   void _resume() {
     _paused = false;
     if (_story.isVideo && !_videoReady && !_videoError) return;
+    if (!_story.isVideo && !_photoReady) return;
     _timer.forward();
     _video?.play();
   }

@@ -3,11 +3,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../shared/models/post.dart';
 import '../post/data/post_repository.dart' show ViewSource, kAgeGroups;
 
-/// Numbers for ONE post / clip, made from its view docs.
-/// Only totals — never who watched.
+/// Analytics numbers made from view docs. Only totals — never who watched.
+/// [PostInsights.from] = one post / clip.
+/// [PostInsights.fromMany] = your whole account (Dashboard).
 class PostInsights {
   PostInsights._({
     required this.post,
+    required this.postCount,
     required this.views,
     required this.reach,
     required this.detailed,
@@ -21,9 +23,19 @@ class PostInsights {
     required this.completionRate,
     required this.timeline,
     required this.hourly,
+    required this.likes,
+    required this.comments,
+    required this.shares,
+    required this.reposts,
+    required this.saves,
+    required this.hasVideo,
   });
 
-  final Post post;
+  /// The post (null = account totals).
+  final Post? post;
+
+  /// How many posts/clips are counted.
+  final int postCount;
 
   /// All views, also repeat views by the same account.
   final int views;
@@ -55,15 +67,36 @@ class PostInsights {
   final List<(DateTime, int)> timeline;
   final bool hourly;
 
-  int get likes => post.likesCount;
-  int get comments => post.commentsCount;
-  int get shares => post.sharesCount;
-  int get reposts => post.repostsCount;
-  int get saves => post.savesCount < 0 ? 0 : post.savesCount;
+  final int likes;
+  final int comments;
+  final int shares;
+  final int reposts;
+  final int saves;
+  final bool hasVideo;
+
+  bool get isAccount => post == null;
   int get interactions => likes + comments + shares + reposts + saves;
 
   /// Interactions per account reached (0..∞, shown as %).
   double get engagementRate => reach == 0 ? 0 : interactions / reach;
+
+  /// Average interactions per post.
+  double get interactionsPerPost =>
+      postCount == 0 ? 0 : interactions / postCount;
+
+  factory PostInsights.from(
+    Post post,
+    List<Map<String, dynamic>> docs, {
+    DateTime? now,
+  }) => _build([post], [docs], post: post, now: now);
+
+  /// Account totals over many posts. [docs] = view docs of each post
+  /// (same order as [posts]).
+  factory PostInsights.fromMany(
+    List<Post> posts,
+    List<List<Map<String, dynamic>>> docs, {
+    DateTime? now,
+  }) => _build(posts, docs, now: now);
 
   static DateTime? _date(Object? v) {
     if (v is Timestamp) return v.toDate();
@@ -80,51 +113,91 @@ class PostInsights {
     return list;
   }
 
-  factory PostInsights.from(
-    Post post,
-    List<Map<String, dynamic>> docs, {
+  static PostInsights _build(
+    List<Post> posts,
+    List<List<Map<String, dynamic>>> docsPerPost, {
+    Post? post,
     DateTime? now,
   }) {
     final n = now ?? DateTime.now();
     var views = 0, followers = 0, watchN = 0, watchSum = 0, done = 0;
+    var videoDocs = 0, detailed = 0, maxReach = 0;
+    final viewers = <String>{};
     final countries = <String, int>{};
     final ages = <String, int>{};
     final sources = <String, int>{};
     final langs = <String, int>{};
     final dates = <DateTime>[];
-    for (final d in docs) {
-      final c = d['count'];
-      views += c is num && c >= 1 ? c.toInt() : 1;
-      if (d['follower'] == true) followers++;
-      final country = d['country'];
-      if (country is String && country.isNotEmpty) {
-        countries[country.toUpperCase()] =
-            (countries[country.toUpperCase()] ?? 0) + 1;
+    var likes = 0, comments = 0, shares = 0, reposts = 0, saves = 0;
+    var hasVideo = false;
+    for (var k = 0; k < posts.length; k++) {
+      final p = posts[k];
+      final docs = k < docsPerPost.length
+          ? docsPerPost[k]
+          : const <Map<String, dynamic>>[];
+      likes += p.likesCount;
+      comments += p.commentsCount;
+      shares += p.sharesCount;
+      reposts += p.repostsCount;
+      saves += p.savesCount < 0 ? 0 : p.savesCount;
+      if (p.hasVideo) hasVideo = true;
+      // watch time: one post = all its docs; account = video posts only
+      final countWatch = post != null || p.hasVideo;
+      if (countWatch) videoDocs += docs.length;
+      var pViews = 0;
+      for (final d in docs) {
+        final c = d['count'];
+        pViews += c is num && c >= 1 ? c.toInt() : 1;
+        final id = d['_id'];
+        if (id is String && id.isNotEmpty) viewers.add(id);
+        if (d['follower'] == true) followers++;
+        final country = d['country'];
+        if (country is String && country.isNotEmpty) {
+          countries[country.toUpperCase()] =
+              (countries[country.toUpperCase()] ?? 0) + 1;
+        }
+        final age = d['ageGroup'];
+        if (age is String && kAgeGroups.contains(age)) {
+          ages[age] = (ages[age] ?? 0) + 1;
+        }
+        final src = ViewSource.normalize(
+          d['source'] is String ? d['source'] as String : '',
+        );
+        sources[src] = (sources[src] ?? 0) + 1;
+        final lang = d['language'];
+        if (lang is String && lang.isNotEmpty) {
+          langs[lang] = (langs[lang] ?? 0) + 1;
+        }
+        if (countWatch) {
+          final w = d['watchMs'];
+          if (w is num && w > 0) {
+            watchN++;
+            watchSum += w.toInt();
+          }
+          if (d['completed'] == true) done++;
+        }
+        final at = _date(d['createdAt']);
+        if (at != null) dates.add(at);
       }
-      final age = d['ageGroup'];
-      if (age is String && kAgeGroups.contains(age)) {
-        ages[age] = (ages[age] ?? 0) + 1;
-      }
-      final src = ViewSource.normalize(
-        d['source'] is String ? d['source'] as String : '',
-      );
-      sources[src] = (sources[src] ?? 0) + 1;
-      final lang = d['language'];
-      if (lang is String && lang.isNotEmpty) {
-        langs[lang] = (langs[lang] ?? 0) + 1;
-      }
-      final w = d['watchMs'];
-      if (w is num && w > 0) {
-        watchN++;
-        watchSum += w.toInt();
-      }
-      if (d['completed'] == true) done++;
-      final at = _date(d['createdAt']);
-      if (at != null) dates.add(at);
+      detailed += docs.length;
+      final pReach = docs.length > p.viewsCount ? docs.length : p.viewsCount;
+      if (pReach > maxReach) maxReach = pReach;
+      views += pViews < pReach ? pReach : pViews;
+    }
+
+    // one post: accounts = its viewers. Account: different people across
+    // all posts (at least the best single post).
+    final int reach;
+    if (post != null) {
+      reach = maxReach;
+    } else {
+      reach = viewers.length > maxReach ? viewers.length : maxReach;
     }
 
     // timeline: hours for young posts, else days (max 30 buckets)
-    final start = post.createdAt;
+    final start = posts.isEmpty
+        ? n
+        : posts.map((p) => p.createdAt).reduce((a, b) => a.isBefore(b) ? a : b);
     final age = n.difference(start);
     final hourly = age.inHours < 48;
     final step = hourly ? const Duration(hours: 1) : const Duration(days: 1);
@@ -145,12 +218,12 @@ class PostInsights {
       for (var i = 0; i < shown; i++) (from.add(step * i), counts[i]),
     ];
 
-    final reach = docs.length > post.viewsCount ? docs.length : post.viewsCount;
     return PostInsights._(
       post: post,
-      views: views < reach ? reach : views,
+      postCount: posts.length,
+      views: views,
       reach: reach,
-      detailed: docs.length,
+      detailed: detailed,
       followerViews: followers,
       countries: _sorted(countries),
       ages: [
@@ -161,9 +234,15 @@ class PostInsights {
       languages: _sorted(langs),
       watchSamples: watchN,
       avgWatchMs: watchN == 0 ? 0 : watchSum / watchN,
-      completionRate: docs.isEmpty ? 0 : done / docs.length,
+      completionRate: videoDocs == 0 ? 0 : done / videoDocs,
       timeline: timeline,
       hourly: hourly,
+      likes: likes,
+      comments: comments,
+      shares: shares,
+      reposts: reposts,
+      saves: saves,
+      hasVideo: hasVideo,
     );
   }
 }

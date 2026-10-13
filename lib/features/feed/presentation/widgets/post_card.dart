@@ -226,7 +226,7 @@ class _PostCardState extends State<PostCard>
                     },
                   ),
                   IconButton(
-                    onPressed: () => sharePost(p),
+                    onPressed: () => sharePost(context, p),
                     icon: const Icon(Icons.send_outlined, size: 26),
                   ),
                   if (p.sharesCount > 0 && (!p.hideShares || mine))
@@ -287,20 +287,6 @@ class _PostCardState extends State<PostCard>
                           ),
                           TextSpan(text: p.caption),
                         ],
-                      ),
-                    ),
-                  ],
-                  if (p.commentsCount > 0) ...[
-                    const SizedBox(height: 4),
-                    GestureDetector(
-                      onTap: () => showComments(context, p),
-                      child: Text(
-                        p.hideComments && !mine
-                            ? 'View comments'
-                            : p.commentsCount == 1
-                            ? 'View 1 comment'
-                            : 'View all ${p.commentsCount} comments',
-                        style: const TextStyle(color: AppColors.textSecondary),
                       ),
                     ),
                   ],

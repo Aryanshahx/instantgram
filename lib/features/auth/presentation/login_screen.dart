@@ -81,6 +81,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             const SizedBox(height: 20),
             IgTextField(
+              height: 48,
               hint: 'Email',
               icon: Icons.alternate_email,
               controller: ctrl,
@@ -88,6 +89,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             const SizedBox(height: 16),
             IgPrimaryButton(
+              height: 46,
               label: 'Send reset link',
               onPressed: () => Navigator.pop(ctx, ctrl.text),
             ),
@@ -122,28 +124,29 @@ class _LoginScreenState extends State<LoginScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const SizedBox(height: 32),
-                        const IgLogo(size: 40),
-                        const SizedBox(height: 28),
+                        const SizedBox(height: 24),
+                        const IgLogo(size: 30),
+                        const SizedBox(height: 18),
                         const Text(
                           'Share the\nmoment,\ninstantly.',
                           style: TextStyle(
-                            fontSize: 46,
+                            fontSize: 32,
                             fontWeight: FontWeight.w800,
-                            letterSpacing: -2,
+                            letterSpacing: -1.2,
                             height: 1.08,
                           ),
                         ),
-                        const SizedBox(height: 18),
+                        const SizedBox(height: 10),
                         const Text(
                           'Log in to see what your people are up to.',
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: 14,
                             color: AppColors.textSecondary,
                           ),
                         ),
-                        const SizedBox(height: 40),
+                        const SizedBox(height: 26),
                         IgTextField(
+                          height: 48,
                           hint: 'Email or username',
                           icon: Icons.alternate_email,
                           controller: _idCtrl,
@@ -157,8 +160,9 @@ class _LoginScreenState extends State<LoginScreen> {
                               ? 'Enter your email or username'
                               : null,
                         ),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 10),
                         IgTextField(
+                          height: 48,
                           hint: 'Password',
                           icon: Icons.lock_outline,
                           controller: _passCtrl,
@@ -177,26 +181,28 @@ class _LoginScreenState extends State<LoginScreen> {
                             style: TextButton.styleFrom(
                               foregroundColor: AppColors.lime,
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 16,
+                                horizontal: 8,
+                                vertical: 8,
                               ),
                             ),
                             child: const Text(
                               'Forgot password?',
                               style: TextStyle(
-                                fontSize: 16,
+                                fontSize: 13.5,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
                           ),
                         ),
                         IgPrimaryButton(
+                          height: 46,
                           label: 'Log in',
                           loading: _loading,
                           onPressed: _login,
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 10),
                         IgOutlineButton(
+                          height: 46,
                           label: 'Create an account',
                           onPressed: () => Navigator.of(context).push(
                             MaterialPageRoute(

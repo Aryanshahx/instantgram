@@ -1,8 +1,10 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/services/app_settings.dart';
+import '../../../core/services/media_prefetch.dart';
 import '../../../shared/models/post.dart';
 import '../presentation/story_viewer_screen.dart';
 import 'story_repository.dart';
@@ -54,11 +56,46 @@ class MomentsIndex {
   void _set(List<StoryGroup> list) {
     _byAuthor = {for (final g in list) g.authorId: g};
     groups.value = list;
+    _warm(list);
+  }
+
+  /// Downloads the first unseen photo of each group (max 12) and opens the
+  /// first video, so tapping a ring shows the moment instantly.
+  void _warm(List<StoryGroup> list) {
+    final allowed = _allowed;
+    if (allowed == null) return;
+    var videos = 0;
+    for (final g in list.where((g) => allowed.contains(g.authorId)).take(12)) {
+      final st = g.stories.firstWhere(
+        (s) => !AppSettings.instance.isSeen(s.id),
+        orElse: () => g.stories.first,
+      );
+      if (st.isVideo) {
+        if (videos++ < 1) VideoPool.instance.prefetch(st.mediaUrl);
+      } else {
+        MediaPrefetch.instance.image(st.mediaUrl);
+      }
+    }
   }
 
   /// For tests / previews.
   @visibleForTesting
   void debugSet(List<StoryGroup> list) => _set(list);
+
+  Set<String>? _allowed;
+
+  /// Whose moments go in the Discover row: me + following + famous.
+  void setAllowed(Set<String> ids) {
+    if (_allowed != null && setEquals(_allowed, ids)) return;
+    _allowed = ids;
+    _warm(groups.value);
+  }
+
+  /// Groups for the Discover row (only allowed authors), viewer order.
+  List<StoryGroup> rowGroups(String myUid, Set<String> allowed) =>
+      ordered(first: myUid)
+          .where((g) => g.authorId == myUid || allowed.contains(g.authorId))
+          .toList();
 
   StoryGroup? of(String uid) => _byAuthor[uid];
   bool has(String uid) => _byAuthor.containsKey(uid);

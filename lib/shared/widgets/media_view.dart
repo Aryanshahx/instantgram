@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
+import '../../core/services/media_prefetch.dart';
 import '../../core/services/app_settings.dart';
 import '../../core/services/music_player.dart';
 import '../../core/theme/app_colors.dart';
@@ -143,16 +144,23 @@ class _MediaVideoState extends State<MediaVideo> {
 
   Future<void> _init() async {
     if (kDisableVideoPlayback || _c != null) return;
-    final c = VideoPlayerController.networkUrl(
-      Uri.parse(widget.item.url),
-      videoPlayerOptions: VideoPlayerOptions(
-        mixWithOthers: widget.mixWithOthers,
-      ),
+    // ready player from the prefetch pool = instant start
+    final pooled = VideoPool.instance.take(
+      widget.item.url,
+      mixWithOthers: widget.mixWithOthers,
     );
+    final c =
+        pooled?.controller ??
+        VideoPlayerController.networkUrl(
+          Uri.parse(widget.item.url),
+          videoPlayerOptions: VideoPlayerOptions(
+            mixWithOthers: widget.mixWithOthers,
+          ),
+        );
     _c = c;
     _failed = false;
     try {
-      await c.initialize();
+      await (pooled?.ready ?? c.initialize());
       if (!mounted || _c != c) {
         c.dispose();
         return;

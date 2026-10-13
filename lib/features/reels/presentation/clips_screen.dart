@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
+import '../../../core/services/media_prefetch.dart';
 import '../../../core/services/music_player.dart';
 import '../../../core/services/system_volume.dart';
 import '../../../core/theme/app_colors.dart';
@@ -20,6 +21,7 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/media_view.dart';
 import '../../../shared/widgets/net_image.dart';
 import '../../post/data/post_repository.dart';
+import '../data/clips_warmup.dart';
 import '../../post/presentation/comments_sheet.dart';
 import '../../post/presentation/create_sheet.dart';
 import '../../post/presentation/post_menu.dart';
@@ -83,7 +85,24 @@ class _ClipsScreenState extends State<ClipsScreen> {
     super.dispose();
   }
 
+  /// Gets the next clips ready while you watch this one
+  /// (next 2 videos opened, next 3 covers downloaded).
+  void _prefetch(List<Post> clips, int i) {
+    MediaPrefetch.instance.ahead(
+      clips,
+      i,
+      images: 3,
+      videos: 2,
+      mixWithOthers: (p) => p.hasMusic,
+    );
+  }
+
+  List<Post> _visible = const [];
+  int _prefetchedFor = -1;
+
   void _onPageChanged(int i) {
+    _prefetch(_visible, i);
+    _prefetchedFor = i;
     setState(() {
       if (i > _current) _showTopBar = false; // swiped up -> hide
       if (i < _current) _showTopBar = true; // swiped down -> show
@@ -114,6 +133,14 @@ class _ClipsScreenState extends State<ClipsScreen> {
   Widget _pager(List<Post> all) {
     final clips = all.where((c) => !_deleted.contains(c.id)).toList();
     _count = clips.length;
+    _visible = clips;
+    if (_prefetchedFor != _current && clips.isNotEmpty) {
+      _prefetchedFor = _current;
+      final at = _current;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _prefetch(clips, at);
+      });
+    }
     if (clips.isEmpty) {
       return Center(
         child: Column(
@@ -174,6 +201,7 @@ class _ClipsScreenState extends State<ClipsScreen> {
                     ? _pager(widget.clips!)
                     : StreamBuilder<List<Post>>(
                         stream: _stream,
+                        initialData: ClipsWarmup.instance.latest,
                         builder: (context, snap) {
                           if (snap.hasError) {
                             return Center(child: ErrorView(error: snap.error));
@@ -364,17 +392,23 @@ class _ClipPlayerState extends State<ClipPlayer>
       return;
     }
     if (kDisableVideoPlayback) return;
-    final c = VideoPlayerController.networkUrl(
-      Uri.parse(_cur.url),
-      videoPlayerOptions: VideoPlayerOptions(
-        mixWithOthers: widget.clip.hasMusic,
-      ),
+    // ready player from the prefetch pool = instant start
+    final pooled = VideoPool.instance.take(
+      _cur.url,
+      mixWithOthers: widget.clip.hasMusic,
     );
+    final c =
+        pooled?.controller ??
+        VideoPlayerController.networkUrl(
+          Uri.parse(_cur.url),
+          videoPlayerOptions: VideoPlayerOptions(
+            mixWithOthers: widget.clip.hasMusic,
+          ),
+        );
     _ctrl = c;
     c.setLooping(!_manualLoop);
     c.addListener(_onTick);
-    c
-        .initialize()
+    (pooled?.ready ?? c.initialize())
         .then((_) async {
           if (!mounted || _ctrl != c) return;
           final total = c.value.duration.inMilliseconds;
@@ -925,7 +959,7 @@ class _ClipPlayerState extends State<ClipPlayer>
           label: c.sharesCount == 0
               ? 'Share'
               : count(c.sharesCount, c.hideShares, 'Share'),
-          onTap: () => sharePost(c),
+          onTap: () => sharePost(context, c),
         ),
         if (c.hasMusic)
           _Action(

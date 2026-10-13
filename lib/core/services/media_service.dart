@@ -5,6 +5,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:image_picker_android/image_picker_android.dart';
+import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 
 import '../theme/app_colors.dart';
 import 'api_client.dart';
@@ -46,6 +48,62 @@ class PickedMedia {
 bool isVideoPath(String path) {
   final ext = path.split('.').last.toLowerCase();
   return const {'mp4', 'mov', 'webm', '3gp', 'mkv', 'm4v', 'avi'}.contains(ext);
+}
+
+const _imageExts = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp'};
+
+/// Video or photo? Uses the file name, and if that says nothing, the
+/// first bytes of the file (some galleries give files without extension).
+bool isVideoFile(File file) {
+  final path = file.path;
+  if (isVideoPath(path)) return true;
+  final ext = path.contains('.') ? path.split('.').last.toLowerCase() : '';
+  if (_imageExts.contains(ext)) return false;
+  try {
+    final raf = file.openSync();
+    final head = raf.readSync(16);
+    raf.closeSync();
+    return isVideoHeader(head);
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Video by its first bytes: MP4/MOV/3GP ("ftyp" box, not HEIC/AVIF photos),
+/// WebM/MKV, AVI.
+bool isVideoHeader(List<int> b) {
+  if (b.length >= 12 &&
+      b[4] == 0x66 && // f
+      b[5] == 0x74 && // t
+      b[6] == 0x79 && // y
+      b[7] == 0x70) {
+    final brand = String.fromCharCodes(b.sublist(8, 12)).toLowerCase();
+    const photoBrands = {
+      'heic',
+      'heix',
+      'hevc',
+      'heim',
+      'heis',
+      'mif1',
+      'msf1',
+      'avif',
+      'avis',
+    };
+    return !photoBrands.contains(brand);
+  }
+  if (b.length >= 4 &&
+      b[0] == 0x1A &&
+      b[1] == 0x45 &&
+      b[2] == 0xDF &&
+      b[3] == 0xA3) {
+    return true; // webm / mkv
+  }
+  if (b.length >= 12 &&
+      String.fromCharCodes(b.sublist(0, 4)) == 'RIFF' &&
+      String.fromCharCodes(b.sublist(8, 11)) == 'AVI') {
+    return true;
+  }
+  return false;
 }
 
 class UploadedMedia {
@@ -210,9 +268,14 @@ class MediaService {
         maxWidth: 2048,
         imageQuality: 92,
       );
-      return xs
-          .map((x) => PickedMedia(File(x.path), isVideo: isVideoPath(x.path)))
-          .toList();
+      return xs.map((x) {
+        final f = File(x.path);
+        final mime = x.mimeType ?? '';
+        final video =
+            mime.startsWith('video/') ||
+            (!mime.startsWith('image/') && isVideoFile(f));
+        return PickedMedia(f, isVideo: video);
+      }).toList();
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context)
@@ -349,4 +412,12 @@ String audioTitle(String fileName) {
   n = n.replaceAll('_', ' ').trim();
   if (n.isEmpty) return 'Music';
   return n.length > 60 ? '${n.substring(0, 60)}…' : n;
+}
+
+/// Android: use the system Photo Picker. The old gallery mode lists only
+/// photos on many phones (videos were missing in create post, clips and
+/// moments). The Photo Picker always shows photos AND videos.
+void useSystemPhotoPicker() {
+  final impl = ImagePickerPlatform.instance;
+  if (impl is ImagePickerAndroid) impl.useAndroidPhotoPicker = true;
 }

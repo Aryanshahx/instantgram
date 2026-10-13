@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
 import '../../../core/services/media_service.dart';
+import '../../../core/utils/merge_streams.dart';
 import '../../../shared/models/post.dart';
 import '../../notifications/data/notification_repository.dart';
 import '../../../shared/models/user_profile.dart';
@@ -245,6 +246,37 @@ class PostRepository {
         .snapshots()
         .map(_map),
   );
+
+  /// Discover feed: posts from [authorIds] (me + following + famous).
+  /// Firestore allows 30 ids per query, so we ask in groups of 30 and
+  /// merge the answers (newest first). Comes from the offline cache first,
+  /// so opening the app again shows the feed instantly.
+  Stream<List<Post>> feedFor(
+    List<String> authorIds, {
+    int perChunk = 40,
+    int max = 150,
+  }) {
+    final ids = authorIds.toSet().toList();
+    if (ids.isEmpty) return Stream.value(const <Post>[]);
+    final parts = <Stream<List<Post>>>[];
+    for (var i = 0; i < ids.length; i += 30) {
+      final chunk = ids.sublist(i, i + 30 > ids.length ? ids.length : i + 30);
+      parts.add(
+        _posts
+            .where('authorId', whereIn: chunk)
+            .orderBy('createdAt', descending: true)
+            .limit(perChunk)
+            .snapshots()
+            .map(_map),
+      );
+    }
+    return _filter.visiblePosts(
+      combineLatestList<List<Post>, List<Post>>(
+        parts,
+        (all) => mergeNewest(all, max: max),
+      ),
+    );
+  }
 
   /// Latest posts from everyone. [type] = Post.photo / Post.clip / null (all)
   Stream<List<Post>> recent({String? type, int limit = 60}) {
@@ -568,7 +600,8 @@ class PostRepository {
   /// Author only: every view doc of one post (for Analytics).
   Future<List<Map<String, dynamic>>> viewDocs(String postId) async {
     final s = await _posts.doc(postId).collection('views').limit(5000).get();
-    return s.docs.map((d) => d.data()).toList();
+    // '_id' = viewer uid (only used to count different people)
+    return s.docs.map((d) => {...d.data(), '_id': d.id}).toList();
   }
 
   // ---------------- Shares ----------------
@@ -665,3 +698,16 @@ const List<String> kAgeGroups = [
   '45-54',
   '55+',
 ];
+
+/// Joins post lists: no duplicates, pinned order ignored, newest first.
+List<Post> mergeNewest(List<List<Post>> lists, {int max = 150}) {
+  final byId = <String, Post>{};
+  for (final l in lists) {
+    for (final p in l) {
+      byId[p.id] = p;
+    }
+  }
+  final out = byId.values.toList()
+    ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  return out.length > max ? out.sublist(0, max) : out;
+}

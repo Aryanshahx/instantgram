@@ -57,12 +57,12 @@ class _ChooseLanguageScreenState extends State<ChooseLanguageScreen> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                const IgLogo(size: 30),
+                const IgLogo(size: 24),
                 const SizedBox(height: 12),
                 const Text(
                   'Choose your\nlanguage',
                   style: TextStyle(
-                    fontSize: 34,
+                    fontSize: 26,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -1.2,
                     height: 1.1,
@@ -150,6 +150,7 @@ class _ChooseLanguageScreenState extends State<ChooseLanguageScreen> {
                 ),
                 const SizedBox(height: 14),
                 IgPrimaryButton(
+                  height: 46,
                   key: const ValueKey('lang-continue'),
                   label: 'Continue',
                   onPressed: _code.isEmpty ? null : _next,

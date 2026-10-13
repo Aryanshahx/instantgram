@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../core/services/app_settings.dart';
-import '../features/post/data/post_repository.dart' show ViewSource;
+import '../features/post/data/post_repository.dart'
+    show PostRepository, ViewSource;
 import '../features/post/presentation/post_detail_screen.dart';
 import '../features/profile/presentation/profile_screen.dart';
 import '../features/reels/presentation/clips_screen.dart';
@@ -44,4 +45,25 @@ void openPost(
       ),
     );
   }
+}
+
+/// Opens a post or clip by id (e.g. from a chat message).
+Future<void> openPostById(BuildContext context, String postId) async {
+  final nav = Navigator.of(context);
+  Post? post;
+  try {
+    post = await PostRepository.instance.watch(postId).first;
+  } catch (_) {
+    post = null;
+  }
+  if (post != null && post.isClip) {
+    final clip = post;
+    nav.push(
+      MaterialPageRoute(
+        builder: (_) => ClipsScreen(clips: [clip], source: ViewSource.other),
+      ),
+    );
+    return;
+  }
+  nav.push(MaterialPageRoute(builder: (_) => PostDetailScreen(postId: postId)));
 }

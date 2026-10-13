@@ -92,8 +92,7 @@ class _Body extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final d = data;
-    final p = d.post;
-    final pct = (d.engagementRate * 100);
+    final p = d.post!;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
@@ -134,196 +133,224 @@ class _Body extends StatelessWidget {
         ),
         const SizedBox(height: 18),
 
-        // ---- overview
-        const _Title('Overview'),
-        Row(
-          children: [
-            _Stat(
-              'Views',
-              compactCount(d.views),
-              Icons.visibility_outlined,
-              key: const ValueKey('ins-views'),
-            ),
-            const SizedBox(width: 8),
-            _Stat(
-              'Accounts reached',
-              compactCount(d.reach),
-              Icons.person_outline,
-              key: const ValueKey('ins-reach'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            _Stat(
-              'Interactions',
-              compactCount(d.interactions),
-              Icons.touch_app_outlined,
-            ),
-            const SizedBox(width: 8),
-            _Stat(
-              'Engagement',
-              d.reach == 0 ? '–' : '${pct.toStringAsFixed(pct < 10 ? 1 : 0)}%',
-              Icons.trending_up,
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        _Panel(
-          title: d.hourly ? 'Views per hour' : 'Views per day',
-          child: _Bars(d.timeline, hourly: d.hourly),
-        ),
-
-        // ---- engagement
-        const SizedBox(height: 18),
-        const _Title('Engagement'),
-        _Panel(
-          child: Column(
-            children: [
-              _Row(Icons.favorite_border, 'Likes', d.likes, d.interactions),
-              _Row(
-                Icons.mode_comment_outlined,
-                'Comments',
-                d.comments,
-                d.interactions,
-              ),
-              _Row(Icons.send_outlined, 'Shares', d.shares, d.interactions),
-              _Row(Icons.repeat, 'Reposts', d.reposts, d.interactions),
-              _Row(Icons.bookmark_border, 'Saves', d.saves, d.interactions),
-            ],
-          ),
-        ),
-        if (p.hasVideo) ...[
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              _Stat(
-                'Avg. watch time',
-                d.watchSamples == 0 ? '–' : _secs(d.avgWatchMs),
-                Icons.timer_outlined,
-              ),
-              const SizedBox(width: 8),
-              _Stat(
-                'Watched to the end',
-                d.detailed == 0 ? '–' : '${(d.completionRate * 100).round()}%',
-                Icons.check_circle_outline,
-              ),
-            ],
-          ),
-        ],
-
-        // ---- audience
-        const SizedBox(height: 18),
-        const _Title('Audience'),
-        if (d.detailed == 0)
-          const _Panel(
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 10),
-              child: Text(
-                'No audience data yet. It appears when other people view '
-                'this.',
-                style: TextStyle(color: AppColors.textSecondary),
-              ),
-            ),
-          )
-        else ...[
-          _Panel(
-            title: 'Followers vs. non-followers',
-            child: _Split(
-              d.followerViews,
-              d.nonFollowerViews,
-              'Followers',
-              'Non-followers',
-            ),
-          ),
-          const SizedBox(height: 8),
-          _Panel(
-            title: 'Top countries',
-            child: d.countries.isEmpty
-                ? const _Empty()
-                : Column(
-                    children: [
-                      for (final (code, n) in d.countries.take(6))
-                        _Row(
-                          null,
-                          '${flagOf(code)}  '
-                          '${countryName(code).isEmpty ? code : countryName(code)}',
-                          n,
-                          d.detailed,
-                          percent: true,
-                        ),
-                    ],
-                  ),
-          ),
-          const SizedBox(height: 8),
-          _Panel(
-            title: 'Age range',
-            child: d.ages.isEmpty
-                ? const _Empty()
-                : Column(
-                    children: [
-                      for (final (g, n) in d.ages)
-                        _Row(null, g, n, d.detailed, percent: true),
-                    ],
-                  ),
-          ),
-          const SizedBox(height: 8),
-          _Panel(
-            title: 'Languages',
-            child: d.languages.isEmpty
-                ? const _Empty()
-                : Column(
-                    children: [
-                      for (final (code, n) in d.languages.take(5))
-                        _Row(
-                          null,
-                          languageByCode(code)?.name ?? code,
-                          n,
-                          d.detailed,
-                          percent: true,
-                        ),
-                    ],
-                  ),
-          ),
-          const SizedBox(height: 8),
-          _Panel(
-            title: 'Where people saw it',
-            child: Column(
-              children: [
-                for (final (s, n) in d.sources)
-                  _Row(null, ViewSource.label(s), n, d.detailed, percent: true),
-              ],
-            ),
-          ),
-        ],
-        if (d.detailed < d.reach) ...[
-          const SizedBox(height: 12),
-          Text(
-            'Audience details come from ${d.detailed} of ${d.reach} '
-            'accounts reached.',
-            style: const TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 12,
-            ),
-          ),
-        ],
-        const SizedBox(height: 12),
-        const Text(
-          'Only totals are shown. Your own views are not counted, and each '
-          'account counts once in "Accounts reached".',
-          style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
-        ),
+        ...insightsSections(d),
       ],
     );
   }
+}
 
-  static String _secs(double ms) {
-    final s = ms / 1000;
-    if (s < 60) return '${s.toStringAsFixed(s < 10 ? 1 : 0)} s';
-    final m = s ~/ 60;
-    return '${m}m ${(s - m * 60).round()}s';
-  }
+/// Overview + Engagement + Audience (used by post Analytics and the
+/// Dashboard).
+List<Widget> insightsSections(PostInsights d) {
+  final pct = (d.engagementRate * 100);
+  return [
+    // ---- overview
+    const _Title('Overview'),
+    Row(
+      children: [
+        _Stat(
+          'Views',
+          compactCount(d.views),
+          Icons.visibility_outlined,
+          key: const ValueKey('ins-views'),
+        ),
+        const SizedBox(width: 8),
+        _Stat(
+          'Accounts reached',
+          compactCount(d.reach),
+          Icons.person_outline,
+          key: const ValueKey('ins-reach'),
+        ),
+      ],
+    ),
+    const SizedBox(height: 8),
+    Row(
+      children: [
+        _Stat(
+          'Interactions',
+          compactCount(d.interactions),
+          Icons.touch_app_outlined,
+        ),
+        const SizedBox(width: 8),
+        _Stat(
+          'Engagement',
+          d.reach == 0 ? '–' : '${pct.toStringAsFixed(pct < 10 ? 1 : 0)}%',
+          Icons.trending_up,
+        ),
+      ],
+    ),
+    if (d.isAccount) ...[
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          _Stat(
+            'Posts counted',
+            compactCount(d.postCount),
+            Icons.grid_view_rounded,
+          ),
+          const SizedBox(width: 8),
+          _Stat(
+            'Per post',
+            d.postCount == 0
+                ? '–'
+                : d.interactionsPerPost.toStringAsFixed(
+                    d.interactionsPerPost < 10 ? 1 : 0,
+                  ),
+            Icons.insights,
+          ),
+        ],
+      ),
+    ],
+    const SizedBox(height: 10),
+    _Panel(
+      title: d.hourly ? 'Views per hour' : 'Views per day',
+      child: _Bars(d.timeline, hourly: d.hourly),
+    ),
+
+    // ---- engagement
+    const SizedBox(height: 18),
+    const _Title('Engagement'),
+    _Panel(
+      child: Column(
+        children: [
+          _Row(Icons.favorite_border, 'Likes', d.likes, d.interactions),
+          _Row(
+            Icons.mode_comment_outlined,
+            'Comments',
+            d.comments,
+            d.interactions,
+          ),
+          _Row(Icons.send_outlined, 'Shares', d.shares, d.interactions),
+          _Row(Icons.repeat, 'Reposts', d.reposts, d.interactions),
+          _Row(Icons.bookmark_border, 'Saves', d.saves, d.interactions),
+        ],
+      ),
+    ),
+    if (d.hasVideo) ...[
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          _Stat(
+            'Avg. watch time',
+            d.watchSamples == 0 ? '–' : _secsText(d.avgWatchMs),
+            Icons.timer_outlined,
+          ),
+          const SizedBox(width: 8),
+          _Stat(
+            'Watched to the end',
+            d.detailed == 0 ? '–' : '${(d.completionRate * 100).round()}%',
+            Icons.check_circle_outline,
+          ),
+        ],
+      ),
+    ],
+
+    // ---- audience
+    const SizedBox(height: 18),
+    const _Title('Audience'),
+    if (d.detailed == 0)
+      const _Panel(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 10),
+          child: Text(
+            'No audience data yet. It appears when other people view '
+            'your posts and clips.',
+            style: TextStyle(color: AppColors.textSecondary),
+          ),
+        ),
+      )
+    else ...[
+      _Panel(
+        title: 'Followers vs. non-followers',
+        child: _Split(
+          d.followerViews,
+          d.nonFollowerViews,
+          'Followers',
+          'Non-followers',
+        ),
+      ),
+      const SizedBox(height: 8),
+      _Panel(
+        title: 'Top countries',
+        child: d.countries.isEmpty
+            ? const _Empty()
+            : Column(
+                children: [
+                  for (final (code, n) in d.countries.take(6))
+                    _Row(
+                      null,
+                      '${flagOf(code)}  '
+                      '${countryName(code).isEmpty ? code : countryName(code)}',
+                      n,
+                      d.detailed,
+                      percent: true,
+                    ),
+                ],
+              ),
+      ),
+      const SizedBox(height: 8),
+      _Panel(
+        title: 'Age range',
+        child: d.ages.isEmpty
+            ? const _Empty()
+            : Column(
+                children: [
+                  for (final (g, n) in d.ages)
+                    _Row(null, g, n, d.detailed, percent: true),
+                ],
+              ),
+      ),
+      const SizedBox(height: 8),
+      _Panel(
+        title: 'Languages',
+        child: d.languages.isEmpty
+            ? const _Empty()
+            : Column(
+                children: [
+                  for (final (code, n) in d.languages.take(5))
+                    _Row(
+                      null,
+                      languageByCode(code)?.name ?? code,
+                      n,
+                      d.detailed,
+                      percent: true,
+                    ),
+                ],
+              ),
+      ),
+      const SizedBox(height: 8),
+      _Panel(
+        title: 'Where people saw it',
+        child: Column(
+          children: [
+            for (final (s, n) in d.sources)
+              _Row(null, ViewSource.label(s), n, d.detailed, percent: true),
+          ],
+        ),
+      ),
+    ],
+    if (!d.isAccount && d.detailed < d.reach) ...[
+      const SizedBox(height: 12),
+      Text(
+        'Audience details come from ${d.detailed} of ${d.reach} '
+        'accounts reached.',
+        style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+      ),
+    ],
+    const SizedBox(height: 12),
+    const Text(
+      'Only totals are shown. Your own views are not counted, and each '
+      'account counts once in "Accounts reached".',
+      style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+    ),
+  ];
+}
+
+String _secsText(double ms) {
+  final s = ms / 1000;
+  if (s < 60) return '${s.toStringAsFixed(s < 10 ? 1 : 0)} s';
+  final m = s ~/ 60;
+  return '${m}m ${(s - m * 60).round()}s';
 }
 
 // ------------------------------------------------------------------ widgets
@@ -506,10 +533,23 @@ class _Split extends StatelessWidget {
         Row(
           children: [
             _dot(AppColors.lime),
-            Text(' $la ${(fa * 100).round()}%'),
+            Flexible(
+              child: Text(
+                ' $la ${(fa * 100).round()}%',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 8),
             const Spacer(),
             _dot(AppColors.mint),
-            Text(' $lb ${((1 - fa) * 100).round()}%'),
+            Flexible(
+              child: Text(
+                ' $lb ${((1 - fa) * 100).round()}%',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
       ],

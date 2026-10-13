@@ -16,15 +16,21 @@ An Instagram-like app built with **Flutter**.
 2. API checks the token, file type and size, then returns a signed Tigris link (valid 10 min).
 3. App uploads the file straight to Tigris and saves the public URL in Firestore.
 
-## Features (v0.5)
+## Features (v0.6)
 - Sign up: choose language first, then name, date of birth and country
 - Log in with email or username
-- Feed of people you follow (everyone's latest posts when you follow nobody yet)
+- Discover: posts and moments from you, people you follow and famous accounts
+  (10,000+ followers)
 - Posts and Clips (any mix of photos and videos, no limit) stay forever;
   Moments disappear after 24h
-- Likes (double-tap too), comments, reposts, saves, share
+- Likes (double-tap too), comments, reposts, saves
+- Share: send to people you follow or chat with, copy link, other apps
 - Hold your own post / clip: Analytics (overview, engagement, audience) and Pin
-- Views count once per account (not your own); dashboard with real stats
+- Views count once per account (not your own); Dashboard with overview,
+  engagement and audience for your whole account
+- Explore: clips only, they play muted when visible, with view counts
+- Instant loading: next clips / moments / photos are prepared before you get there,
+  media is cached on the phone and on the Tigris CDN
 - Follow / unfollow, followers & following lists
 - Search: people, clips and #hashtags
 - Direct messages
@@ -46,7 +52,7 @@ An Instagram-like app built with **Flutter**.
 
 ## Download the APK
 - **Every push to `main`** → Actions tab → latest run → *Artifacts* → `InstantGram-apk-N`
-- **Releases** → push a tag like `v0.5.0` → APK appears under *Releases*
+- **Releases** → push a tag like `v0.6.0` → APK appears under *Releases*
 
 ## Setup
 ### Firebase

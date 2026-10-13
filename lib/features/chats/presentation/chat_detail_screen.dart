@@ -9,6 +9,7 @@ import '../../../shared/models/user_profile.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/async_views.dart';
 import '../../../shared/widgets/avatar.dart';
+import '../../../shared/widgets/net_image.dart';
 import '../data/chat_repository.dart';
 
 class ChatDetailScreen extends StatefulWidget {
@@ -151,15 +152,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            Text(
-                              m.text,
-                              style: TextStyle(
-                                fontSize: 14.5,
-                                color: mine
-                                    ? Colors.black
-                                    : AppColors.textPrimary,
+                            if (m.isSharedPost)
+                              SharedPostCard(message: m, mine: mine)
+                            else
+                              Text(
+                                m.text,
+                                style: TextStyle(
+                                  fontSize: 14.5,
+                                  color: mine
+                                      ? Colors.black
+                                      : AppColors.textPrimary,
+                                ),
                               ),
-                            ),
                             const SizedBox(height: 2),
                             Text(
                               timeAgo(m.createdAt),
@@ -253,6 +257,72 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// A post / clip someone shared in the chat. Tap = open it.
+class SharedPostCard extends StatelessWidget {
+  const SharedPostCard({super.key, required this.message, required this.mine});
+
+  final Message message;
+  final bool mine;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = message;
+    final fg = mine ? Colors.black : AppColors.textPrimary;
+    return GestureDetector(
+      key: ValueKey('shared-post-${m.postId}'),
+      onTap: () => openPostById(context, m.postId),
+      child: SizedBox(
+        width: 190,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '@${m.postAuthor}',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 13.5,
+                color: fg,
+              ),
+            ),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: AspectRatio(
+                aspectRatio: m.postType == Post.clip ? 0.75 : 1,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    NetImage(m.postThumb),
+                    if (m.postType == Post.clip)
+                      const Positioned(
+                        right: 8,
+                        top: 8,
+                        child: Icon(
+                          Icons.smart_display,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            if (m.postCaption.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                m.postCaption,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 13, color: fg),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

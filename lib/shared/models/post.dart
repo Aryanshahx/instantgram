@@ -477,12 +477,26 @@ class Message {
     required this.senderId,
     required this.text,
     required this.createdAt,
+    this.postId = '',
+    this.postType = '',
+    this.postThumb = '',
+    this.postAuthor = '',
+    this.postCaption = '',
   });
 
   final String id;
   final String senderId;
   final String text;
   final DateTime createdAt;
+
+  /// Shared post / clip (empty = normal text message).
+  final String postId;
+  final String postType;
+  final String postThumb;
+  final String postAuthor;
+  final String postCaption;
+
+  bool get isSharedPost => postId.isNotEmpty;
 
   factory Message.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final m = doc.data() ?? const <String, dynamic>{};
@@ -491,6 +505,11 @@ class Message {
       senderId: _str(m['senderId']),
       text: _str(m['text']),
       createdAt: _date(m['createdAt']),
+      postId: _str(m['postId']),
+      postType: _str(m['postType']),
+      postThumb: _str(m['postThumb']),
+      postAuthor: _str(m['postAuthor']),
+      postCaption: _str(m['postCaption']),
     );
   }
 }

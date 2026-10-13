@@ -32,6 +32,26 @@ class UserRepository {
     return snap.exists ? UserProfile.fromDoc(snap) : null;
   }
 
+  /// Profiles for many uids (asks 30 at a time, in parallel).
+  Future<List<UserProfile>> usersByIds(List<String> uids) async {
+    final ids = uids.toSet().toList();
+    if (ids.isEmpty) return const [];
+    final parts = <Future<QuerySnapshot<Map<String, dynamic>>>>[];
+    for (var i = 0; i < ids.length; i += 30) {
+      final chunk = ids.sublist(i, i + 30 > ids.length ? ids.length : i + 30);
+      parts.add(_users.where(FieldPath.documentId, whereIn: chunk).get());
+    }
+    final snaps = await Future.wait(parts);
+    final byId = {
+      for (final s in snaps)
+        for (final d in s.docs) d.id: UserProfile.fromDoc(d),
+    };
+    return [
+      for (final id in ids)
+        if (byId[id] != null) byId[id]!,
+    ];
+  }
+
   UserProfile? _meCache;
   DateTime _meCacheAt = DateTime(2000);
 
