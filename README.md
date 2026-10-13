@@ -12,9 +12,24 @@ An Instagram-like app built with **Flutter**.
 | Media storage | Tigris (S3-compatible, public bucket) |
 
 ## How uploads work
-1. App asks the Vercel API for an upload link (`POST /api/upload-url`, with the Firebase login token).
-2. API checks the token, file type and size, then returns a signed Tigris link (valid 10 min).
-3. App uploads the file straight to Tigris and saves the public URL in Firestore.
+1. Tap Share: the post goes into an **upload queue** and you can keep using the app
+   (a "Sharing… %" bar in Discover + an Android notification).
+2. Videos are made HD on the phone (1080p, max 30 fps, fast start) + a small copy for slow networks.
+3. The app asks the Vercel API for signed Tigris links (with the Firebase login token).
+   Big files go in 5 MB parts, 6 at the same time; if the network breaks, it goes on
+   from the last finished part (also after closing the app).
+4. When all files are up, the post is saved in Firestore.
+
+## How videos load
+- Videos play through a small cache on the phone: watching again (clips, moments,
+  Discover) does not download again. The next 3 videos are partly downloaded before you get there.
+
+## New in v0.8
+- Background uploads with progress bar + notification, resume after a break
+- Faster videos: phone cache, preloading, fast start, HD 1080p / 30 fps uploads
+- Comments: photos, GIFs (GIPHY search + gallery), likes, replies, emoji row
+- Clips: time bubble on the progress bar, springy buttons, pause stays paused
+- Discover videos pause while moments are open
 
 ## Features (v0.6)
 - Sign up: choose language first, then name, date of birth and country

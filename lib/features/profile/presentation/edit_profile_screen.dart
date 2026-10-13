@@ -211,6 +211,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(text)));
 
+  static bool _isDenied(Object e) {
+    final t = e.toString();
+    return t.contains('permission-denied') || t.contains('PERMISSION_DENIED');
+  }
+
   Future<void> _save() async {
     final newName = _username.text.trim();
     final changeName = newName != widget.profile.username;
@@ -226,14 +231,45 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     setState(() => _saving = true);
     try {
       if (changeName) {
-        await UserRepository.instance.changeUsername(newName);
+        try {
+          await UserRepository.instance.changeUsername(newName);
+        } catch (e) {
+          if (!_isDenied(e)) rethrow;
+          throw const _RulesMissing('change your username');
+        }
       }
-      await UserRepository.instance.updateProfile(
-        name: _name.text,
-        bio: _bio.text,
-        links: links,
-      );
+      try {
+        await UserRepository.instance.updateProfile(
+          name: _name.text,
+          bio: _bio.text,
+          links: links,
+        );
+      } catch (e) {
+        if (!_isDenied(e)) rethrow;
+        // v0.8: older database rules don't know "links" yet -> save the
+        // rest (name, bio, first link) so your changes are not lost
+        await UserRepository.instance.updateProfile(
+          name: _name.text,
+          bio: _bio.text,
+          website: links.isEmpty ? '' : links.first.url,
+        );
+        if (links.length > 1 || links.any((l) => l.title.isNotEmpty)) {
+          if (mounted) {
+            _snack(
+              'Saved. To keep all 3 links, the database rules must be '
+              'updated (see the steps you got with this update).',
+            );
+          }
+        }
+      }
       if (mounted) Navigator.of(context).pop();
+    } on _RulesMissing catch (e) {
+      if (mounted) {
+        _snack(
+          "Can't ${e.what} yet: the database rules are old. Run "
+          '"firebase deploy --only firestore:rules" (see update steps).',
+        );
+      }
     } catch (e) {
       if (mounted) _snack('Could not save: ${friendlyError(e)}');
     } finally {
@@ -501,4 +537,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       ),
     ),
   );
+}
+
+class _RulesMissing implements Exception {
+  const _RulesMissing(this.what);
+  final String what;
 }

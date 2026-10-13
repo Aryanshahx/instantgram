@@ -159,20 +159,71 @@ class _SmoothSeekBarState extends State<SmoothSeekBar>
           setState(() => _drag = null);
         },
         onHorizontalDragCancel: () => setState(() => _drag = null),
-        child: SizedBox(
-          height: widget.height,
-          width: double.infinity,
-          child: CustomPaint(
-            painter: _BarPainter(
-              played: playing,
-              buffered: buffered,
-              active: active,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            SizedBox(
+              height: widget.height,
+              width: double.infinity,
+              child: CustomPaint(
+                painter: _BarPainter(
+                  played: playing,
+                  buffered: buffered,
+                  active: active,
+                ),
+              ),
+            ),
+            // v0.8: time while you slide, e.g. "0:12 / 0:45"
+            if (active) _bubble(playing, box.maxWidth),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _bubble(double f, double width) {
+    final (start, end) = _range;
+    final len = end - start;
+    final text =
+        '${formatVideoTime((len * f).round())} / ${formatVideoTime(len)}';
+    const w = 104.0;
+    final left = (width * f - w / 2).clamp(0.0, (width - w).clamp(0.0, 1e9));
+    return Positioned(
+      left: left,
+      bottom: widget.height + 6,
+      child: IgnorePointer(
+        child: Container(
+          key: const ValueKey('seek-time'),
+          width: w,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration: BoxDecoration(
+            color: const Color(0xE6141720),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Text(
+            text,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
         ),
       ),
     );
   }
+}
+
+/// 75000 -> "1:15", 3725000 -> "1:02:05".
+String formatVideoTime(int ms) {
+  final t = (ms < 0 ? 0 : ms) ~/ 1000;
+  final h = t ~/ 3600, m = (t % 3600) ~/ 60, sec = t % 60;
+  final ss = sec.toString().padLeft(2, '0');
+  if (h > 0) return '$h:${m.toString().padLeft(2, '0')}:$ss';
+  return '$m:$ss';
 }
 
 class _BarPainter extends CustomPainter {

@@ -355,6 +355,17 @@ class Comment {
     required this.authorPhotoUrl,
     required this.text,
     required this.createdAt,
+    this.parentId = '',
+    this.replyToUsername = '',
+    this.imageUrl = '',
+    this.imageKey = '',
+    this.imageW = 0,
+    this.imageH = 0,
+    this.gifUrl = '',
+    this.gifW = 0,
+    this.gifH = 0,
+    this.likesCount = 0,
+    this.repliesCount = 0,
   });
 
   final String id;
@@ -364,17 +375,81 @@ class Comment {
   final String text;
   final DateTime createdAt;
 
-  factory Comment.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final m = doc.data() ?? const <String, dynamic>{};
-    return Comment(
-      id: doc.id,
-      authorId: _str(m['authorId']),
-      authorUsername: _str(m['authorUsername']),
-      authorPhotoUrl: _str(m['authorPhotoUrl']),
-      text: _str(m['text']),
-      createdAt: _date(m['createdAt']),
-    );
+  /// v0.8: reply to this comment id ('' = normal comment).
+  final String parentId;
+
+  /// Who the reply answers (shown as @name).
+  final String replyToUsername;
+
+  /// Photo / gallery GIF sent with the comment.
+  final String imageUrl;
+  final String imageKey;
+  final int imageW;
+  final int imageH;
+
+  /// GIF from GIF search (GIPHY).
+  final String gifUrl;
+  final int gifW;
+  final int gifH;
+
+  final int likesCount;
+  final int repliesCount;
+
+  bool get isReply => parentId.isNotEmpty;
+
+  /// Picture to show (photo or GIF), '' = text only.
+  String get pictureUrl => gifUrl.isNotEmpty ? gifUrl : imageUrl;
+
+  /// Width / height of the picture (1 when unknown).
+  double get pictureAspect {
+    final w = gifUrl.isNotEmpty ? gifW : imageW;
+    final h = gifUrl.isNotEmpty ? gifH : imageH;
+    if (w <= 0 || h <= 0) return 1;
+    return (w / h).clamp(0.4, 2.5);
   }
+
+  factory Comment.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
+      Comment.fromMap(doc.id, doc.data() ?? const <String, dynamic>{});
+
+  factory Comment.fromMap(String id, Map<String, dynamic> m) => Comment(
+    id: id,
+    authorId: _str(m['authorId']),
+    authorUsername: _str(m['authorUsername']),
+    authorPhotoUrl: _str(m['authorPhotoUrl']),
+    text: _str(m['text']),
+    createdAt: _date(m['createdAt']),
+    parentId: _str(m['parentId']),
+    replyToUsername: _str(m['replyToUsername']),
+    imageUrl: _str(m['imageUrl']),
+    imageKey: _str(m['imageKey']),
+    imageW: _int(m['imageW']),
+    imageH: _int(m['imageH']),
+    gifUrl: _str(m['gifUrl']),
+    gifW: _int(m['gifW']),
+    gifH: _int(m['gifH']),
+    likesCount: _int(m['likesCount']),
+    repliesCount: _int(m['repliesCount']),
+  );
+}
+
+/// Comments in show order: each comment, then its replies (oldest first).
+/// Replies whose comment was deleted are left out.
+List<Comment> threadComments(List<Comment> all) {
+  final top = <Comment>[];
+  final replies = <String, List<Comment>>{};
+  for (final c in all) {
+    if (c.isReply) {
+      (replies[c.parentId] ??= []).add(c);
+    } else {
+      top.add(c);
+    }
+  }
+  final out = <Comment>[];
+  for (final c in top) {
+    out.add(c);
+    out.addAll(replies[c.id] ?? const []);
+  }
+  return out;
 }
 
 class Story {

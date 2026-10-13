@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
+import '../../core/navigation/page_cover.dart';
 import '../../core/services/media_prefetch.dart';
 import '../../core/services/app_settings.dart';
 import '../../core/services/music_player.dart';
@@ -12,6 +13,7 @@ import '../../core/theme/app_colors.dart';
 import '../../features/editor/filters.dart';
 import '../models/post.dart';
 import 'net_image.dart';
+import '../../core/services/video_cache.dart';
 
 /// Tests: don't create real video players.
 bool kDisableVideoPlayback = false;
@@ -113,6 +115,7 @@ class _MediaVideoState extends State<MediaVideo> {
 
   // adaptive quality (small copy while the network is slow)
   bool _usingLow = false;
+  String _openUrl = ''; // what the player plays (for the pool)
   StallWatch? _stall;
   Timer? _startTimer;
 
@@ -148,13 +151,9 @@ class _MediaVideoState extends State<MediaVideo> {
     if (widget.muted != old.muted) _c?.setVolume(_volume);
   }
 
+  // v0.8: through the disk cache (watching again = no new download)
   VideoPlayerController _newCtrl(String url) =>
-      VideoPlayerController.networkUrl(
-        Uri.parse(url),
-        videoPlayerOptions: VideoPlayerOptions(
-          mixWithOthers: widget.mixWithOthers,
-        ),
-      );
+      VideoCache.instance.controller(url, mixWithOthers: widget.mixWithOthers);
 
   void _applyTrim(VideoPlayerController c) {
     final total = c.value.duration.inMilliseconds;
@@ -168,6 +167,7 @@ class _MediaVideoState extends State<MediaVideo> {
     // full quality, unless videos were buffering a moment ago
     _usingLow = NetQuality.slow && item.lowUrl.isNotEmpty;
     final url = _usingLow ? item.lowUrl : item.url;
+    _openUrl = url;
     // ready player from the prefetch pool = instant start
     final pooled = VideoPool.instance.take(
       url,
@@ -242,6 +242,7 @@ class _MediaVideoState extends State<MediaVideo> {
     }
     old.removeListener(_tick);
     c.addListener(_tick);
+    _openUrl = low;
     setState(() {
       _c = c;
       _ready = true;
@@ -270,10 +271,20 @@ class _MediaVideoState extends State<MediaVideo> {
     _stall = null;
     final c = _c;
     if (c == null) return;
+    final wasReady = _ready;
     _c = null;
     _ready = false;
     c.removeListener(_tick);
-    c.dispose();
+    if (wasReady) {
+      // v0.8: keep it ready, scrolling back starts at once
+      VideoPool.instance.keep(
+        _openUrl,
+        c,
+        mixWithOthers: widget.mixWithOthers,
+      );
+    } else {
+      c.dispose();
+    }
     if (_maxPos > 0 || _completed) {
       widget.onWatched?.call(_maxPos, _completed);
       _maxPos = 0;
@@ -368,10 +379,11 @@ class PostMedia extends StatefulWidget {
   State<PostMedia> createState() => _PostMediaState();
 }
 
-class _PostMediaState extends State<PostMedia> {
+class _PostMediaState extends State<PostMedia> with PageCoverAware {
   final PageController _pages = PageController();
   int _index = 0;
-  bool _visible = false;
+  bool _visible = false; // on screen AND no page (moments…) on top
+  bool _onScreen = false;
   Timer? _seenTimer;
   bool _seenSent = false;
 
@@ -405,7 +417,14 @@ class _PostMediaState extends State<PostMedia> {
     }
   }
 
-  void _setVisible(bool v) {
+  // v0.8: moments open on top -> pause (they are see-through, so the
+  // card still looked "on screen")
+  @override
+  void onPageCoverChanged(bool covered) => _setVisible(_onScreen);
+
+  void _setVisible(bool onScreen) {
+    _onScreen = onScreen;
+    final v = onScreen && !pageCovered;
     if (v == _visible || !mounted) return;
     setState(() => _visible = v);
     if (v) {

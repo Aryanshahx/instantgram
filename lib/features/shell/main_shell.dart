@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/services/deep_links.dart';
@@ -13,6 +15,7 @@ import '../stories/data/moments_index.dart';
 
 import '../chats/presentation/chats_screen.dart';
 import '../feed/presentation/home_screen.dart';
+import '../post/data/upload_queue.dart';
 import '../post/presentation/create_sheet.dart';
 import '../profile/presentation/profile_screen.dart';
 import '../reels/presentation/clips_screen.dart';
@@ -41,6 +44,7 @@ class _MainShellState extends State<MainShell> {
 
   int _index = 0;
   AppLifecycleListener? _life;
+  StreamSubscription<UploadTask>? _shared;
 
   @override
   void initState() {
@@ -55,14 +59,34 @@ class _MainShellState extends State<MainShell> {
     UsageTracker.instance
       ..onLimitReached = _limitReached
       ..start();
+    // v0.8: posts that were still uploading go on (also after a restart)
+    UploadQueue.instance.start();
+    _shared = UploadQueue.instance.finished.listen(_onShared);
     // instantgram://u/<username> (shared profile links + QR codes)
     DeepLinks.instance.start((name) {
       if (mounted) openUsername(context, name);
     });
   }
 
+  void _onShared(UploadTask t) {
+    if (!mounted) return;
+    final n = t.items.length;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          t.isMoment
+              ? (n > 1 ? '$n moments shared ✨' : 'Moment shared ✨')
+              : t.kind == UploadTask.clip
+              ? 'Clip shared 🎬'
+              : 'Post shared 🎉',
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
+    _shared?.cancel();
     UsageTracker.instance
       ..onLimitReached = null
       ..stop();

@@ -13,6 +13,7 @@ import '../../../shared/widgets/net_image.dart';
 import '../../editor/filters.dart';
 import '../../profile/data/user_repository.dart';
 import '../data/story_repository.dart';
+import '../../../core/services/video_cache.dart';
 
 /// Full-screen moment viewer: tap right = next, tap left = back,
 /// hold = pause, swipe down = close. Plays photo and video moments.
@@ -99,7 +100,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     final pooled = VideoPool.instance.take(st.mediaUrl);
     final c =
         pooled?.controller ??
-        VideoPlayerController.networkUrl(Uri.parse(st.mediaUrl));
+        VideoCache.instance.controller(st.mediaUrl); // disk cache (v0.8)
     _video = c;
     try {
       await (pooled?.ready ?? c.initialize());

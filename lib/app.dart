@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'core/constants/app_constants.dart';
+import 'core/navigation/page_cover.dart';
 import 'core/services/app_settings.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/auth_gate.dart';
@@ -37,6 +38,8 @@ class InstantGramApp extends StatelessWidget {
           );
         },
       ),
+      // v0.8: videos pause while another page is open on top
+      navigatorObservers: [PageCover.instance],
       home: home ?? const AuthGate(),
     );
   }

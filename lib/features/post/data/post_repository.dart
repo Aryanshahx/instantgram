@@ -7,9 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
-import '../../../core/services/low_copy.dart';
 import '../../../core/services/media_service.dart';
-import '../../../core/services/uploader.dart';
 import '../../../core/utils/merge_streams.dart';
 import '../../../shared/models/post.dart';
 import '../../notifications/data/notification_repository.dart';
@@ -80,147 +78,32 @@ class PostRepository {
   /// Most items one post / clip may have (Firestore rules allow 200).
   static const int maxItems = 200;
 
-  /// Creates a post or clip with any mix of photos and videos.
-  /// [cover] = clip cover chosen by the user (else the first video frame).
-  /// [audio] = music that plays in a loop.
-  Future<void> createPost({
+  /// New post id (chosen before upload, so a retry never posts twice).
+  String newPostId() => _posts.doc().id;
+
+  /// Writes a post or clip whose files are already uploaded (v0.8: the
+  /// upload queue uploads in the background, then calls this).
+  /// Safe to call again with the same [postId] (no double post).
+  Future<void> publishPost({
+    required String postId,
     required String type,
-    required List<PostUpload> items,
+    required List<MediaItem> media,
     required String caption,
-    File? cover,
-    PickedAudio? audio,
+    UploadedMedia? cover,
+    UploadedMedia? audio,
+    String audioName = '',
     PostOptions options = const PostOptions(),
-    ValueChanged<double>? onProgress,
   }) async {
-    if (items.isEmpty) throw ArgumentError('Nothing to share');
-    if (items.length > maxItems) {
+    if (media.isEmpty) throw ArgumentError('Nothing to share');
+    if (media.length > maxItems) {
       throw StateError('You can share up to $maxItems photos and videos');
     }
+    final ref = _posts.doc(postId);
     final me = await UserRepository.instance.me();
-
-    // ---- small copies of videos (played only when the network is slow)
-    // made on the phone WHILE the full files upload
-    final lowFutures = <int, Future<File?>>{
-      for (var k = 0; k < items.length; k++)
-        if (items[k].isVideo) k: LowCopy.make(items[k].file),
-    };
-
-    // ---- upload everything (progress by file size, 2 files at a time)
-    final jobs = <(File, MediaKind)>[];
-    for (final it in items) {
-      // the folder only depends on the file type, so this also works
-      // with older servers (videos -> clip, photos -> post)
-      jobs.add((it.file, it.isVideo ? MediaKind.clip : MediaKind.post));
-      final t = it.thumb;
-      if (it.isVideo && t != null) jobs.add((t, MediaKind.thumb));
-    }
-    if (cover != null) jobs.add((cover, MediaKind.thumb));
-    if (audio != null) jobs.add((audio.file, MediaKind.audio));
-    final sizes = <int>[];
-    for (final j in jobs) {
-      sizes.add(await j.$1.length().catchError((Object _) => 1));
-    }
-    // low copies are ~1/5 of a video: count them in the progress too
-    var lowGuess = 0;
-    for (final k in lowFutures.keys) {
-      lowGuess +=
-          (await items[k].file.length().catchError((Object _) => 0)) ~/ 5;
-    }
-    final total = (sizes.fold<int>(0, (a, b) => a + b) + lowGuess).clamp(
-      1,
-      1 << 62,
-    );
-    final progress = List<double>.filled(jobs.length, 0);
-    var lowDone = 0.0;
-    void report() {
-      var bytes = lowDone;
-      for (var i = 0; i < jobs.length; i++) {
-        bytes += sizes[i] * progress[i];
-      }
-      onProgress?.call((bytes / total * 0.97).clamp(0.0, 0.97));
-    }
-
-    final uploaded = await Uploader.pool<UploadedMedia?>(2, [
-      for (var i = 0; i < jobs.length; i++)
-        () async {
-          final (file, kind) = jobs[i];
-          try {
-            return await MediaService.instance.upload(
-              file,
-              kind: kind,
-              onProgress: (v) {
-                progress[i] = v;
-                report();
-              },
-            );
-          } catch (e) {
-            if (kind == MediaKind.thumb) return null; // a cover is optional
-            if (kind == MediaKind.audio) {
-              throw StateError('Could not upload the music ($e)');
-            }
-            rethrow;
-          }
-        },
-    ]);
-
-    // ---- upload the small copies (optional: a failure is ignored)
-    final lows = <int, UploadedMedia>{};
-    for (final e in lowFutures.entries) {
-      final f = await e.value;
-      if (f == null) continue;
-      try {
-        final guess = (await items[e.key].file.length()) ~/ 5;
-        final base = lowDone;
-        lows[e.key] = await MediaService.instance.upload(
-          f,
-          kind: MediaKind.clip,
-          onProgress: (v) {
-            lowDone = base + guess * v;
-            report();
-          },
-        );
-        lowDone = base + guess;
-      } catch (err) {
-        debugPrint('low copy upload: $err');
-      } finally {
-        unawaited(f.delete().then((_) {}, onError: (Object _) {}));
-      }
-    }
-
-    // ---- build the media list
-    var u = 0;
-    final media = <MediaItem>[];
-    for (var k = 0; k < items.length; k++) {
-      final it = items[k];
-      final main = uploaded[u++]!;
-      final low = lows[k];
-      UploadedMedia? thumb;
-      if (it.isVideo && it.thumb != null) thumb = uploaded[u++];
-      media.add(
-        MediaItem(
-          url: main.url,
-          key: main.key,
-          aspectRatio: safeAspect(it.aspectRatio),
-          isVideo: it.isVideo,
-          thumbUrl: thumb?.url ?? '',
-          thumbKey: thumb?.key ?? '',
-          durationMs: it.isVideo ? it.durationMs : 0,
-          edits: it.isVideo ? it.edits : const VideoEdits(),
-          lowUrl: low?.url ?? '',
-          lowKey: low?.key ?? '',
-        ),
-      );
-    }
-    final coverUp = cover != null ? uploaded[u++] : null;
-    final audioUp = audio != null ? uploaded[u++] : null;
-
     final first = media.first;
-    final firstItem = items.first;
     // cover for grids: chosen cover, else the first item's image
-    final coverUrl = coverUp?.url ?? first.coverUrl;
-    final coverKey = coverUp?.key ?? (first.isVideo ? first.thumbKey : '');
-
-    final ref = _posts.doc();
+    final coverUrl = cover?.url ?? first.coverUrl;
+    final coverKey = cover?.key ?? (first.isVideo ? first.thumbKey : '');
     final batch = _db.batch();
     batch.set(ref, {
       ..._base(me, options, caption),
@@ -234,11 +117,11 @@ class PostRepository {
       if (coverKey.isNotEmpty) 'thumbKey': coverKey,
       // older app versions read these for a clip's first video
       if (first.isVideo && first.durationMs > 0) 'durationMs': first.durationMs,
-      if (first.isVideo) ...firstItem.edits.toMap(),
-      if (audioUp != null) ...{
-        'audioUrl': audioUp.url,
-        'audioKey': audioUp.key,
-        'audioName': audio!.name,
+      if (first.isVideo) ...first.edits.toMap(),
+      if (audio != null) ...{
+        'audioUrl': audio.url,
+        'audioKey': audio.key,
+        'audioName': audioName,
       },
     });
     batch.update(_db.collection('users').doc(me.uid), {
@@ -256,8 +139,16 @@ class PostRepository {
         durationMs: first.durationMs,
       );
     }
-    await batch.commit();
-    onProgress?.call(1);
+    try {
+      await batch.commit();
+    } catch (e) {
+      // posted already (app closed right after the last try)?
+      final done = await ref
+          .get()
+          .then((d) => d.exists && d.data()?['authorId'] == me.uid)
+          .catchError((Object _) => false);
+      if (!done) rethrow;
+    }
   }
 
   Future<void> delete(Post post) async {
@@ -522,37 +413,100 @@ class PostRepository {
             .toList(),
       );
 
-  Future<void> addComment(Post post, String text) async {
+  /// Adds a comment (v0.8: text, photo or GIF; [replyTo] = reply).
+  Future<void> addComment(
+    Post post,
+    String text, {
+    Comment? replyTo,
+    CommentPicture? picture,
+  }) async {
     final t = text.trim();
-    if (t.isEmpty) return;
+    if (t.isEmpty && picture == null) return;
     final me = await UserRepository.instance.meCached();
     final ref = _posts.doc(post.id);
     final batch = _db.batch();
+    // replies always hang under the first comment (one level, like IG)
+    final parentId = replyTo == null
+        ? ''
+        : (replyTo.isReply ? replyTo.parentId : replyTo.id);
     batch.set(ref.collection('comments').doc(), {
       'authorId': me.uid,
       'authorUsername': me.username,
       'authorPhotoUrl': me.photoUrl,
       'text': t,
       'createdAt': FieldValue.serverTimestamp(),
+      if (parentId.isNotEmpty) 'parentId': parentId,
+      if (replyTo != null) 'replyToUsername': replyTo.authorUsername,
+      ...?picture?.toMap(),
     });
     batch.update(ref, {'commentsCount': FieldValue.increment(1)});
+    if (parentId.isNotEmpty) {
+      batch.update(ref.collection('comments').doc(parentId), {
+        'repliesCount': FieldValue.increment(1),
+      });
+    }
     NotificationRepository.instance.addToBatch(
       batch,
       toUid: post.authorId,
       from: me,
       type: AppNotification.comment,
       post: post,
-      text: t,
+      text: t.isNotEmpty ? t : (picture!.isGif ? 'sent a GIF' : 'sent a photo'),
     );
     await batch.commit();
   }
 
-  Future<void> deleteComment(String postId, String commentId) async {
+  Future<void> deleteComment(String postId, Comment c) async {
     final ref = _posts.doc(postId);
     final batch = _db.batch();
-    batch.delete(ref.collection('comments').doc(commentId));
+    batch.delete(ref.collection('comments').doc(c.id));
     batch.update(ref, {'commentsCount': FieldValue.increment(-1)});
     await batch.commit();
+    if (c.isReply) {
+      // the parent may be gone already: that's fine
+      await ref
+          .collection('comments')
+          .doc(c.parentId)
+          .update({'repliesCount': FieldValue.increment(-1)})
+          .catchError((Object _) {});
+    }
+    if (c.imageKey.isNotEmpty) MediaService.instance.delete(c.imageKey);
+  }
+
+  /// Did I like this comment?
+  Stream<bool> isCommentLiked(String postId, String commentId) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream.value(false);
+    return _posts
+        .doc(postId)
+        .collection('comments')
+        .doc(commentId)
+        .collection('likes')
+        .doc(uid)
+        .snapshots()
+        .map((d) => d.exists);
+  }
+
+  /// Like / unlike a comment (v0.8).
+  Future<void> setCommentLiked(
+    String postId,
+    String commentId,
+    bool like,
+  ) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final c = _posts.doc(postId).collection('comments').doc(commentId);
+    final likeRef = c.collection('likes').doc(uid);
+    await _db.runTransaction((tx) async {
+      final had = (await tx.get(likeRef)).exists;
+      if (had == like) return;
+      if (like) {
+        tx.set(likeRef, {'createdAt': FieldValue.serverTimestamp()});
+      } else {
+        tx.delete(likeRef);
+      }
+      tx.update(c, {'likesCount': FieldValue.increment(like ? 1 : -1)});
+    });
   }
 
   // ---------------- Views ----------------
@@ -763,4 +717,31 @@ List<Post> mergeNewest(List<List<Post>> lists, {int max = 150}) {
   final out = byId.values.toList()
     ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   return out.length > max ? out.sublist(0, max) : out;
+}
+
+/// Photo or GIF sent with a comment (v0.8).
+class CommentPicture {
+  const CommentPicture.image({
+    required this.url,
+    required this.key,
+    this.width = 0,
+    this.height = 0,
+  }) : isGif = false;
+
+  const CommentPicture.gif({
+    required this.url,
+    this.width = 0,
+    this.height = 0,
+  }) : key = '',
+       isGif = true;
+
+  final String url;
+  final String key;
+  final int width;
+  final int height;
+  final bool isGif;
+
+  Map<String, dynamic> toMap() => isGif
+      ? {'gifUrl': url, 'gifW': width, 'gifH': height}
+      : {'imageUrl': url, 'imageKey': key, 'imageW': width, 'imageH': height};
 }

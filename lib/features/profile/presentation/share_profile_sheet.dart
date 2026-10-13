@@ -1,9 +1,11 @@
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -53,34 +55,56 @@ class _ShareProfileSheetState extends State<ShareProfileSheet> {
   );
 
   /// Saves the QR card as a picture in the gallery.
+  /// Download: saves the QR card as a picture in Gallery → InstantGram.
+  /// v0.8: saved from a file (saving raw bytes failed on some phones);
+  /// if the gallery still refuses, the share menu opens ("Save to…").
   Future<void> _save() async {
     setState(() => _saving = true);
+    File? file;
     try {
       final boundary =
           _card.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) throw StateError('not ready');
+      if (boundary == null) throw StateError('The QR code is not ready yet');
       final image = await boundary.toImage(pixelRatio: 3);
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       image.dispose();
-      if (data == null) throw StateError('no image');
-      if (!await Gal.hasAccess()) {
-        final ok = await Gal.requestAccess();
-        if (!ok) {
-          _snack('Allow photo access to save the QR code');
-          return;
-        }
-      }
-      await Gal.putImageBytes(
-        data.buffer.asUint8List(),
-        name: 'instantgram_${widget.user.username}',
+      if (data == null) throw StateError('Could not draw the QR code');
+      final dir = await getTemporaryDirectory();
+      final safe = widget.user.username.replaceAll(RegExp(r'[^A-Za-z0-9_]'), '_');
+      file = File(
+        '${dir.path}/instantgram_${safe}_${DateTime.now().millisecondsSinceEpoch}.png',
       );
-      _snack('QR code saved to your gallery');
+      await file.writeAsBytes(data.buffer.asUint8List(), flush: true);
     } catch (e) {
-      _snack(
-        e is GalException
-            ? 'Could not save: ${e.type.message}'
-            : 'Could not save the QR code',
-      );
+      _snack('Could not save: $e');
+      if (mounted) setState(() => _saving = false);
+      return;
+    }
+    try {
+      if (!await Gal.hasAccess(toAlbum: true)) {
+        final ok = await Gal.requestAccess(toAlbum: true);
+        if (!ok) throw const _NoAccess();
+      }
+      await Gal.putImage(file.path, album: 'InstantGram');
+      _snack('QR code saved to Gallery → InstantGram');
+    } catch (e) {
+      final why = e is _NoAccess
+          ? 'no photo access'
+          : e is GalException
+          ? e.type.message
+          : '$e';
+      debugPrint('QR save: $why');
+      // plan B: the share menu (Save to Files / Drive / Gallery…)
+      try {
+        await SharePlus.instance.share(
+          ShareParams(
+            files: [XFile(file.path, mimeType: 'image/png')],
+            text: 'Follow @${widget.user.username} on InstantGram',
+          ),
+        );
+      } catch (_) {
+        _snack('Could not save the QR code ($why)');
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -260,4 +284,8 @@ class _Action extends StatelessWidget {
       ),
     );
   }
+}
+
+class _NoAccess implements Exception {
+  const _NoAccess();
 }

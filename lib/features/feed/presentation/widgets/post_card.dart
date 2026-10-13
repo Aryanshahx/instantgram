@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+
 import '../../../insights/owner_sheet.dart';
 
 import '../../../../core/services/content_filter.dart';
@@ -14,6 +15,7 @@ import '../../../../shared/widgets/media_view.dart';
 import '../../../post/data/post_repository.dart';
 import '../../../post/presentation/comments_sheet.dart';
 import '../../../post/presentation/post_menu.dart';
+import '../../../../shared/widgets/bounce.dart';
 
 class PostCard extends StatefulWidget {
   const PostCard({
@@ -210,6 +212,7 @@ class _PostCardState extends State<PostCard>
                           ActionCount(
                             key: const ValueKey('count-like'),
                             onTap: () => _setLiked(serverLiked, !liked),
+                            trigger: liked,
                             icon: Icon(
                               liked ? Icons.favorite : Icons.favorite_border,
                               color: liked ? AppColors.like : null,
@@ -237,6 +240,7 @@ class _PostCardState extends State<PostCard>
                                 onTap: () => _toggle(
                                   () => _repo.setReposted(p, !reposted),
                                 ),
+                                trigger: reposted,
                                 icon: Icon(
                                   Icons.repeat,
                                   size: 26,
@@ -265,10 +269,13 @@ class _PostCardState extends State<PostCard>
                       return IconButton(
                         onPressed: () =>
                             _toggle(() => _repo.setSaved(p, !saved)),
-                        icon: Icon(
-                          saved ? Icons.bookmark : Icons.bookmark_border,
-                          size: 28,
-                          color: saved ? AppColors.lime : null,
+                        icon: Bounce(
+                          trigger: saved,
+                          child: Icon(
+                            saved ? Icons.bookmark : Icons.bookmark_border,
+                            size: 28,
+                            color: saved ? AppColors.lime : null,
+                          ),
                         ),
                       );
                     },
@@ -313,13 +320,14 @@ class _PostCardState extends State<PostCard>
 }
 
 /// Action icon with its count next to it (no number when 0 or hidden).
-class ActionCount extends StatelessWidget {
+class ActionCount extends StatefulWidget {
   const ActionCount({
     super.key,
     required this.icon,
     required this.count,
     required this.hidden,
     required this.onTap,
+    this.trigger,
   });
 
   final Widget icon;
@@ -327,25 +335,52 @@ class ActionCount extends StatelessWidget {
   final bool hidden;
   final VoidCallback onTap;
 
+  /// The icon pops when this changes (liked, reposted…).
+  final Object? trigger;
+
+  @override
+  State<ActionCount> createState() => _ActionCountState();
+}
+
+class _ActionCountState extends State<ActionCount> {
+  final _bounce = GlobalKey<BounceState>();
+
   @override
   Widget build(BuildContext context) {
-    final show = !hidden && count > 0;
+    final show = !widget.hidden && widget.count > 0;
     return InkWell(
-      onTap: onTap,
+      onTap: () {
+        _bounce.currentState?.play();
+        widget.onTap();
+      },
       customBorder: const StadiumBorder(),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            icon,
+            Bounce(key: _bounce, trigger: widget.trigger, child: widget.icon),
             if (show) ...[
               const SizedBox(width: 5),
-              Text(
-                compactCount(count),
-                style: const TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                transitionBuilder: (child, a) => FadeTransition(
+                  opacity: a,
+                  child: SlideTransition(
+                    position: Tween(
+                      begin: const Offset(0, 0.4),
+                      end: Offset.zero,
+                    ).animate(a),
+                    child: child,
+                  ),
+                ),
+                child: Text(
+                  compactCount(widget.count),
+                  key: ValueKey(widget.count),
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ],

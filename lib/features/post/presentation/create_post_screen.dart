@@ -17,8 +17,8 @@ import '../../editor/bake_filter.dart';
 import '../../editor/edit_models.dart';
 import '../../editor/filters.dart';
 import '../../editor/video_frames.dart';
-import '../../stories/data/story_repository.dart';
 import '../data/post_repository.dart';
+import '../data/upload_queue.dart';
 
 export '../../editor/edit_models.dart' show ComposeMode, EditedMedia;
 export '../../../shared/widgets/media_view.dart' show PageDots;
@@ -152,64 +152,49 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     try {
       final items = widget.items;
       MusicPlayer.instance.stop(_kMusic);
-      switch (widget.mode) {
-        case ComposeMode.photo:
-        case ComposeMode.clip:
-          final uploads = <PostUpload>[];
-          for (final m in items) {
-            File? thumb;
-            if (m.isVideo && m.preview != null) {
-              thumb = await bakeFilter(m.preview!, m.edits.filter);
-            }
-            uploads.add(
-              PostUpload(
-                file: m.file,
-                isVideo: m.isVideo,
-                aspectRatio: m.aspectRatio,
-                edits: m.edits,
-                durationMs: m.durationMs,
-                thumb: thumb,
-              ),
-            );
-          }
-          await PostRepository.instance.createPost(
-            type: _isClip ? Post.clip : Post.photo,
-            items: uploads,
-            caption: _caption.text,
-            cover: _hasCover ? _cover : null,
-            audio: widget.audio,
-            options: _options,
-            onProgress: onProgress,
-          );
-        case ComposeMode.story:
-          final n = items.length;
-          for (var i = 0; i < n; i++) {
-            final m = items[i];
-            await StoryRepository.instance.create(
-              m.file,
-              isVideo: m.isVideo,
-              edits: m.edits,
-              durationMs: m.durationMs,
-              audience: _audience,
-              onProgress: (v) => onProgress((i + v) / n),
-            );
-          }
-      }
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _isStory
-                ? (widget.items.length > 1
-                      ? '${widget.items.length} moments shared ✨'
-                      : 'Moment shared ✨')
-                : _isClip
-                ? 'Clip shared 🎬'
-                : 'Post shared 🎉',
+      // v0.8: upload goes on in the background (bar in Discover +
+      // notification); you can use the app right away
+      final queued = <QueuedMedia>[];
+      for (var i = 0; i < items.length; i++) {
+        final m = items[i];
+        File? thumb;
+        if (!_isStory && m.isVideo && m.preview != null) {
+          thumb = await bakeFilter(m.preview!, m.edits.filter);
+        }
+        onProgress((i + 1) / items.length);
+        queued.add(
+          QueuedMedia(
+            path: m.file.path,
+            isVideo: m.isVideo,
+            aspectRatio: m.aspectRatio,
+            edits: m.edits,
+            durationMs: m.durationMs,
+            thumbPath: thumb?.path,
           ),
+        );
+      }
+      UploadQueue.instance.add(
+        kind: _isStory
+            ? UploadTask.moment
+            : _isClip
+            ? UploadTask.clip
+            : UploadTask.post,
+        items: queued,
+        caption: _isStory ? '' : _caption.text,
+        options: _isStory ? PostOptions(audience: _audience) : _options,
+        coverPath: !_isStory && _hasCover ? _cover?.path : null,
+        audioPath: _isStory ? null : widget.audio?.file.path,
+        audioName: _isStory ? '' : (widget.audio?.name ?? ''),
+      );
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.of(context).popUntil((r) => r.isFirst);
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Sharing in the background… you can keep using the app'),
+          duration: Duration(seconds: 2),
         ),
       );
-      Navigator.of(context).popUntil((r) => r.isFirst);
     } catch (e) {
       if (mounted) {
         setState(() {

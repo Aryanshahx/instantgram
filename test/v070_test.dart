@@ -9,7 +9,7 @@ import 'package:image/image.dart' as img;
 import 'package:instantgram/core/services/api_client.dart';
 import 'package:instantgram/core/services/content_filter.dart';
 import 'package:instantgram/core/services/deep_links.dart';
-import 'package:instantgram/core/services/low_copy.dart';
+import 'package:instantgram/core/services/video_prep.dart';
 import 'package:instantgram/core/services/media_prefetch.dart';
 import 'package:instantgram/core/services/music_player.dart';
 import 'package:instantgram/core/services/net_quality.dart';
@@ -87,7 +87,7 @@ void main() {
     NetImage.disableCache = true;
     MediaPrefetch.disabled = true;
     VideoPool.disabled = true;
-    LowCopy.disabled = true;
+    VideoPrep.disabled = true;
     DeepLinks.disabled = true;
     NetQuality.reset();
   });

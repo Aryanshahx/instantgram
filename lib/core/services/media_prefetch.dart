@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../shared/models/post.dart';
 import 'net_quality.dart';
+import 'video_cache.dart';
 
 /// "Instant" loading, like Instagram Reels:
 ///  * photos/covers of what comes next are downloaded to the disk cache
@@ -44,15 +45,29 @@ class MediaPrefetch {
     }
   }
 
+  /// Downloads the start of a video to the disk cache (v0.8).
+  void video(String url, {int? bytes}) {
+    if (disabled || url.isEmpty || !url.startsWith('http')) return;
+    unawaited(VideoCache.instance.prefetch(url, bytes: bytes));
+  }
+
   /// Images + first video of the next posts/clips.
+  /// [videos] players are opened, [diskVideos] are downloaded a bit.
   void ahead(
     List<Post> list,
     int index, {
     int images = 3,
     int videos = 2,
+    int diskVideos = 3,
     bool Function(Post p)? mixWithOthers,
   }) {
     if (disabled) return;
+    for (var k = 1; k <= diskVideos && index + k < list.length; k++) {
+      final p = list[index + k];
+      for (final m in p.items.take(2)) {
+        if (m.isVideo) video(NetQuality.urlFor(m));
+      }
+    }
     for (var k = 1; k <= images && index + k < list.length; k++) {
       post(list[index + k]);
     }
@@ -110,14 +125,32 @@ class VideoPool {
       _pool[key] = _pool.remove(key)!;
       return;
     }
-    final c = VideoPlayerController.networkUrl(
-      Uri.parse(url),
-      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: mixWithOthers),
-    );
+    final c = VideoCache.instance.controller(url, mixWithOthers: mixWithOthers);
     final ready = c.initialize();
     // never leave an unhandled error behind
     unawaited(ready.then<void>((_) {}, onError: (Object _) {}));
     _pool[key] = PooledVideo(c, ready);
+    _trim();
+  }
+
+  /// Gives back a player that was just watched, so swiping back to it
+  /// starts at once (v0.8). The pool owns it now.
+  void keep(
+    String url,
+    VideoPlayerController c, {
+    bool mixWithOthers = false,
+  }) {
+    final key = _key(url, mixWithOthers);
+    if (disabled || !c.value.isInitialized || c.value.hasError ||
+        _pool.containsKey(key)) {
+      c.dispose();
+      return;
+    }
+    c.pause();
+    c.setVolume(0);
+    c.setPlaybackSpeed(1);
+    c.seekTo(Duration.zero);
+    _pool[key] = PooledVideo(c, Future<void>.value());
     _trim();
   }
 

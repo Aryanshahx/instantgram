@@ -23,6 +23,8 @@ import '../../post/data/post_repository.dart';
 import '../../profile/data/user_repository.dart';
 import '../../../core/services/net_quality.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/navigation/page_cover.dart';
+import '../../../core/services/video_cache.dart';
 
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({super.key});
@@ -416,7 +418,15 @@ class _TileVideo extends StatefulWidget {
   State<_TileVideo> createState() => _TileVideoState();
 }
 
-class _TileVideoState extends State<_TileVideo> {
+class _TileVideoState extends State<_TileVideo> with PageCoverAware {
+  // v0.8: paused while a page (moments, a clip…) is open on top
+  @override
+  void onPageCoverChanged(bool covered) {
+    final c = _c;
+    if (c == null || !_ready) return;
+    covered ? c.pause() : c.play();
+  }
+
   VideoPlayerController? _c;
   bool _ready = false;
 
@@ -428,11 +438,11 @@ class _TileVideoState extends State<_TileVideo> {
 
   Future<void> _init() async {
     if (kDisableVideoPlayback || widget.item.url.isEmpty) return;
-    final c = VideoPlayerController.networkUrl(
-      // small tiles: the small copy is enough (loads much faster)
-      Uri.parse(NetQuality.tileUrl(widget.item)),
-      // muted preview must never stop other apps' music
-      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+    // small tiles: the small copy is enough (loads much faster);
+    // muted preview must never stop other apps' music; disk cache (v0.8)
+    final c = VideoCache.instance.controller(
+      NetQuality.tileUrl(widget.item),
+      mixWithOthers: true,
     );
     _c = c;
     try {
@@ -443,7 +453,7 @@ class _TileVideoState extends State<_TileVideo> {
       final start = widget.item.edits.trimStartMs;
       if (start > 0) await c.seekTo(Duration(milliseconds: start));
       if (!mounted || _c != c) return;
-      await c.play();
+      if (!pageCovered) await c.play();
       if (mounted) setState(() => _ready = true);
     } catch (_) {
       // cover stays visible

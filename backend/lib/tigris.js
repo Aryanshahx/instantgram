@@ -5,6 +5,7 @@ import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
+  ListPartsCommand,
   PutObjectCommand,
   S3Client,
   UploadPartCommand,
@@ -15,7 +16,7 @@ import { env, HttpError, requireEnv } from './http.js';
 /** Files never change (unique names) -> cache for a year. */
 export const CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
-export const KINDS = ['post', 'clip', 'story', 'avatar', 'cover', 'thumb', 'audio'];
+export const KINDS = ['post', 'clip', 'story', 'avatar', 'cover', 'thumb', 'audio', 'comment'];
 
 const MB = 1024 * 1024;
 export const MAX_IMAGE = 15 * MB;
@@ -159,6 +160,33 @@ export async function createMultipart({ uid, kind, contentType, size, partSize }
     )),
   );
   return { key, uploadId, publicUrl: publicUrl(key), partSize: ps, partUrls };
+}
+
+/** New links for some parts of an upload (to go on after a break). */
+export async function signParts({ uid, key, uploadId, parts }) {
+  ownKey(uid, key);
+  if (typeof uploadId !== 'string' || !uploadId) throw new HttpError(400, 'Bad upload id');
+  if (!Array.isArray(parts) || parts.length < 1 || parts.length > MAX_PARTS) {
+    throw new HttpError(400, 'Bad parts');
+  }
+  const Bucket = requireEnv('TIGRIS_BUCKET');
+  // the upload must still exist (else the app starts a new one)
+  try {
+    await s3().send(new ListPartsCommand({ Bucket, Key: key, UploadId: uploadId, MaxParts: 1 }));
+  } catch (e) {
+    throw new HttpError(410, 'Upload expired');
+  }
+  const partUrls = {};
+  await Promise.all(parts.map(async (p) => {
+    const n = Number(p);
+    if (!Number.isInteger(n) || n < 1 || n > MAX_PARTS) throw new HttpError(400, 'Bad parts');
+    partUrls[n] = await getSignedUrl(
+      s3(),
+      new UploadPartCommand({ Bucket, Key: key, UploadId: uploadId, PartNumber: n }),
+      { expiresIn: 3600 },
+    );
+  }));
+  return { partUrls };
 }
 
 export async function completeMultipart({ uid, key, uploadId, parts }) {

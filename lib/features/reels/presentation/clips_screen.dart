@@ -28,6 +28,8 @@ import '../../post/presentation/comments_sheet.dart';
 import '../../post/presentation/create_sheet.dart';
 import '../../post/presentation/post_menu.dart';
 import '../../profile/data/user_repository.dart';
+import '../../../core/services/video_cache.dart';
+import '../../../shared/widgets/bounce.dart';
 
 /// Full-screen vertical clips.
 /// [clips] given -> play that list (from a profile / explore).
@@ -132,8 +134,23 @@ class _ClipsScreenState extends State<ClipsScreen> {
     });
   }
 
+  /// Order of the clips you have seen so far. New clips from the server
+  /// go to the END, so the clip you watch never changes under you (v0.8:
+  /// a paused clip started again when a new clip arrived).
+  final List<Post> _order = [];
+
   Widget _pager(List<Post> all) {
-    final clips = all.where((c) => !_deleted.contains(c.id)).toList();
+    final fresh = all.where((c) => !_deleted.contains(c.id)).toList();
+    final List<Post> clips;
+    if (widget.clips != null) {
+      clips = fresh;
+    } else {
+      final merged = stableMerge(_order, fresh, keepUpTo: _current);
+      _order
+        ..clear()
+        ..addAll(merged);
+      clips = merged;
+    }
     _count = clips.length;
     _visible = clips;
     if (_prefetchedFor != _current && clips.isNotEmpty) {
@@ -272,6 +289,28 @@ class _ClipsScreenState extends State<ClipsScreen> {
   }
 }
 
+/// Keeps the order of [old]: known clips keep their place (with fresh
+/// data), new clips are added at the end. Clips gone from the server are
+/// dropped, except up to index [keepUpTo] (so the page you watch stays).
+@visibleForTesting
+List<Post> stableMerge(List<Post> old, List<Post> fresh, {int keepUpTo = 0}) {
+  if (old.isEmpty) return fresh;
+  final byId = {for (final p in fresh) p.id: p};
+  final out = <Post>[];
+  for (var i = 0; i < old.length; i++) {
+    final now = byId.remove(old[i].id);
+    if (now != null) {
+      out.add(now);
+    } else if (i <= keepUpTo) {
+      out.add(old[i]);
+    }
+  }
+  for (final p in fresh) {
+    if (byId.containsKey(p.id)) out.add(p);
+  }
+  return out;
+}
+
 class ClipPlayer extends StatefulWidget {
   const ClipPlayer({
     super.key,
@@ -345,6 +384,10 @@ class _ClipPlayerState extends State<ClipPlayer>
 
   // adaptive quality (small copy while the network is slow)
   bool _usingLow = false;
+
+  /// You paused it: nothing starts it again by itself (v0.8 fix).
+  bool _userPaused = false;
+  String _openUrl = ''; // what the player plays (for the pool)
   StallWatch? _stall;
   Timer? _startTimer;
 
@@ -402,6 +445,7 @@ class _ClipPlayerState extends State<ClipPlayer>
     // full quality, unless videos were buffering a moment ago
     _usingLow = NetQuality.slow && _cur.lowUrl.isNotEmpty;
     final url = _usingLow ? _cur.lowUrl : _cur.url;
+    _openUrl = url;
     // ready player from the prefetch pool = instant start
     final pooled = VideoPool.instance.take(
       url,
@@ -425,7 +469,7 @@ class _ClipPlayerState extends State<ClipPlayer>
           if (!mounted || _ctrl != c) return;
           setState(() => _ready = true);
           c.setVolume(_effectiveVolume);
-          if (widget.active) _play();
+          if (widget.active && !_userPaused) _play();
         })
         .catchError((Object _) {
           if (!mounted || _ctrl != c) return;
@@ -437,13 +481,9 @@ class _ClipPlayerState extends State<ClipPlayer>
         });
   }
 
+  // v0.8: through the disk cache (watching again = no new download)
   VideoPlayerController _newCtrl(String url) =>
-      VideoPlayerController.networkUrl(
-        Uri.parse(url),
-        videoPlayerOptions: VideoPlayerOptions(
-          mixWithOthers: widget.clip.hasMusic,
-        ),
-      );
+      VideoCache.instance.controller(url, mixWithOthers: widget.clip.hasMusic);
 
   void _applyTrim(VideoPlayerController c) {
     final total = c.value.duration.inMilliseconds;
@@ -493,6 +533,7 @@ class _ClipPlayerState extends State<ClipPlayer>
       return;
     }
     await c.setVolume(_effectiveVolume);
+    _openUrl = low;
     old.removeListener(_onTick);
     c.addListener(_onTick);
     setState(() {
@@ -500,7 +541,7 @@ class _ClipPlayerState extends State<ClipPlayer>
       _ready = true;
       _failed = false;
     });
-    if (widget.active && playing) {
+    if (widget.active && playing && !_userPaused) {
       _play();
       if (_fast) c.setPlaybackSpeed(2);
     }
@@ -517,7 +558,16 @@ class _ClipPlayerState extends State<ClipPlayer>
     _ctrl = null;
     if (c != null) {
       c.removeListener(_onTick);
-      c.dispose();
+      if (_ready && !_failed) {
+        // v0.8: keep it ready, swiping back starts at once
+        VideoPool.instance.keep(
+          _openUrl,
+          c,
+          mixWithOthers: widget.clip.hasMusic,
+        );
+      } else {
+        c.dispose();
+      }
     }
     _sendWatch();
   }
@@ -532,6 +582,7 @@ class _ClipPlayerState extends State<ClipPlayer>
 
   void _goToItem(int i) {
     if (i == _item || i < 0 || i >= _items.length) return;
+    _userPaused = false;
     setState(() {
       _closeItem();
       _item = i;
@@ -542,6 +593,7 @@ class _ClipPlayerState extends State<ClipPlayer>
 
   /// Clip came on screen.
   void _startActive() {
+    _userPaused = false; // came back to it: plays again
     _repo.addView(widget.clip, source: widget.source);
     if (widget.clip.hasMusic) {
       MusicPlayer.instance.play(
@@ -607,6 +659,7 @@ class _ClipPlayerState extends State<ClipPlayer>
     final pos = v.position.inMilliseconds;
     final watched = pos - _startMs;
     if (watched > _maxWatch) _maxWatch = watched;
+    if (_userPaused) return;
     if (!_manualLoop || !widget.active || _finishedSent) return;
     final atEnd =
         pos >= _endOrTotal - 120 ||
@@ -674,7 +727,15 @@ class _ClipPlayerState extends State<ClipPlayer>
   void _togglePlay() {
     final c = _ctrl;
     if (!_ready || c == null) return;
-    setState(() => c.value.isPlaying ? c.pause() : _play());
+    setState(() {
+      if (c.value.isPlaying) {
+        _userPaused = true;
+        c.pause();
+      } else {
+        _userPaused = false;
+        _play();
+      }
+    });
   }
 
   void _holdStart(LongPressStartDetails d) {
@@ -1392,6 +1453,7 @@ class _Action extends StatefulWidget {
 
 class _ActionState extends State<_Action> {
   bool _down = false;
+  final _bounce = GlobalKey<BounceState>();
 
   void _set(bool v) {
     if (_down != v) setState(() => _down = v);
@@ -1404,7 +1466,10 @@ class _ActionState extends State<_Action> {
       onTapDown: (_) => _set(true),
       onTapUp: (_) => _set(false),
       onTapCancel: () => _set(false),
-      onTap: widget.onTap,
+      onTap: () {
+        _bounce.currentState?.play(); // v0.8: springy pop
+        widget.onTap();
+      },
       child: AnimatedScale(
         scale: _down ? 0.82 : 1,
         duration: const Duration(milliseconds: 90),
@@ -1414,11 +1479,18 @@ class _ActionState extends State<_Action> {
             width: 52,
             child: Column(
               children: [
-                Icon(
-                  widget.icon,
-                  size: 25,
-                  color: widget.color,
-                  shadows: const [Shadow(blurRadius: 8, color: Colors.black54)],
+                Bounce(
+                  key: _bounce,
+                  // liked / saved / reposted -> the icon pops
+                  trigger: widget.icon,
+                  child: Icon(
+                    widget.icon,
+                    size: 25,
+                    color: widget.color,
+                    shadows: const [
+                      Shadow(blurRadius: 8, color: Colors.black54),
+                    ],
+                  ),
                 ),
                 if (widget.label.isNotEmpty) ...[
                   const SizedBox(height: 2),

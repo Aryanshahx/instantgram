@@ -12,7 +12,7 @@ import 'api_client.dart';
 import 'uploader.dart';
 
 /// What the file is used for (decides the folder in Tigris + size limits).
-enum MediaKind { post, clip, story, avatar, cover, thumb, audio }
+enum MediaKind { post, clip, story, avatar, cover, thumb, audio, comment }
 
 /// What the create flow may pick.
 enum PickKind {
@@ -315,6 +315,20 @@ class MediaService {
     return PickedAudio(file, audioTitle(name));
   }
 
+  /// A GIF from the gallery, unchanged (resizing would stop the
+  /// animation). null = cancelled. Throws if it is not a GIF.
+  Future<File?> pickGalleryGif() async {
+    final x = await _picker.pickImage(
+      source: ImageSource.gallery,
+      requestFullMetadata: false,
+    );
+    if (x == null) return null;
+    final isGif =
+        x.path.toLowerCase().endsWith('.gif') || x.mimeType == 'image/gif';
+    if (!isGif) throw const FormatException('Please choose a GIF file');
+    return File(x.path);
+  }
+
   /// One photo from the gallery (used for clip covers).
   Future<File?> pickGalleryImage({double maxWidth = 1440}) async {
     final x = await _picker.pickImage(
@@ -327,10 +341,15 @@ class MediaService {
 
   /// Uploads a file to Tigris (fast + real progress, v0.7):
   /// small files = one direct PUT, big files = parts in parallel.
+  ///
+  /// v0.8: part uploads can go on later from where they stopped: pass the
+  /// saved [resume] state and keep the states given to [onPartState].
   Future<UploadedMedia> upload(
     File file, {
     required MediaKind kind,
     ValueChanged<double>? onProgress,
+    PartState? resume,
+    ValueChanged<PartState>? onPartState,
   }) async {
     final contentType = contentTypeFor(file.path);
     final size = await file.length();
@@ -344,7 +363,15 @@ class MediaService {
     UploadedMedia? done;
     if (size >= Uploader.multipartFrom && _multipartWorks) {
       try {
-        done = await _uploadParts(file, kind, contentType, size, onBytes);
+        done = await _uploadParts(
+          file,
+          kind,
+          contentType,
+          size,
+          onBytes,
+          resume: resume,
+          onPartState: onPartState,
+        );
       } on ApiException catch (e) {
         // old server without /api/multipart -> normal upload
         if (e.statusCode != 404) rethrow;
@@ -388,62 +415,121 @@ class MediaService {
     MediaKind kind,
     String contentType,
     int size,
-    void Function(int) onBytes,
-  ) async {
-    final parts = Uploader.planParts(size);
-    final start = await ApiClient.instance.post('/api/multipart', {
-      'action': 'create',
-      'kind': kind.name,
-      'contentType': contentType,
-      'size': size,
-      'partSize': Uploader.partSize,
-      'parts': parts.length,
-    });
-    final key = start['key'] as String;
-    final uploadId = start['uploadId'] as String;
-    final urls = (start['partUrls'] as List).cast<String>();
-    if (urls.length != parts.length) {
-      throw const ApiException('Upload failed: server gave wrong parts');
+    void Function(int) onBytes, {
+    PartState? resume,
+    ValueChanged<PartState>? onPartState,
+  }) async {
+    PartState? state;
+    Map<int, String> urls = {};
+    // 1) go on with a saved upload (same file size), if the server still
+    //    has it
+    if (resume != null && resume.size == size && resume.partSize >= 5 << 20) {
+      final missing = [
+        for (var n = 1; n <= Uploader.planParts(size, resume.partSize).length; n++)
+          if (!resume.etags.containsKey(n)) n,
+      ];
+      try {
+        if (missing.isNotEmpty) {
+          final r = await ApiClient.instance.post('/api/multipart', {
+            'action': 'sign',
+            'key': resume.key,
+            'uploadId': resume.uploadId,
+            'parts': missing,
+          });
+          final m = (r['partUrls'] as Map?) ?? const {};
+          urls = {for (final e in m.entries) int.parse('${e.key}'): '${e.value}'};
+        }
+        state = resume;
+      } on ApiException catch (e) {
+        // old server (no 'sign') or the upload expired -> start again
+        debugPrint('resume upload: $e');
+      }
+    }
+    // 2) new upload
+    if (state == null) {
+      final parts = Uploader.planParts(size);
+      final start = await ApiClient.instance.post('/api/multipart', {
+        'action': 'create',
+        'kind': kind.name,
+        'contentType': contentType,
+        'size': size,
+        'partSize': Uploader.partSize,
+        'parts': parts.length,
+      });
+      final list = (start['partUrls'] as List).cast<String>();
+      if (list.length != parts.length) {
+        throw const ApiException('Upload failed: server gave wrong parts');
+      }
+      state = PartState(
+        key: start['key'] as String,
+        uploadId: start['uploadId'] as String,
+        publicUrl: start['publicUrl'] as String,
+        partSize: (start['partSize'] as num?)?.toInt() ?? Uploader.partSize,
+        size: size,
+      );
+      urls = {for (var i = 0; i < list.length; i++) i + 1: list[i]};
+      onPartState?.call(state);
+    }
+    final st = state;
+    final parts = Uploader.planParts(size, st.partSize);
+    // parts already uploaded count as sent
+    for (final n in st.etags.keys) {
+      if (n >= 1 && n <= parts.length) {
+        onBytes(parts[n - 1].$2 - parts[n - 1].$1);
+      }
     }
     try {
-      final etags = await Uploader.pool<String>(Uploader.parallelParts, [
+      await Uploader.pool<void>(Uploader.parallelParts, [
         for (var i = 0; i < parts.length; i++)
-          () => Uploader.retry(
-            (_) => Uploader.put(
-              Uri.parse(urls[i]),
-              file,
-              start: parts[i].$1,
-              end: parts[i].$2,
-              onBytes: onBytes,
-              errorText: _storageError,
-            ),
-          ),
+          if (!st.etags.containsKey(i + 1))
+            () async {
+              final url = urls[i + 1];
+              if (url == null) {
+                throw const ApiException('Upload failed: missing part link');
+              }
+              final etag = await Uploader.retry(
+                (_) => Uploader.put(
+                  Uri.parse(url),
+                  file,
+                  start: parts[i].$1,
+                  end: parts[i].$2,
+                  onBytes: onBytes,
+                  errorText: _storageError,
+                ),
+              );
+              st.etags[i + 1] = etag;
+              onPartState?.call(st);
+            },
       ]);
       await Uploader.retry(
         (_) => ApiClient.instance.post('/api/multipart', {
           'action': 'complete',
-          'key': key,
-          'uploadId': uploadId,
+          'key': st.key,
+          'uploadId': st.uploadId,
           'parts': [
-            for (var i = 0; i < etags.length; i++)
-              {'PartNumber': i + 1, 'ETag': etags[i]},
+            for (var n = 1; n <= parts.length; n++)
+              {'PartNumber': n, 'ETag': st.etags[n]},
           ],
         }),
       );
-      return UploadedMedia(url: start['publicUrl'] as String, key: key);
+      return UploadedMedia(url: st.publicUrl, key: st.key);
     } catch (e) {
-      unawaited(
-        ApiClient.instance
-            .post('/api/multipart', {
-              'action': 'abort',
-              'key': key,
-              'uploadId': uploadId,
-            })
-            .then<void>((_) {}, onError: (Object _) {}),
-      );
+      // can go on later -> keep the parts; otherwise free them
+      if (onPartState == null) {
+        unawaited(
+          ApiClient.instance
+              .post('/api/multipart', {
+                'action': 'abort',
+                'key': st.key,
+                'uploadId': st.uploadId,
+              })
+              .then<void>((_) {}, onError: (Object _) {}),
+        );
+      }
       rethrow;
     }
   }
+
 
   /// Turns a Tigris XML error into a short, readable message.
   static String _storageError(int status, String body) {

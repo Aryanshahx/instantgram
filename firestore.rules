@@ -309,16 +309,65 @@ service cloud.firestore {
       }
       match /comments/{cid} {
         allow read: if signedIn();
+        // v0.8: text and/or a photo / GIF, one level of replies
         allow create: if signedIn()
           && request.resource.data.authorId == me()
-          && request.resource.data.text is string
-          && request.resource.data.text.size() > 0
-          && request.resource.data.text.size() <= 1000
+          && commentOk(request.resource.data)
+          && request.resource.data.get('likesCount', 0) == 0
+          && request.resource.data.get('repliesCount', 0) == 0
           && !blockedByPostAuthor();
         // comment author or post owner can delete
         allow delete: if signedIn() && (resource.data.authorId == me()
           || get(/databases/$(database)/documents/posts/$(pid)).data.authorId == me());
-        allow update: if false;
+        // only the like / reply counters change, by 1; a like needs the
+        // like doc (written in the same transaction)
+        allow update: if signedIn()
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['likesCount', 'repliesCount'])
+          && cStep('likesCount') && cStep('repliesCount')
+          && commentLikeOk();
+
+        function cDelta(f) {
+          return request.resource.data.get(f, 0) - resource.data.get(f, 0);
+        }
+        function cStep(f) {
+          return !request.resource.data.diff(resource.data).affectedKeys().hasAny([f])
+            || (request.resource.data[f] is int
+                && (cDelta(f) == 1 || cDelta(f) == -1)
+                && request.resource.data[f] >= 0);
+        }
+        function commentLikeOk() {
+          let likePath = /databases/$(database)/documents/posts/$(pid)/comments/$(cid)/likes/$(me());
+          return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['likesCount'])
+            || (cDelta('likesCount') == 1 && !exists(likePath) && existsAfter(likePath))
+            || (cDelta('likesCount') == -1 && exists(likePath) && !existsAfter(likePath));
+        }
+        function commentOk(d) {
+          let hasPic = d.get('imageUrl', '') != '' || d.get('gifUrl', '') != '';
+          return d.keys().hasOnly(['authorId', 'authorUsername', 'authorPhotoUrl',
+                  'text', 'createdAt', 'parentId', 'replyToUsername',
+                  'imageUrl', 'imageKey', 'imageW', 'imageH',
+                  'gifUrl', 'gifW', 'gifH', 'likesCount', 'repliesCount'])
+            && d.text is string && d.text.size() <= 1000
+            && (d.text.size() > 0 || hasPic)
+            && d.get('parentId', '') is string && d.get('parentId', '').size() <= 40
+            && d.get('replyToUsername', '') is string
+            && d.get('replyToUsername', '').size() <= 40
+            && d.get('imageUrl', '') is string && d.get('imageUrl', '').size() <= 600
+            && d.get('imageKey', '') is string && d.get('imageKey', '').size() <= 300
+            && d.get('gifUrl', '') is string && d.get('gifUrl', '').size() <= 600
+            && (d.get('gifUrl', '') == '' || d.gifUrl.matches('https://.*'))
+            && d.get('imageW', 0) is int && d.get('imageH', 0) is int
+            && d.get('gifW', 0) is int && d.get('gifH', 0) is int;
+        }
+
+        // v0.8: comment likes, one doc per account
+        match /likes/{uid} {
+          allow read: if signedIn();
+          allow create: if signedIn() && me() == uid
+            && request.resource.data.keys().hasOnly(['createdAt']);
+          allow delete: if signedIn() && me() == uid;
+        }
       }
     }
 

@@ -16,18 +16,26 @@ class Uploader {
   Uploader._();
 
   /// Files from this size use the parallel (multipart) upload.
-  static int multipartFrom = 16 * 1024 * 1024;
+  static int multipartFrom = 10 * 1024 * 1024;
 
   /// Size of one part (S3 minimum is 5 MB).
-  static int partSize = 8 * 1024 * 1024;
+  static int partSize = 5 * 1024 * 1024;
 
   /// Parts uploading at the same time.
-  static int parallelParts = 4;
+  static int parallelParts = 6;
 
   /// No byte sent for this long = connection is dead -> retry.
   static Duration stallTimeout = const Duration(seconds: 45);
 
-  static const int _tries = 3;
+  static const int _tries = 5;
+
+  /// Pause before try 2, 3, 4, 5 (waits for a weak network to come back).
+  static List<Duration> retryPauses = const [
+    Duration(seconds: 1),
+    Duration(seconds: 3),
+    Duration(seconds: 6),
+    Duration(seconds: 12),
+  ];
 
   /// Byte ranges [start, end) of the parts of a file of [size] bytes.
   static List<(int, int)> planParts(int size, [int? part]) {
@@ -78,7 +86,11 @@ class Uploader {
         if (a >= tries) rethrow;
         onRetry?.call();
         debugPrint('upload retry $a: $e');
-        await Future<void>.delayed(Duration(milliseconds: 800 * a * a));
+        await Future<void>.delayed(
+          retryPauses.isEmpty
+              ? Duration.zero
+              : retryPauses[(a - 1).clamp(0, retryPauses.length - 1)],
+        );
       }
     }
   }
@@ -143,6 +155,59 @@ class Uploader {
     } finally {
       watchdog?.cancel();
       client.close(force: true);
+    }
+  }
+}
+
+/// Saved state of a part-by-part upload, so it can go on later from
+/// where it stopped (app closed, network gone...).
+class PartState {
+  PartState({
+    required this.key,
+    required this.uploadId,
+    required this.publicUrl,
+    required this.partSize,
+    required this.size,
+    Map<int, String>? etags,
+  }) : etags = etags ?? {};
+
+  final String key;
+  final String uploadId;
+  final String publicUrl;
+  final int partSize;
+  final int size;
+
+  /// Part number (1..) -> ETag of the parts already uploaded.
+  final Map<int, String> etags;
+
+  Map<String, dynamic> toJson() => {
+    'key': key,
+    'uploadId': uploadId,
+    'publicUrl': publicUrl,
+    'partSize': partSize,
+    'size': size,
+    'etags': {for (final e in etags.entries) '${e.key}': e.value},
+  };
+
+  static PartState? fromJson(Object? v) {
+    if (v is! Map) return null;
+    try {
+      final e = v['etags'];
+      return PartState(
+        key: v['key'] as String,
+        uploadId: v['uploadId'] as String,
+        publicUrl: v['publicUrl'] as String,
+        partSize: (v['partSize'] as num).toInt(),
+        size: (v['size'] as num).toInt(),
+        etags: e is Map
+            ? {
+                for (final x in e.entries)
+                  int.parse('${x.key}'): '${x.value}',
+              }
+            : {},
+      );
+    } catch (_) {
+      return null;
     }
   }
 }

@@ -56,6 +56,38 @@ class StoryRepository {
     });
   }
 
+  /// New moment id (chosen before upload: a retry never posts twice).
+  String newId() => _stories.doc().id;
+
+  /// Writes a moment whose file is already uploaded (v0.8 upload queue).
+  Future<void> createUploaded({
+    required String id,
+    required UploadedMedia media,
+    bool isVideo = false,
+    VideoEdits edits = const VideoEdits(),
+    int durationMs = 0,
+    String audience = Audience.everyone,
+  }) async {
+    final me = await UserRepository.instance.me();
+    final ref = _stories.doc(id);
+    try {
+      await ref.set({
+        ..._base(me, audience),
+        'type': isVideo ? Story.video : Story.photo,
+        'mediaUrl': media.url,
+        'mediaKey': media.key,
+        if (isVideo && durationMs > 0) 'durationMs': durationMs,
+        if (isVideo) ...edits.toMap(),
+      });
+    } catch (e) {
+      final done = await ref
+          .get()
+          .then((d) => d.exists)
+          .catchError((Object _) => false);
+      if (!done) rethrow;
+    }
+  }
+
   /// A moment that re-uses a new post's media (no own file -> mediaKey '').
   void addSharedToBatch(
     WriteBatch batch, {

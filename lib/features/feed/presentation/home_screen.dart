@@ -11,6 +11,7 @@ import '../../notifications/data/notification_repository.dart';
 import '../../notifications/presentation/notifications_screen.dart';
 import '../../post/data/post_repository.dart';
 import '../../post/presentation/create_sheet.dart';
+import '../../post/presentation/upload_banner.dart';
 import '../../profile/data/famous_index.dart';
 import '../../profile/data/user_repository.dart';
 import '../../search/presentation/find_people_screen.dart';
@@ -137,6 +138,8 @@ class _HomeFeedState extends State<_HomeFeed> {
               const SizedBox(width: 8),
             ],
           ),
+          // v0.8: "Sharing your post… 45%" (background uploads)
+          const SliverToBoxAdapter(child: UploadBanner()),
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.only(top: 4, bottom: 8),
