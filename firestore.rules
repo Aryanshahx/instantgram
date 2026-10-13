@@ -40,12 +40,15 @@ service cloud.firestore {
             || (request.resource.data.country is string
                 && request.resource.data.country.size() <= 3));
       allow update: if signedIn() && (
-        // Owner edits profile. uid / username / email can't change.
+        // Owner edits profile. uid / email can't change. A new username
+        // must be reserved for you in the same write (unique names).
         (me() == uid
           && changed().hasOnly(['name', 'bio', 'website', 'photoUrl', 'photoKey',
                                 'coverUrl', 'coverKey', 'postsCount',
                                 'followingCount', 'followersCount',
-                                'language', 'isPrivate', 'country'])
+                                'language', 'isPrivate', 'country',
+                                'username', 'links'])
+          && usernameOk(uid) && linksOk()
           && stepOk('postsCount') && stepOk('followingCount')
           && stepOk('followersCount')
           && (!changed().hasAny(['isPrivate'])
@@ -64,6 +67,20 @@ service cloud.firestore {
         (changed().hasOnly(['followingCount']) && followingOk(uid))
       );
       allow delete: if false;
+
+      function usernameOk(uid) {
+        let n = request.resource.data.get('username', '');
+        return !changed().hasAny(['username'])
+          || (n is string && n.matches('^[a-z0-9._]{3,30}$')
+              && getAfter(/databases/$(database)/documents/usernames/$(n)).data.uid == uid);
+      }
+
+      // max 3 links: {title, url}
+      function linksOk() {
+        let l = request.resource.data.get('links', []);
+        return !changed().hasAny(['links'])
+          || (l is list && l.size() <= 3);
+      }
 
       function followingOk(uid) {
         let f = /databases/$(database)/documents/users/$(uid)/following/$(request.auth.uid);
@@ -146,7 +163,11 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.uid == me()
         && name.matches('^[a-z0-9._]{3,30}$');
-      allow update, delete: if false;
+      // free your old name only while switching to a new one
+      allow delete: if signedIn()
+        && resource.data.uid == me()
+        && getAfter(/databases/$(database)/documents/users/$(me())).data.username != name;
+      allow update: if false;
     }
 
     // ---------------- Posts & clips ----------------
@@ -169,6 +190,7 @@ service cloud.firestore {
       allow update: if signedIn() && (
         (resource.data.authorId == me()
           && changed().hasOnly(['caption', 'tags', 'pinned', 'authorPhotoUrl',
+                                'authorUsername',
                                 'audience', 'hideLikes', 'hideComments',
                                 'hideReposts', 'hideShares'])
           && tagsOk() && optionsOk())

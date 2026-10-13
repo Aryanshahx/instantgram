@@ -7,10 +7,12 @@ Tiny API that gives the app **signed upload links** for Tigris storage.
 | `GET /api/health` | Shows if all settings are filled in |
 | `POST /api/upload-url` | `{kind, contentType, size}` → `{uploadUrl, publicUrl, key, headers}` |
 | `POST /api/delete-media` | `{key}` → deletes your own file |
+| `POST /api/multipart` | big videos: `create` → part links, `complete`, `abort` (parts upload in parallel) |
+| `GET /u/<username>` | profile link page with **Open in InstantGram** (used by QR codes) |
 
 All POST calls need `Authorization: Bearer <Firebase ID token>`.
 
-Limits: photos 15 MB, videos 150 MB. Kinds: `post`, `clip`, `story`, `avatar`, `cover`.
+Limits: photos 15 MB, videos 500 MB. Kinds: `post`, `clip`, `story`, `avatar`, `cover`.
 
 ## 1. Tigris
 1. Open https://console.storage.dev and sign in.

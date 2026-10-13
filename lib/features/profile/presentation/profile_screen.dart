@@ -1,9 +1,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/services/content_filter.dart';
-import '../../../core/services/media_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/email.dart';
 import '../../../core/utils/errors.dart';
@@ -26,6 +26,7 @@ import '../../post/presentation/create_sheet.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../data/user_repository.dart';
 import 'edit_profile_screen.dart';
+import 'profile_image_crop.dart';
 import 'user_list_screen.dart';
 
 /// Profile of any user. [standalone] = opened as its own page (shows back button).
@@ -130,28 +131,6 @@ class _ProfileViewState extends State<ProfileView>
       ..showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  Future<void> _changePhoto() async {
-    final file = await MediaService.instance.pick(context, maxWidth: 800);
-    if (file == null || !mounted) return;
-    final ok = await runWithProgress(
-      context,
-      title: 'Updating photo',
-      task: (p) => UserRepository.instance.changePhoto(file, onProgress: p),
-    );
-    if (ok) _snack('Profile photo updated');
-  }
-
-  Future<void> _changeCover() async {
-    final file = await MediaService.instance.pick(context, maxWidth: 1600);
-    if (file == null || !mounted) return;
-    final ok = await runWithProgress(
-      context,
-      title: 'Updating cover',
-      task: (p) => UserRepository.instance.changeCover(file, onProgress: p),
-    );
-    if (ok) _snack('Cover updated');
-  }
-
   void _openSettings() {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -214,7 +193,7 @@ class _ProfileViewState extends State<ProfileView>
     if (!mounted || action == null) return;
     switch (action) {
       case 'share':
-        shareProfile(p);
+        shareProfile(context, p);
       case 'report':
         await _reportUser();
       case 'block':
@@ -342,12 +321,10 @@ class _ProfileViewState extends State<ProfileView>
               blocked: blocked,
               onUnblock: _unblock,
               onEdit: _editProfile,
-              onShare: () => shareProfile(p),
+              onShare: () => shareProfile(context, p),
               onDashboard: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const DashboardScreen()),
               ),
-              onAddPhoto: _changePhoto,
-              onCoverTap: widget.isMe ? _changeCover : null,
               onNewStory: () => startCompose(context, ComposeMode.story),
               onPostsTap: () => _tabs.animateTo(0),
               onFollowersTap: hidden ? null : () => _openList(true),
@@ -539,8 +516,6 @@ class _Header extends StatelessWidget {
     required this.onEdit,
     required this.onShare,
     required this.onDashboard,
-    required this.onAddPhoto,
-    required this.onCoverTap,
     required this.onNewStory,
     required this.onPostsTap,
     required this.onFollowersTap,
@@ -557,14 +532,12 @@ class _Header extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onShare;
   final VoidCallback onDashboard;
-  final VoidCallback onAddPhoto;
-  final VoidCallback? onCoverTap;
   final VoidCallback onNewStory;
   final VoidCallback onPostsTap;
   final VoidCallback? onFollowersTap;
   final VoidCallback? onFollowingTap;
 
-  static const double _coverHeight = 140;
+  /// Banner height: width / [kBannerAspect] (at least 140).
   static const double _avatarSize = 80;
 
   Widget _circleButton(IconData icon, String tip, VoidCallback onTap) {
@@ -585,12 +558,18 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     final topPad = MediaQuery.of(context).padding.top;
     final p = profile;
+    // the banner keeps its shape (5:2) on every phone
+    final coverHeight =
+        ((MediaQuery.of(context).size.width - 24) / kBannerAspect).clamp(
+          140.0,
+          260.0,
+        );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          height: _coverHeight + topPad + _avatarSize * 0.45,
+          height: coverHeight + topPad + _avatarSize * 0.45,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -598,9 +577,9 @@ class _Header extends StatelessWidget {
                 left: 12,
                 right: 12,
                 top: 0,
-                height: _coverHeight + topPad,
-                child: GestureDetector(
-                  onTap: onCoverTap,
+                height: coverHeight + topPad,
+                // photo + banner change only in Edit profile (v0.7)
+                child: IgnorePointer(
                   child: ClipRRect(
                     borderRadius: const BorderRadius.vertical(
                       bottom: Radius.circular(26),
@@ -650,16 +629,14 @@ class _Header extends StatelessWidget {
                     color: AppColors.background,
                     shape: BoxShape.circle,
                   ),
-                  child: GestureDetector(
-                    onTap: isMe ? onAddPhoto : null,
-                    child: Avatar(
-                      url: p.photoUrl,
-                      name: p.displayName,
-                      size: _avatarSize,
-                      uid: p.uid,
-                      showPlus: isMe,
-                      onPlusTap: onAddPhoto,
-                    ),
+                  // tap the + = new moment (photo changes in Edit profile)
+                  child: Avatar(
+                    url: p.photoUrl,
+                    name: p.displayName,
+                    size: _avatarSize,
+                    uid: p.uid,
+                    showPlus: isMe,
+                    onPlusTap: isMe ? onNewStory : null,
                   ),
                 ),
               ),
@@ -709,18 +686,15 @@ class _Header extends StatelessWidget {
                   style: const TextStyle(fontSize: 14.5, height: 1.35),
                 ),
               ],
-              if (p.website.isNotEmpty) ...[
+              if (p.allLinks.isNotEmpty) ...[
                 const SizedBox(height: 10),
-                _LinkChip(
-                  label: p.website,
-                  onTap: () async {
-                    await Clipboard.setData(ClipboardData(text: p.website));
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Link copied')),
-                      );
-                    }
-                  },
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final (i, l) in p.allLinks.indexed)
+                      _LinkChip(key: ValueKey('profile-link-$i'), link: l),
+                  ],
                 ),
               ],
               const SizedBox(height: 14),
@@ -955,23 +929,44 @@ class _HiddenNotice extends StatelessWidget {
   }
 }
 
+/// A profile link: tap = open it, long press = copy.
 class _LinkChip extends StatelessWidget {
-  const _LinkChip({required this.label, required this.onTap});
+  const _LinkChip({super.key, required this.link});
 
-  final String label;
-  final VoidCallback onTap;
+  final ProfileLink link;
+
+  Future<void> _open(BuildContext context) async {
+    final uri = Uri.tryParse(link.url);
+    final ok =
+        uri != null &&
+        await launchUrl(
+          uri,
+          mode: LaunchMode.externalApplication,
+        ).catchError((Object _) => false);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Couldn't open this link")));
+    }
+  }
+
+  Future<void> _copy(BuildContext context) async {
+    await Clipboard.setData(ClipboardData(text: link.url));
+    if (context.mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Link copied')));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final display = label
-        .replaceFirst(RegExp(r'^https?://'), '')
-        .replaceFirst(RegExp(r'/$'), '');
     return Material(
       color: AppColors.surface,
       shape: const StadiumBorder(side: BorderSide(color: AppColors.border)),
       child: InkWell(
         customBorder: const StadiumBorder(),
-        onTap: onTap,
+        onTap: () => _open(context),
+        onLongPress: () => _copy(context),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Row(
@@ -980,9 +975,9 @@ class _LinkChip extends StatelessWidget {
               const Icon(Icons.link, color: AppColors.lime, size: 17),
               const SizedBox(width: 6),
               ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 240),
+                constraints: const BoxConstraints(maxWidth: 220),
                 child: Text(
-                  display,
+                  link.label,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 13.5,

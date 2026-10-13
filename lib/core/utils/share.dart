@@ -3,6 +3,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../features/chats/presentation/share_sheet.dart';
 import '../../features/post/data/post_repository.dart';
+import '../../features/profile/presentation/share_profile_sheet.dart';
 import '../../shared/models/post.dart';
 import '../../shared/models/user_profile.dart';
 
@@ -31,12 +32,6 @@ Future<void> shareToOtherApps(Post post) async {
   }
 }
 
-Future<void> shareProfile(UserProfile user) {
-  return SharePlus.instance.share(
-    ShareParams(
-      text:
-          'Follow @${user.username} on InstantGram 📸'
-          '${user.website.isNotEmpty ? '\n${user.website}' : ''}',
-    ),
-  );
-}
+/// Share profile sheet: QR code, copy link, share, save QR, scan (v0.7).
+Future<void> shareProfile(BuildContext context, UserProfile user) =>
+    showShareProfileSheet(context, user);

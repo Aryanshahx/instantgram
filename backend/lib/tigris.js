@@ -1,6 +1,14 @@
 // Tigris (S3-compatible) storage helpers.
 import { randomUUID } from 'node:crypto';
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
+  DeleteObjectCommand,
+  PutObjectCommand,
+  S3Client,
+  UploadPartCommand,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env, HttpError, requireEnv } from './http.js';
 
@@ -11,7 +19,7 @@ export const KINDS = ['post', 'clip', 'story', 'avatar', 'cover', 'thumb', 'audi
 
 const MB = 1024 * 1024;
 export const MAX_IMAGE = 15 * MB;
-export const MAX_VIDEO = 150 * MB;
+export const MAX_VIDEO = 500 * MB;
 export const MAX_AUDIO = 20 * MB;
 
 const TYPES = {
@@ -58,8 +66,8 @@ export function publicUrl(key) {
   return `https://${requireEnv('TIGRIS_BUCKET')}.t3.tigrisfiles.io/${key}`;
 }
 
-/** Validates the request and returns a presigned PUT url. */
-export async function createUpload({ uid, kind, contentType, size }) {
+/** Checks kind / type / size. Returns { ext, n } or throws HttpError. */
+function checkUpload({ kind, contentType, size }) {
   if (!KINDS.includes(kind)) throw new HttpError(400, 'Bad upload kind');
   const ext = TYPES[contentType];
   if (!ext) throw new HttpError(400, `File type not allowed: ${contentType}`);
@@ -75,8 +83,17 @@ export async function createUpload({ uid, kind, contentType, size }) {
   if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'Bad file size');
   const max = isAudio ? MAX_AUDIO : isVideo ? MAX_VIDEO : MAX_IMAGE;
   if (n > max) throw new HttpError(413, `File too big (max ${max / MB} MB)`);
+  return { ext, n };
+}
 
-  const key = `${kind}/${uid}/${Date.now()}-${randomUUID()}.${ext}`;
+function newKey(kind, uid, ext) {
+  return `${kind}/${uid}/${Date.now()}-${randomUUID()}.${ext}`;
+}
+
+/** Validates the request and returns a presigned PUT url. */
+export async function createUpload({ uid, kind, contentType, size }) {
+  const { ext, n } = checkUpload({ kind, contentType, size });
+  const key = newKey(kind, uid, ext);
   const command = new PutObjectCommand({
     Bucket: requireEnv('TIGRIS_BUCKET'),
     Key: key,
@@ -108,4 +125,66 @@ export async function deleteOwned({ uid, key }) {
   if (!owned) throw new HttpError(403, 'Not your file');
   await s3().send(new DeleteObjectCommand({ Bucket: requireEnv('TIGRIS_BUCKET'), Key: key }));
   return { deleted: true };
+}
+
+// ---------------- multipart (big videos, parts in parallel) ----------------
+
+const MIN_PART = 5 * MB;
+const MAX_PARTS = 1000;
+
+/** Your own key only: "<kind>/<uid>/..." */
+function ownKey(uid, key) {
+  if (typeof key !== 'string' || key.includes('..')) throw new HttpError(400, 'Bad key');
+  if (!KINDS.some((k) => key.startsWith(`${k}/${uid}/`))) throw new HttpError(403, 'Not your file');
+  return key;
+}
+
+/** Starts a multipart upload and signs one PUT url per part. */
+export async function createMultipart({ uid, kind, contentType, size, partSize }) {
+  const { ext, n } = checkUpload({ kind, contentType, size });
+  const ps = Math.max(MIN_PART, Number(partSize) || 8 * MB);
+  const count = Math.ceil(n / ps);
+  if (count < 1 || count > MAX_PARTS) throw new HttpError(400, 'Bad part size');
+  const Bucket = requireEnv('TIGRIS_BUCKET');
+  const key = newKey(kind, uid, ext);
+  const created = await s3().send(new CreateMultipartUploadCommand({
+    Bucket, Key: key, ContentType: contentType, CacheControl: CACHE_CONTROL,
+  }));
+  const uploadId = created.UploadId;
+  const partUrls = await Promise.all(
+    Array.from({ length: count }, (_, i) => getSignedUrl(
+      s3(),
+      new UploadPartCommand({ Bucket, Key: key, UploadId: uploadId, PartNumber: i + 1 }),
+      { expiresIn: 3600 },
+    )),
+  );
+  return { key, uploadId, publicUrl: publicUrl(key), partSize: ps, partUrls };
+}
+
+export async function completeMultipart({ uid, key, uploadId, parts }) {
+  ownKey(uid, key);
+  if (typeof uploadId !== 'string' || !uploadId) throw new HttpError(400, 'Bad upload id');
+  if (!Array.isArray(parts) || parts.length < 1 || parts.length > MAX_PARTS) {
+    throw new HttpError(400, 'Bad parts');
+  }
+  const Parts = parts.map((p, i) => {
+    const PartNumber = Number(p && p.PartNumber);
+    const ETag = String((p && p.ETag) || '');
+    if (PartNumber !== i + 1 || !ETag) throw new HttpError(400, 'Bad parts');
+    return { PartNumber, ETag };
+  });
+  await s3().send(new CompleteMultipartUploadCommand({
+    Bucket: requireEnv('TIGRIS_BUCKET'), Key: key, UploadId: uploadId,
+    MultipartUpload: { Parts },
+  }));
+  return { done: true, publicUrl: publicUrl(key), key };
+}
+
+export async function abortMultipart({ uid, key, uploadId }) {
+  ownKey(uid, key);
+  if (typeof uploadId !== 'string' || !uploadId) throw new HttpError(400, 'Bad upload id');
+  await s3().send(new AbortMultipartUploadCommand({
+    Bucket: requireEnv('TIGRIS_BUCKET'), Key: key, UploadId: uploadId,
+  }));
+  return { aborted: true };
 }

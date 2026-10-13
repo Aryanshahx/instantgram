@@ -3,13 +3,13 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:image_picker_android/image_picker_android.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 
 import '../theme/app_colors.dart';
 import 'api_client.dart';
+import 'uploader.dart';
 
 /// What the file is used for (decides the folder in Tigris + size limits).
 enum MediaKind { post, clip, story, avatar, cover, thumb, audio }
@@ -325,7 +325,8 @@ class MediaService {
     return x == null ? null : File(x.path);
   }
 
-  /// 1) ask the backend for a presigned URL  2) PUT the file to Tigris.
+  /// Uploads a file to Tigris (fast + real progress, v0.7):
+  /// small files = one direct PUT, big files = parts in parallel.
   Future<UploadedMedia> upload(
     File file, {
     required MediaKind kind,
@@ -333,41 +334,115 @@ class MediaService {
   }) async {
     final contentType = contentTypeFor(file.path);
     final size = await file.length();
+    onProgress?.call(0);
+    var sent = 0;
+    void onBytes(int n) {
+      sent += n;
+      if (size > 0) onProgress?.call((sent / size).clamp(0.0, 0.995));
+    }
 
-    final sign = await ApiClient.instance.post('/api/upload-url', {
+    UploadedMedia? done;
+    if (size >= Uploader.multipartFrom && _multipartWorks) {
+      try {
+        done = await _uploadParts(file, kind, contentType, size, onBytes);
+      } on ApiException catch (e) {
+        // old server without /api/multipart -> normal upload
+        if (e.statusCode != 404) rethrow;
+        _multipartWorks = false;
+        sent = 0;
+      }
+    }
+    final UploadedMedia result =
+        done ??
+        await Uploader.retry<UploadedMedia>((_) async {
+          final sign = await ApiClient.instance.post('/api/upload-url', {
+            'kind': kind.name,
+            'contentType': contentType,
+            'size': size,
+          });
+          await Uploader.put(
+            Uri.parse(sign['uploadUrl'] as String),
+            file,
+            headers: Map<String, String>.from(
+              (sign['headers'] as Map?) ?? {'Content-Type': contentType},
+            ),
+            end: size,
+            onBytes: onBytes,
+            errorText: _storageError,
+          );
+          return UploadedMedia(
+            url: sign['publicUrl'] as String,
+            key: sign['key'] as String,
+          );
+        });
+    onProgress?.call(1);
+    return result;
+  }
+
+  /// False after the server said it has no multipart upload (old backend).
+  static bool _multipartWorks = true;
+
+  /// Big file: 8 MB parts, 4 at a time, each part retried on errors.
+  Future<UploadedMedia> _uploadParts(
+    File file,
+    MediaKind kind,
+    String contentType,
+    int size,
+    void Function(int) onBytes,
+  ) async {
+    final parts = Uploader.planParts(size);
+    final start = await ApiClient.instance.post('/api/multipart', {
+      'action': 'create',
       'kind': kind.name,
       'contentType': contentType,
       'size': size,
+      'partSize': Uploader.partSize,
+      'parts': parts.length,
     });
-
-    final uploadUrl = sign['uploadUrl'] as String;
-    final headers = Map<String, String>.from(
-      (sign['headers'] as Map?) ?? {'Content-Type': contentType},
-    );
-
-    final request = http.StreamedRequest('PUT', Uri.parse(uploadUrl))
-      ..headers.addAll(headers)
-      ..contentLength = size;
-
-    final responseFuture = request.send();
-    var sent = 0;
-    onProgress?.call(0);
-    await for (final chunk in file.openRead()) {
-      request.sink.add(chunk);
-      sent += chunk.length;
-      onProgress?.call(size == 0 ? 1 : sent / size);
+    final key = start['key'] as String;
+    final uploadId = start['uploadId'] as String;
+    final urls = (start['partUrls'] as List).cast<String>();
+    if (urls.length != parts.length) {
+      throw const ApiException('Upload failed: server gave wrong parts');
     }
-    await request.sink.close();
-
-    final response = await responseFuture.timeout(const Duration(minutes: 10));
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      final body = await response.stream.bytesToString();
-      throw ApiException(_storageError(response.statusCode, body));
+    try {
+      final etags = await Uploader.pool<String>(Uploader.parallelParts, [
+        for (var i = 0; i < parts.length; i++)
+          () => Uploader.retry(
+            (_) => Uploader.put(
+              Uri.parse(urls[i]),
+              file,
+              start: parts[i].$1,
+              end: parts[i].$2,
+              onBytes: onBytes,
+              errorText: _storageError,
+            ),
+          ),
+      ]);
+      await Uploader.retry(
+        (_) => ApiClient.instance.post('/api/multipart', {
+          'action': 'complete',
+          'key': key,
+          'uploadId': uploadId,
+          'parts': [
+            for (var i = 0; i < etags.length; i++)
+              {'PartNumber': i + 1, 'ETag': etags[i]},
+          ],
+        }),
+      );
+      return UploadedMedia(url: start['publicUrl'] as String, key: key);
+    } catch (e) {
+      unawaited(
+        ApiClient.instance
+            .post('/api/multipart', {
+              'action': 'abort',
+              'key': key,
+              'uploadId': uploadId,
+            })
+            .then<void>((_) {}, onError: (Object _) {}),
+      );
+      rethrow;
     }
-    return UploadedMedia(
-      url: sign['publicUrl'] as String,
-      key: sign['key'] as String,
-    );
   }
 
   /// Turns a Tigris XML error into a short, readable message.

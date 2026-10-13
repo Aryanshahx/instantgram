@@ -8,6 +8,7 @@ import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
 import '../../../core/services/media_prefetch.dart';
 import '../../../core/services/music_player.dart';
+import '../../../core/services/net_quality.dart';
 import '../../../core/services/system_volume.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/errors.dart';
@@ -20,6 +21,7 @@ import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/media_view.dart';
 import '../../../shared/widgets/net_image.dart';
+import '../../../shared/widgets/seek_bar.dart';
 import '../../post/data/post_repository.dart';
 import '../data/clips_warmup.dart';
 import '../../post/presentation/comments_sheet.dart';
@@ -341,6 +343,11 @@ class _ClipPlayerState extends State<ClipPlayer>
   bool _detailsOpen = false;
   Timer? _photoTimer;
 
+  // adaptive quality (small copy while the network is slow)
+  bool _usingLow = false;
+  StallWatch? _stall;
+  Timer? _startTimer;
+
   // watch time of the current video (for the author's Analytics)
   int _maxWatch = 0;
   bool _completed = false;
@@ -392,30 +399,28 @@ class _ClipPlayerState extends State<ClipPlayer>
       return;
     }
     if (kDisableVideoPlayback) return;
+    // full quality, unless videos were buffering a moment ago
+    _usingLow = NetQuality.slow && _cur.lowUrl.isNotEmpty;
+    final url = _usingLow ? _cur.lowUrl : _cur.url;
     // ready player from the prefetch pool = instant start
     final pooled = VideoPool.instance.take(
-      _cur.url,
+      url,
       mixWithOthers: widget.clip.hasMusic,
     );
-    final c =
-        pooled?.controller ??
-        VideoPlayerController.networkUrl(
-          Uri.parse(_cur.url),
-          videoPlayerOptions: VideoPlayerOptions(
-            mixWithOthers: widget.clip.hasMusic,
-          ),
-        );
+    final c = pooled?.controller ?? _newCtrl(url);
     _ctrl = c;
     c.setLooping(!_manualLoop);
     c.addListener(_onTick);
+    _watchStall(c);
+    // first frame takes too long -> try the small copy
+    _startTimer?.cancel();
+    _startTimer = Timer(NetQuality.startTimeout, () {
+      if (mounted && _ctrl == c && !_ready && widget.active) _switchToLow();
+    });
     (pooled?.ready ?? c.initialize())
         .then((_) async {
           if (!mounted || _ctrl != c) return;
-          final total = c.value.duration.inMilliseconds;
-          _startMs = _edits.trimStartMs.clamp(0, total);
-          _endMs = _edits.trimEndMs > _startMs
-              ? _edits.trimEndMs.clamp(0, total)
-              : 0;
+          _applyTrim(c);
           if (_startMs > 0) await c.seekTo(Duration(milliseconds: _startMs));
           if (!mounted || _ctrl != c) return;
           setState(() => _ready = true);
@@ -423,13 +428,91 @@ class _ClipPlayerState extends State<ClipPlayer>
           if (widget.active) _play();
         })
         .catchError((Object _) {
-          if (mounted && _ctrl == c) setState(() => _failed = true);
+          if (!mounted || _ctrl != c) return;
+          if (!_usingLow && _cur.lowUrl.isNotEmpty) {
+            _switchToLow();
+          } else {
+            setState(() => _failed = true);
+          }
         });
+  }
+
+  VideoPlayerController _newCtrl(String url) =>
+      VideoPlayerController.networkUrl(
+        Uri.parse(url),
+        videoPlayerOptions: VideoPlayerOptions(
+          mixWithOthers: widget.clip.hasMusic,
+        ),
+      );
+
+  void _applyTrim(VideoPlayerController c) {
+    final total = c.value.duration.inMilliseconds;
+    _startMs = _edits.trimStartMs.clamp(0, total);
+    _endMs = _edits.trimEndMs > _startMs ? _edits.trimEndMs.clamp(0, total) : 0;
+  }
+
+  void _watchStall(VideoPlayerController c) {
+    _stall?.dispose();
+    _stall = null;
+    if (_usingLow || _cur.lowUrl.isEmpty) return;
+    _stall = StallWatch(c, onStall: _switchToLow);
+  }
+
+  /// Buffering: continue with the smaller copy at the same moment.
+  Future<void> _switchToLow() async {
+    final old = _ctrl;
+    final item = _item;
+    final low = _cur.lowUrl;
+    if (old == null || _usingLow || low.isEmpty) return;
+    _usingLow = true;
+    NetQuality.markSlow();
+    _stall?.dispose();
+    _stall = null;
+    final c = _newCtrl(low);
+    try {
+      await c.initialize();
+    } catch (_) {
+      c.dispose();
+      return;
+    }
+    if (!mounted || _ctrl != old || _item != item) {
+      c.dispose();
+      return;
+    }
+    final wasReady = _ready;
+    final playing = !wasReady || old.value.isPlaying;
+    final pos = wasReady ? old.value.position : Duration.zero;
+    _applyTrim(c);
+    await c.setLooping(!_manualLoop);
+    final at = pos.inMilliseconds > _startMs
+        ? pos
+        : Duration(milliseconds: _startMs);
+    if (at > Duration.zero) await c.seekTo(at);
+    if (!mounted || _ctrl != old) {
+      c.dispose();
+      return;
+    }
+    await c.setVolume(_effectiveVolume);
+    old.removeListener(_onTick);
+    c.addListener(_onTick);
+    setState(() {
+      _ctrl = c;
+      _ready = true;
+      _failed = false;
+    });
+    if (widget.active && playing) {
+      _play();
+      if (_fast) c.setPlaybackSpeed(2);
+    }
+    old.dispose();
   }
 
   /// Frees the current video player (and reports watch time).
   void _closeItem() {
     _photoTimer?.cancel();
+    _startTimer?.cancel();
+    _stall?.dispose();
+    _stall = null;
     final c = _ctrl;
     _ctrl = null;
     if (c != null) {
@@ -683,20 +766,24 @@ class _ClipPlayerState extends State<ClipPlayer>
               open: _detailsOpen,
               onTap: () => setState(() => _detailsOpen = !_detailsOpen),
             ),
+            // smooth bar: drag or tap to jump in the video
             SizedBox(
-              height: 3,
+              height: 18,
               child: _ready && _ctrl != null
-                  ? VideoProgressIndicator(
-                      _ctrl!,
-                      allowScrubbing: true,
-                      padding: EdgeInsets.zero,
-                      colors: const VideoProgressColors(
-                        playedColor: AppColors.lime,
-                        bufferedColor: Color(0xFF6B6E75),
-                        backgroundColor: Color(0xFF3A3D44),
-                      ),
+                  ? SmoothSeekBar(
+                      key: ValueKey(_ctrl),
+                      controller: _ctrl!,
+                      startMs: _startMs,
+                      endMs: _endMs,
                     )
-                  : const ColoredBox(color: Color(0xFF3A3D44)),
+                  : const Align(
+                      alignment: Alignment.bottomCenter,
+                      child: SizedBox(
+                        height: 3,
+                        width: double.infinity,
+                        child: ColoredBox(color: Color(0xFF3A3D44)),
+                      ),
+                    ),
             ),
           ],
         );
@@ -808,7 +895,12 @@ class _ClipPlayerState extends State<ClipPlayer>
                       child: Center(child: _SpeedPill()),
                     ),
                   if (_volumeMode)
-                    Center(child: _VolumeHud(value: widget.volume)),
+                    Positioned(
+                      // top-right, no background (v0.7)
+                      right: 14,
+                      top: MediaQuery.of(context).padding.top + 64,
+                      child: _VolumeHud(value: widget.volume),
+                    ),
                   Center(child: _HeartBurst(animation: _heart)),
                 ],
               ),
@@ -1181,13 +1273,10 @@ class _VolumeHud extends StatelessWidget {
         : value < 0.5
         ? Icons.volume_down
         : Icons.volume_up;
-    return Container(
-      width: 64,
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(20),
-      ),
+    const shadow = [Shadow(color: Colors.black54, blurRadius: 6)];
+    return SizedBox(
+      key: const ValueKey('volume-hud'),
+      width: 48,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1213,11 +1302,15 @@ class _VolumeHud extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          Icon(icon, size: 20),
+          Icon(icon, size: 20, shadows: shadow),
           const SizedBox(height: 2),
           Text(
             '${(value * 100).round()}%',
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              shadows: shadow,
+            ),
           ),
         ],
       ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -6,7 +7,9 @@ import 'package:flutter/foundation.dart';
 
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
+import '../../../core/services/low_copy.dart';
 import '../../../core/services/media_service.dart';
+import '../../../core/services/uploader.dart';
 import '../../../core/utils/merge_streams.dart';
 import '../../../shared/models/post.dart';
 import '../../notifications/data/notification_repository.dart';
@@ -95,7 +98,14 @@ class PostRepository {
     }
     final me = await UserRepository.instance.me();
 
-    // ---- upload everything (progress by file size)
+    // ---- small copies of videos (played only when the network is slow)
+    // made on the phone WHILE the full files upload
+    final lowFutures = <int, Future<File?>>{
+      for (var k = 0; k < items.length; k++)
+        if (items[k].isVideo) k: LowCopy.make(items[k].file),
+    };
+
+    // ---- upload everything (progress by file size, 2 files at a time)
     final jobs = <(File, MediaKind)>[];
     for (final it in items) {
       // the folder only depends on the file type, so this also works
@@ -110,39 +120,80 @@ class PostRepository {
     for (final j in jobs) {
       sizes.add(await j.$1.length().catchError((Object _) => 1));
     }
-    final total = sizes.fold<int>(0, (a, b) => a + b).clamp(1, 1 << 62);
-    var done = 0;
-    final uploaded = <UploadedMedia?>[];
-    for (var i = 0; i < jobs.length; i++) {
-      final (file, kind) = jobs[i];
-      final base = done;
-      final optional = kind == MediaKind.thumb;
-      try {
-        uploaded.add(
-          await MediaService.instance.upload(
-            file,
-            kind: kind,
-            onProgress: (v) =>
-                onProgress?.call((base + sizes[i] * v) / total * 0.97),
-          ),
-        );
-      } catch (e) {
-        if (!optional) {
-          if (kind == MediaKind.audio) {
-            throw StateError('Could not upload the music ($e)');
-          }
-          rethrow;
-        }
-        uploaded.add(null); // a cover is optional
+    // low copies are ~1/5 of a video: count them in the progress too
+    var lowGuess = 0;
+    for (final k in lowFutures.keys) {
+      lowGuess +=
+          (await items[k].file.length().catchError((Object _) => 0)) ~/ 5;
+    }
+    final total = (sizes.fold<int>(0, (a, b) => a + b) + lowGuess).clamp(
+      1,
+      1 << 62,
+    );
+    final progress = List<double>.filled(jobs.length, 0);
+    var lowDone = 0.0;
+    void report() {
+      var bytes = lowDone;
+      for (var i = 0; i < jobs.length; i++) {
+        bytes += sizes[i] * progress[i];
       }
-      done += sizes[i];
+      onProgress?.call((bytes / total * 0.97).clamp(0.0, 0.97));
+    }
+
+    final uploaded = await Uploader.pool<UploadedMedia?>(2, [
+      for (var i = 0; i < jobs.length; i++)
+        () async {
+          final (file, kind) = jobs[i];
+          try {
+            return await MediaService.instance.upload(
+              file,
+              kind: kind,
+              onProgress: (v) {
+                progress[i] = v;
+                report();
+              },
+            );
+          } catch (e) {
+            if (kind == MediaKind.thumb) return null; // a cover is optional
+            if (kind == MediaKind.audio) {
+              throw StateError('Could not upload the music ($e)');
+            }
+            rethrow;
+          }
+        },
+    ]);
+
+    // ---- upload the small copies (optional: a failure is ignored)
+    final lows = <int, UploadedMedia>{};
+    for (final e in lowFutures.entries) {
+      final f = await e.value;
+      if (f == null) continue;
+      try {
+        final guess = (await items[e.key].file.length()) ~/ 5;
+        final base = lowDone;
+        lows[e.key] = await MediaService.instance.upload(
+          f,
+          kind: MediaKind.clip,
+          onProgress: (v) {
+            lowDone = base + guess * v;
+            report();
+          },
+        );
+        lowDone = base + guess;
+      } catch (err) {
+        debugPrint('low copy upload: $err');
+      } finally {
+        unawaited(f.delete().then((_) {}, onError: (Object _) {}));
+      }
     }
 
     // ---- build the media list
     var u = 0;
     final media = <MediaItem>[];
-    for (final it in items) {
+    for (var k = 0; k < items.length; k++) {
+      final it = items[k];
       final main = uploaded[u++]!;
+      final low = lows[k];
       UploadedMedia? thumb;
       if (it.isVideo && it.thumb != null) thumb = uploaded[u++];
       media.add(
@@ -155,6 +206,8 @@ class PostRepository {
           thumbKey: thumb?.key ?? '',
           durationMs: it.isVideo ? it.durationMs : 0,
           edits: it.isVideo ? it.edits : const VideoEdits(),
+          lowUrl: low?.url ?? '',
+          lowKey: low?.key ?? '',
         ),
       );
     }

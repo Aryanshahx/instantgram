@@ -3,9 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/errors.dart';
-import '../../../core/utils/share.dart';
 import '../../../shared/models/post.dart';
-import '../../../shared/navigation.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
 import '../data/post_repository.dart';
@@ -95,23 +93,6 @@ Future<void> showPostMenu(
                 onTap: () {
                   Navigator.pop(ctx);
                   showPostOptionsSheet(context, post);
-                },
-              ),
-            ListTile(
-              leading: const Icon(Icons.ios_share),
-              title: const Text('Share'),
-              onTap: () {
-                Navigator.pop(ctx);
-                sharePost(context, post);
-              },
-            ),
-            if (!mine)
-              ListTile(
-                leading: const Icon(Icons.person_outline),
-                title: Text('View @${post.authorUsername}'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  openProfile(context, post.authorId);
                 },
               ),
             if (!mine)

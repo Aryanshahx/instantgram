@@ -3,6 +3,7 @@ import 'dart:async';
 import '../../../core/services/media_prefetch.dart';
 import '../../../shared/models/post.dart';
 import '../../post/data/post_repository.dart';
+import '../../../core/services/net_quality.dart';
 
 /// Keeps the Clips list loaded in the background from app start and gets
 /// the first clip ready, so the Clips tab opens and plays instantly.
@@ -36,7 +37,7 @@ class ClipsWarmup {
     }
     if (first.items.isNotEmpty && first.items.first.isVideo) {
       VideoPool.instance.prefetch(
-        first.items.first.url,
+        NetQuality.urlFor(first.items.first),
         mixWithOthers: first.hasMusic,
       );
     }

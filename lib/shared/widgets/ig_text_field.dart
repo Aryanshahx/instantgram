@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/theme/app_colors.dart';
 
@@ -22,6 +23,9 @@ class IgTextField extends StatefulWidget {
     this.readOnly = false,
     this.onTap,
     this.trailing,
+    this.inputFormatters,
+    this.maxLength,
+    this.fieldKey,
   });
 
   final String hint;
@@ -44,6 +48,13 @@ class IgTextField extends StatefulWidget {
 
   /// Icon on the right (ignored for password fields).
   final IconData? trailing;
+
+  /// e.g. lower case only (usernames).
+  final List<TextInputFormatter>? inputFormatters;
+  final int? maxLength;
+
+  /// Key of the inner text field (tests).
+  final Key? fieldKey;
 
   @override
   State<IgTextField> createState() => _IgTextFieldState();
@@ -68,7 +79,10 @@ class _IgTextFieldState extends State<IgTextField> {
         ? (compact ? 12.0 : 18.0)
         : (widget.height - fontSize * 1.4) / 2;
     return TextFormField(
+      key: widget.fieldKey,
       controller: widget.controller,
+      inputFormatters: widget.inputFormatters,
+      maxLength: widget.maxLength,
       obscureText: widget.isPassword && _obscure,
       keyboardType: widget.keyboardType,
       textInputAction: widget.textInputAction,
@@ -85,6 +99,7 @@ class _IgTextFieldState extends State<IgTextField> {
       style: TextStyle(fontSize: fontSize, color: AppColors.textPrimary),
       decoration: InputDecoration(
         hintText: widget.hint,
+        counterText: '',
         hintStyle: TextStyle(fontSize: fontSize, color: AppColors.textHint),
         filled: true,
         fillColor: AppColors.surface.withValues(alpha: 0.85),

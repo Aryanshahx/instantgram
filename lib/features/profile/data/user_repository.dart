@@ -124,15 +124,100 @@ class UserRepository {
   Future<void> updateProfile({
     required String name,
     required String bio,
-    required String website,
+    String? website,
+    List<ProfileLink>? links,
   }) {
-    var site = website.trim();
-    if (site.isNotEmpty && !site.startsWith('http')) site = 'https://$site';
-    return _users.doc(myUid).update({
-      'name': name.trim(),
-      'bio': bio.trim(),
-      'website': site,
+    final data = <String, dynamic>{'name': name.trim(), 'bio': bio.trim()};
+    if (links != null) {
+      final clean = links
+          .where((l) => l.url.isNotEmpty)
+          .take(UserProfile.maxLinks)
+          .toList();
+      data['links'] = clean.map((l) => l.toMap()).toList();
+      // older app versions show one website: the first link
+      data['website'] = clean.isEmpty ? '' : clean.first.url;
+    } else if (website != null) {
+      var site = website.trim();
+      if (site.isNotEmpty && !site.startsWith('http')) site = 'https://$site';
+      data['website'] = site;
+    }
+    _clearMeCache();
+    return _users.doc(myUid).update(data);
+  }
+
+  /// Why [name] can't be a username ('' = fine). Lower case is expected.
+  static String usernameProblem(String name) {
+    if (name.length < 3) return 'At least 3 characters';
+    if (name.length > 30) return 'At most 30 characters';
+    if (!RegExp(r'^[a-z0-9._]+$').hasMatch(name)) {
+      return 'Only letters, numbers, . and _';
+    }
+    return '';
+  }
+
+  /// True when nobody (else) has [name].
+  Future<bool> usernameFree(String name) async {
+    final snap = await _db.collection('usernames').doc(name).get();
+    return !snap.exists || snap.data()?['uid'] == myUid;
+  }
+
+  /// Changes your username (must be unique). Frees the old one and
+  /// updates the name on your posts.
+  Future<void> changeUsername(String newName) async {
+    final name = newName.trim().toLowerCase();
+    final problem = usernameProblem(name);
+    if (problem.isNotEmpty) throw StateError(problem);
+    final uid = myUid;
+    final userRef = _users.doc(uid);
+    final newRef = _db.collection('usernames').doc(name);
+    await _db.runTransaction((tx) async {
+      final user = await tx.get(userRef);
+      final old = (user.data()?['username'] as String?) ?? '';
+      if (old == name) return;
+      final taken = await tx.get(newRef);
+      if (taken.exists && taken.data()?['uid'] != uid) {
+        throw StateError('That username is taken');
+      }
+      final oldRef = _db.collection('usernames').doc(old.isEmpty ? '-' : old);
+      final oldSnap = old.isEmpty ? null : await tx.get(oldRef);
+      final email =
+          (oldSnap?.data()?['email'] as String?) ??
+          FirebaseAuth.instance.currentUser?.email ??
+          '';
+      if (!taken.exists) tx.set(newRef, {'uid': uid, 'email': email});
+      if (oldSnap != null && oldSnap.exists && oldSnap.data()?['uid'] == uid) {
+        tx.delete(oldRef);
+      }
+      tx.update(userRef, {'username': name});
     });
+    _clearMeCache();
+    // show the new name on your posts
+    try {
+      final posts = await _db
+          .collection('posts')
+          .where('authorId', isEqualTo: uid)
+          .limit(400)
+          .get();
+      if (posts.docs.isNotEmpty) {
+        final batch = _db.batch();
+        for (final d in posts.docs) {
+          batch.update(d.reference, {'authorUsername': name});
+        }
+        await batch.commit();
+      }
+    } catch (e) {
+      debugPrint('username on posts: $e');
+    }
+  }
+
+  /// Finds a user by username (for profile links and QR codes).
+  Future<UserProfile?> userByUsername(String name) async {
+    final n = name.trim().toLowerCase().replaceFirst('@', '');
+    if (usernameProblem(n).isNotEmpty) return null;
+    final snap = await _db.collection('usernames').doc(n).get();
+    final uid = snap.data()?['uid'];
+    if (uid is! String || uid.isEmpty) return null;
+    return getUser(uid);
   }
 
   /// Upload new profile photo, update profile + your posts.

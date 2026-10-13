@@ -7,6 +7,7 @@ import 'package:visibility_detector/visibility_detector.dart';
 import '../../core/services/media_prefetch.dart';
 import '../../core/services/app_settings.dart';
 import '../../core/services/music_player.dart';
+import '../../core/services/net_quality.dart';
 import '../../core/theme/app_colors.dart';
 import '../../features/editor/filters.dart';
 import '../models/post.dart';
@@ -110,6 +111,11 @@ class _MediaVideoState extends State<MediaVideo> {
   int _maxPos = 0;
   bool _completed = false;
 
+  // adaptive quality (small copy while the network is slow)
+  bool _usingLow = false;
+  StallWatch? _stall;
+  Timer? _startTimer;
+
   VideoEdits get _edits => widget.item.edits;
 
   double get _volume => (widget.muted || _edits.muted) ? 0 : 1;
@@ -142,34 +148,48 @@ class _MediaVideoState extends State<MediaVideo> {
     if (widget.muted != old.muted) _c?.setVolume(_volume);
   }
 
+  VideoPlayerController _newCtrl(String url) =>
+      VideoPlayerController.networkUrl(
+        Uri.parse(url),
+        videoPlayerOptions: VideoPlayerOptions(
+          mixWithOthers: widget.mixWithOthers,
+        ),
+      );
+
+  void _applyTrim(VideoPlayerController c) {
+    final total = c.value.duration.inMilliseconds;
+    _startMs = _edits.trimStartMs.clamp(0, total);
+    _endMs = _edits.trimEndMs > _startMs ? _edits.trimEndMs.clamp(0, total) : 0;
+  }
+
   Future<void> _init() async {
     if (kDisableVideoPlayback || _c != null) return;
+    final item = widget.item;
+    // full quality, unless videos were buffering a moment ago
+    _usingLow = NetQuality.slow && item.lowUrl.isNotEmpty;
+    final url = _usingLow ? item.lowUrl : item.url;
     // ready player from the prefetch pool = instant start
     final pooled = VideoPool.instance.take(
-      widget.item.url,
+      url,
       mixWithOthers: widget.mixWithOthers,
     );
-    final c =
-        pooled?.controller ??
-        VideoPlayerController.networkUrl(
-          Uri.parse(widget.item.url),
-          videoPlayerOptions: VideoPlayerOptions(
-            mixWithOthers: widget.mixWithOthers,
-          ),
-        );
+    final c = pooled?.controller ?? _newCtrl(url);
     _c = c;
     _failed = false;
+    if (!_usingLow && item.lowUrl.isNotEmpty) {
+      _stall = StallWatch(c, onStall: _switchToLow);
+      _startTimer = Timer(NetQuality.startTimeout, () {
+        if (mounted && _c == c && !_ready) _switchToLow();
+      });
+    }
     try {
       await (pooled?.ready ?? c.initialize());
       if (!mounted || _c != c) {
+        if (_c != c) return; // replaced by the small copy
         c.dispose();
         return;
       }
-      final total = c.value.duration.inMilliseconds;
-      _startMs = _edits.trimStartMs.clamp(0, total);
-      _endMs = _edits.trimEndMs > _startMs
-          ? _edits.trimEndMs.clamp(0, total)
-          : 0;
+      _applyTrim(c);
       await c.setLooping(!_edits.hasTrim);
       if (_startMs > 0) await c.seekTo(Duration(milliseconds: _startMs));
       await c.setVolume(_volume);
@@ -178,8 +198,57 @@ class _MediaVideoState extends State<MediaVideo> {
       setState(() => _ready = true);
       if (widget.active) c.play();
     } catch (_) {
-      if (mounted && _c == c) setState(() => _failed = true);
+      if (!mounted || _c != c) return;
+      if (!_usingLow && widget.item.lowUrl.isNotEmpty) {
+        _switchToLow();
+      } else {
+        setState(() => _failed = true);
+      }
     }
+  }
+
+  /// Buffering: continue with the smaller copy at the same moment.
+  Future<void> _switchToLow() async {
+    final old = _c;
+    final low = widget.item.lowUrl;
+    if (old == null || _usingLow || low.isEmpty) return;
+    _usingLow = true;
+    NetQuality.markSlow();
+    _stall?.dispose();
+    _stall = null;
+    final c = _newCtrl(low);
+    try {
+      await c.initialize();
+    } catch (_) {
+      c.dispose();
+      return;
+    }
+    if (!mounted || _c != old) {
+      c.dispose();
+      return;
+    }
+    final wasReady = _ready;
+    final pos = wasReady ? old.value.position : Duration.zero;
+    _applyTrim(c);
+    await c.setLooping(!_edits.hasTrim);
+    final at = pos.inMilliseconds > _startMs
+        ? pos
+        : Duration(milliseconds: _startMs);
+    if (at > Duration.zero) await c.seekTo(at);
+    await c.setVolume(_volume);
+    if (!mounted || _c != old) {
+      c.dispose();
+      return;
+    }
+    old.removeListener(_tick);
+    c.addListener(_tick);
+    setState(() {
+      _c = c;
+      _ready = true;
+      _failed = false;
+    });
+    if (widget.active) c.play();
+    old.dispose();
   }
 
   void _tick() {
@@ -196,6 +265,9 @@ class _MediaVideoState extends State<MediaVideo> {
   }
 
   void _release() {
+    _startTimer?.cancel();
+    _stall?.dispose();
+    _stall = null;
     final c = _c;
     if (c == null) return;
     _c = null;

@@ -198,46 +198,66 @@ class _PostCardState extends State<PostCard>
               padding: const EdgeInsets.symmetric(horizontal: 6),
               child: Row(
                 children: [
-                  IconButton(
-                    onPressed: () => _setLiked(serverLiked, !liked),
-                    icon: Icon(
-                      liked ? Icons.favorite : Icons.favorite_border,
-                      color: liked ? AppColors.like : null,
-                      size: 28,
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => showComments(context, p),
-                    icon: const Icon(Icons.chat_bubble_outline, size: 26),
-                  ),
-                  StreamBuilder<bool>(
-                    stream: _repo.isReposted(p.id),
-                    builder: (context, s) {
-                      final reposted = s.data ?? false;
-                      return IconButton(
-                        onPressed: () =>
-                            _toggle(() => _repo.setReposted(p, !reposted)),
-                        icon: Icon(
-                          Icons.repeat,
-                          size: 27,
-                          color: reposted ? AppColors.lime : null,
-                        ),
-                      );
-                    },
-                  ),
-                  IconButton(
-                    onPressed: () => sharePost(context, p),
-                    icon: const Icon(Icons.send_outlined, size: 26),
-                  ),
-                  if (p.sharesCount > 0 && (!p.hideShares || mine))
-                    Text(
-                      compactCount(p.sharesCount),
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
+                  // icon + count (a count is hidden when the author
+                  // switched it off; the author still sees it)
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ActionCount(
+                            key: const ValueKey('count-like'),
+                            onTap: () => _setLiked(serverLiked, !liked),
+                            icon: Icon(
+                              liked ? Icons.favorite : Icons.favorite_border,
+                              color: liked ? AppColors.like : null,
+                              size: 27,
+                            ),
+                            count: likes,
+                            hidden: p.hideLikes && !mine,
+                          ),
+                          ActionCount(
+                            key: const ValueKey('count-comment'),
+                            onTap: () => showComments(context, p),
+                            icon: const Icon(
+                              Icons.chat_bubble_outline,
+                              size: 25,
+                            ),
+                            count: p.commentsCount,
+                            hidden: p.hideComments && !mine,
+                          ),
+                          StreamBuilder<bool>(
+                            stream: _repo.isReposted(p.id),
+                            builder: (context, s) {
+                              final reposted = s.data ?? false;
+                              return ActionCount(
+                                key: const ValueKey('count-repost'),
+                                onTap: () => _toggle(
+                                  () => _repo.setReposted(p, !reposted),
+                                ),
+                                icon: Icon(
+                                  Icons.repeat,
+                                  size: 26,
+                                  color: reposted ? AppColors.lime : null,
+                                ),
+                                count: p.repostsCount,
+                                hidden: p.hideReposts && !mine,
+                              );
+                            },
+                          ),
+                          ActionCount(
+                            key: const ValueKey('count-share'),
+                            onTap: () => sharePost(context, p),
+                            icon: const Icon(Icons.send_outlined, size: 25),
+                            count: p.sharesCount,
+                            hidden: p.hideShares && !mine,
+                          ),
+                        ],
                       ),
                     ),
-                  const Spacer(),
+                  ),
                   StreamBuilder<bool>(
                     stream: _repo.isSaved(p.id),
                     builder: (context, s) {
@@ -261,23 +281,7 @@ class _PostCardState extends State<PostCard>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (!p.hideLikes || mine)
-                    Text(
-                      '${compactCount(likes)} ${likes == 1 ? 'like' : 'likes'}'
-                      '${p.hideLikes ? ' · hidden from others' : ''}',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  if (!mine && p.repostsCount > 0 && !p.hideReposts)
-                    Text(
-                      '${compactCount(p.repostsCount)} '
-                      '${p.repostsCount == 1 ? 'repost' : 'reposts'}',
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
                   if (p.caption.isNotEmpty) ...[
-                    const SizedBox(height: 4),
                     Text.rich(
                       TextSpan(
                         children: [
@@ -304,6 +308,50 @@ class _PostCardState extends State<PostCard>
           ],
         );
       },
+    );
+  }
+}
+
+/// Action icon with its count next to it (no number when 0 or hidden).
+class ActionCount extends StatelessWidget {
+  const ActionCount({
+    super.key,
+    required this.icon,
+    required this.count,
+    required this.hidden,
+    required this.onTap,
+  });
+
+  final Widget icon;
+  final int count;
+  final bool hidden;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final show = !hidden && count > 0;
+    return InkWell(
+      onTap: onTap,
+      customBorder: const StadiumBorder(),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            icon,
+            if (show) ...[
+              const SizedBox(width: 5),
+              Text(
+                compactCount(count),
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

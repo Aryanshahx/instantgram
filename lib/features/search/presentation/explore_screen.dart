@@ -21,6 +21,8 @@ import '../../../shared/widgets/post_grid.dart';
 import '../../../shared/widgets/user_tile.dart';
 import '../../post/data/post_repository.dart';
 import '../../profile/data/user_repository.dart';
+import '../../../core/services/net_quality.dart';
+import '../../../core/theme/app_colors.dart';
 
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({super.key});
@@ -36,9 +38,7 @@ class ExploreScreen extends StatefulWidget {
 class _ExploreScreenState extends State<ExploreScreen> {
   final _searchCtrl = TextEditingController();
   // one stream for the grid AND search (clips only, never photo posts)
-  final Stream<List<Post>> _recentClips = PostRepository.instance
-      .recent(type: Post.clip, limit: 100)
-      .asBroadcastStream();
+  late Stream<List<Post>> _recentClips = _newStream();
   final ExploreAutoplay _autoplay = ExploreAutoplay();
   List<Post>? _lastClips;
   Timer? _debounce;
@@ -48,6 +48,23 @@ class _ExploreScreenState extends State<ExploreScreen> {
   bool _searching = false;
 
   bool get _isTag => _query.startsWith('#');
+
+  Stream<List<Post>> _newStream() => PostRepository.instance
+      .recent(type: Post.clip, limit: 100)
+      .asBroadcastStream();
+
+  /// Swipe down: load the newest clips again (and search again).
+  Future<void> _refresh() async {
+    final s = _newStream();
+    setState(() => _recentClips = s);
+    if (_word.isNotEmpty) _onChanged(_searchCtrl.text);
+    try {
+      await s.first.timeout(const Duration(seconds: 8));
+    } catch (_) {
+      // the grid shows the error / keeps the old clips
+    }
+  }
+
   String get _word => _query.replaceFirst('#', '').trim().toLowerCase();
 
   @override
@@ -211,13 +228,20 @@ class _ExploreScreenState extends State<ExploreScreen> {
             ];
           }
 
-          return CustomScrollView(
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            slivers: [
-              header,
-              ...body,
-              const SliverToBoxAdapter(child: SizedBox(height: 110)),
-            ],
+          return RefreshIndicator(
+            key: const ValueKey('explore-refresh'),
+            color: AppColors.lime,
+            backgroundColor: AppColors.surface,
+            onRefresh: _refresh,
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              slivers: [
+                header,
+                ...body,
+                const SliverToBoxAdapter(child: SizedBox(height: 110)),
+              ],
+            ),
           );
         },
       ),
@@ -405,7 +429,8 @@ class _TileVideoState extends State<_TileVideo> {
   Future<void> _init() async {
     if (kDisableVideoPlayback || widget.item.url.isEmpty) return;
     final c = VideoPlayerController.networkUrl(
-      Uri.parse(widget.item.url),
+      // small tiles: the small copy is enough (loads much faster)
+      Uri.parse(NetQuality.tileUrl(widget.item)),
       // muted preview must never stop other apps' music
       videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
     );

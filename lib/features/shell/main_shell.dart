@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../core/services/deep_links.dart';
 import '../../core/services/media_prefetch.dart';
+import '../profile/presentation/open_username.dart';
 import '../profile/data/famous_index.dart';
 import '../reels/data/clips_warmup.dart';
 
@@ -53,6 +55,10 @@ class _MainShellState extends State<MainShell> {
     UsageTracker.instance
       ..onLimitReached = _limitReached
       ..start();
+    // instantgram://u/<username> (shared profile links + QR codes)
+    DeepLinks.instance.start((name) {
+      if (mounted) openUsername(context, name);
+    });
   }
 
   @override
@@ -61,6 +67,7 @@ class _MainShellState extends State<MainShell> {
       ..onLimitReached = null
       ..stop();
     _life?.dispose();
+    DeepLinks.instance.stop();
     ClipsWarmup.instance.stop();
     FamousIndex.instance.stop();
     VideoPool.instance.clear();

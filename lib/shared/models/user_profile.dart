@@ -1,5 +1,55 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+/// One link on a profile (max [UserProfile.maxLinks]).
+class ProfileLink {
+  const ProfileLink({required this.title, required this.url});
+
+  final String title;
+  final String url;
+
+  static const int maxTitle = 40;
+  static const int maxUrl = 300;
+
+  /// "example.com/page" (no https://, no trailing /).
+  String get shortUrl => url
+      .replaceFirst(RegExp(r'^https?://'), '')
+      .replaceFirst(RegExp(r'^www\.'), '')
+      .replaceFirst(RegExp(r'/$'), '');
+
+  /// Title, or the address when there is no title.
+  String get label => title.trim().isEmpty ? shortUrl : title.trim();
+
+  /// Adds https:// when missing. '' when it is not a usable web address.
+  static String fixUrl(String raw) {
+    var u = raw.trim();
+    if (u.isEmpty) return '';
+    if (!RegExp(r'^https?://', caseSensitive: false).hasMatch(u)) {
+      u = 'https://$u';
+    }
+    final uri = Uri.tryParse(u);
+    if (uri == null || uri.host.isEmpty || !uri.host.contains('.')) return '';
+    if (u.length > maxUrl) return '';
+    return u;
+  }
+
+  Map<String, String> toMap() => {'title': title.trim(), 'url': url};
+
+  static ProfileLink? fromMap(Object? v) {
+    if (v is! Map) return null;
+    final url = v['url'];
+    if (url is! String || url.isEmpty) return null;
+    final t = v['title'];
+    return ProfileLink(title: t is String ? t : '', url: url);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is ProfileLink && other.title == title && other.url == url;
+
+  @override
+  int get hashCode => Object.hash(title, url);
+}
+
 class UserProfile {
   const UserProfile({
     required this.uid,
@@ -18,7 +68,10 @@ class UserProfile {
     this.language = '',
     this.isPrivate = false,
     this.country = '',
+    this.links = const [],
   });
+
+  static const int maxLinks = 3;
 
   final String uid;
   final String name;
@@ -43,6 +96,16 @@ class UserProfile {
   /// Country code chosen at sign up, e.g. 'IN' ('' = not set).
   final String country;
 
+  /// Up to 3 links with a title (v0.7).
+  final List<ProfileLink> links;
+
+  /// Links to show: [links], or the old single website.
+  List<ProfileLink> get allLinks => links.isNotEmpty
+      ? links
+      : website.isEmpty
+      ? const []
+      : [ProfileLink(title: '', url: website)];
+
   String get displayName => name.trim().isEmpty ? username : name;
 
   factory UserProfile.fromMap(String uid, Map<String, dynamic> map) {
@@ -65,6 +128,13 @@ class UserProfile {
       language: s(map['language']),
       isPrivate: map['isPrivate'] == true,
       country: s(map['country']),
+      links: map['links'] is List
+          ? (map['links'] as List)
+                .map(ProfileLink.fromMap)
+                .whereType<ProfileLink>()
+                .take(maxLinks)
+                .toList()
+          : const [],
     );
   }
 

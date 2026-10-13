@@ -90,6 +90,8 @@ class MediaItem {
     this.thumbKey = '',
     this.durationMs = 0,
     this.edits = const VideoEdits(),
+    this.lowUrl = '',
+    this.lowKey = '',
   });
 
   static const String photo = 'photo';
@@ -112,6 +114,11 @@ class MediaItem {
   /// Video trim / filter / mute.
   final VideoEdits edits;
 
+  /// Smaller copy of a video, played only when the full one buffers
+  /// ('' = none, e.g. posts from before v0.7).
+  final String lowUrl;
+  final String lowKey;
+
   /// Image to show in grids / while a video loads.
   String get coverUrl => isVideo ? thumbUrl : url;
 
@@ -124,6 +131,8 @@ class MediaItem {
     if (thumbKey.isNotEmpty) 'thumbKey': thumbKey,
     if (durationMs > 0) 'durationMs': durationMs,
     if (isVideo && edits.toMap().isNotEmpty) 'edits': edits.toMap(),
+    if (lowUrl.isNotEmpty) 'lowUrl': lowUrl,
+    if (lowKey.isNotEmpty) 'lowKey': lowKey,
   };
 
   static MediaItem? fromMap(Object? v) {
@@ -139,6 +148,8 @@ class MediaItem {
       thumbUrl: _str(v['thumbUrl']),
       thumbKey: _str(v['thumbKey']),
       durationMs: _int(v['durationMs']),
+      lowUrl: _str(v['lowUrl']),
+      lowKey: _str(v['lowKey']),
       edits: e is Map
           ? VideoEdits.fromMap(Map<String, dynamic>.from(e))
           : const VideoEdits(),
@@ -282,6 +293,7 @@ class Post {
     for (final m in media) ...[
       if (m.key.isNotEmpty) m.key,
       if (m.thumbKey.isNotEmpty) m.thumbKey,
+      if (m.lowKey.isNotEmpty) m.lowKey,
     ],
     if (thumbKey.isNotEmpty) thumbKey,
     if (audioKey.isNotEmpty) audioKey,

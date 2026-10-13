@@ -189,9 +189,9 @@ void main() {
     expect(deco('new').boxShadow, isNull);
     expect(deco('new').gradient, isNotNull);
     expect(deco('seen').boxShadow, isNull);
-    expect(deco('seen').color, kSeenRingColor);
-    // clearly lighter than the dark background
-    expect(kSeenRingColor.computeLuminance(), greaterThan(0.2));
+    // v0.7: seen = the same green ring, faded
+    expect(deco('seen').gradient, kSeenRingGradient);
+    expect(kSeenRingGradient.colors.first.a, lessThan(0.6));
   });
 
   testWidgets('moments row: only me, people I follow and famous', (

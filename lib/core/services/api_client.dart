@@ -6,8 +6,11 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 
 class ApiException implements Exception {
-  const ApiException(this.message);
+  const ApiException(this.message, {this.statusCode = 0});
   final String message;
+
+  /// HTTP status from the server (0 = no answer / not from the server).
+  final int statusCode;
 
   @override
   String toString() => message;
@@ -57,6 +60,7 @@ class ApiClient {
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw ApiException(
         (data['error'] as String?) ?? 'Server error (${res.statusCode})',
+        statusCode: res.statusCode,
       );
     }
     return data;

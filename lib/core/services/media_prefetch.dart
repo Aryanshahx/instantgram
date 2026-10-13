@@ -6,6 +6,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../shared/models/post.dart';
+import 'net_quality.dart';
 
 /// "Instant" loading, like Instagram Reels:
 ///  * photos/covers of what comes next are downloaded to the disk cache
@@ -60,7 +61,7 @@ class MediaPrefetch {
       final first = p.items.isEmpty ? null : p.items.first;
       if (first != null && first.isVideo) {
         VideoPool.instance.prefetch(
-          first.url,
+          NetQuality.urlFor(first),
           mixWithOthers: mixWithOthers?.call(p) ?? false,
         );
       }
