@@ -27,7 +27,7 @@ An Instagram-like app built with **Flutter**.
 ## New in v0.9
 - Chats: photos, GIFs, voice messages, location (opens Google Maps), reactions,
   reply (long-press or swipe right), forward, pin, delete for everyone / for you
-- Voice + video calls (ZEGOCLOUD), ringing also when the app is closed (FCM push)
+- Voice + video calls: coming soon (ZEGOCLOUD removed in v0.9.3, new call service next)
 - Clips: comments open as a panel, the clip plays small on top; drag the panel to
   full screen and the clip pauses. Paused clips stay paused (music too)
 - Reply to a comment with one of your clips / posts, or make a new one
@@ -90,13 +90,9 @@ See [`backend/README.md`](backend/README.md).
 Then set the GitHub repo variable **`API_BASE_URL`** = your Vercel URL
 (Settings → Secrets and variables → Actions → Variables), or put it in `lib/core/config/api_url.dart`.
 
-### Calls (ZEGOCLOUD)
-1. https://console.zegocloud.com → create a project (Voice & Video Call) → copy **AppID** and **AppSign**.
-2. In the project: Service Management → **In-app Chat (ZIM)** → activate.
-3. Push (rings when the app is closed): add an **FCM** push config → upload the Firebase
-   service account JSON → Resource ID `instantgram_call`, channel ID `instantgram_calls`, sound `call`.
-4. Vercel env vars: `ZEGO_APP_ID`, `ZEGO_APP_SIGN`, `ZEGO_RESOURCE_ID` (= `instantgram_call`) → redeploy.
-5. Check `https://YOUR-API.vercel.app/api/health` → `features.calls: true`.
+### Calls
+Off for now (v0.9.3). ZEGOCLOUD was removed because its Android plugins do not
+build with AGP 9 / Gradle 9. A new call service comes in the next update.
 
 ## Project structure
 ```

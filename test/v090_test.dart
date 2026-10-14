@@ -471,11 +471,11 @@ void main() {
       expect(find.byKey(const ValueKey('attach-location')), findsOneWidget);
       await t.tapAt(const Offset(10, 10));
       await t.pumpAndSettle();
-      // calls not set up -> friendly message
+      // calls are off (v0.9.3) -> friendly message
       await t.tap(find.byKey(const ValueKey('call-video')));
       await t.pump();
       await t.pump(const Duration(milliseconds: 100));
-      expect(find.textContaining('Calls are not set up'), findsOneWidget);
+      expect(find.textContaining('calls are coming soon'), findsOneWidget);
       await msgs.close();
       await _finish(t);
     });

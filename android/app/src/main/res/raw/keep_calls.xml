@@ -1,4 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- v0.9: the call sound is found by name, keep it -->
-<resources xmlns:tools="http://schemas.android.com/tools"
-    tools:keep="@raw/call" />

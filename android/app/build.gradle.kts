@@ -1,7 +1,6 @@
 plugins {
     id("com.android.application")
     // START: FlutterFire Configuration
-    id("com.google.gms.google-services")
     // END: FlutterFire Configuration
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
@@ -45,9 +44,4 @@ kotlin {
 
 flutter {
     source = "../.."
-}
-
-// v0.9: incoming calls ring when the app is closed (FCM)
-dependencies {
-    implementation("im.zego:zpns-fcm:2.8.0")
 }
