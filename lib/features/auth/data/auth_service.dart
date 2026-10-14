@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../../core/services/saved_accounts.dart';
 import '../../../shared/models/user_profile.dart';
 import '../../profile/data/user_repository.dart';
 
@@ -49,11 +51,56 @@ class AuthService {
         }
         email = data['email'] as String;
       }
-      await _auth.signInWithEmailAndPassword(email: email, password: password);
+      final cred = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      await _remember(cred.user, email, password);
     } on FirebaseAuthException catch (e) {
       throw AuthFailure(_message(e));
     } on FirebaseException catch (e) {
       throw AuthFailure(e.message ?? 'Something went wrong. Try again.');
+    }
+  }
+
+  /// v0.12: saves the login on this phone for Settings -> Accounts.
+  Future<void> _remember(User? user, String email, String password) async {
+    if (user == null) return;
+    try {
+      await SavedAccounts.instance.rememberLogin(
+        uid: user.uid,
+        email: email,
+        password: password,
+      );
+    } catch (_) {}
+  }
+
+  /// v0.12: is this email + password right? Checked on a second Firebase
+  /// app, so the account you are using now stays logged in.
+  /// null = right, else the problem to show.
+  Future<String?> checkPassword(String email, String password) async {
+    try {
+      FirebaseApp app;
+      try {
+        app = Firebase.app('acct_check');
+      } catch (_) {
+        app = await Firebase.initializeApp(
+          name: 'acct_check',
+          options: Firebase.app().options,
+        );
+      }
+      final auth = FirebaseAuth.instanceFor(app: app);
+      await auth.signInWithEmailAndPassword(email: email, password: password);
+      await auth.signOut();
+      return null;
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'network-request-failed' ||
+          e.code == 'too-many-requests') {
+        return _message(e);
+      }
+      return 'Wrong password for $email.';
+    } catch (_) {
+      return null; // could not check: try the real login
     }
   }
 
@@ -125,6 +172,7 @@ class AuthService {
       if (e is AuthFailure) rethrow;
       throw AuthFailure('Could not create your profile. ($e)');
     }
+    await _remember(user, email.trim(), password);
   }
 
   Future<void> sendPasswordReset(String email) async {

@@ -1091,6 +1091,7 @@ class _CommentTileState extends State<CommentTile> {
         widget.postId,
         widget.comment.id,
         now,
+        comment: widget.comment,
       );
     } catch (e) {
       if (mounted) {

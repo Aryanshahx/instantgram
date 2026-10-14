@@ -26,6 +26,7 @@ class IgTextField extends StatefulWidget {
     this.inputFormatters,
     this.maxLength,
     this.fieldKey,
+    this.focusNode,
   });
 
   final String hint;
@@ -56,6 +57,9 @@ class IgTextField extends StatefulWidget {
   /// Key of the inner text field (tests).
   final Key? fieldKey;
 
+  /// v0.12: e.g. jump to the password field.
+  final FocusNode? focusNode;
+
   @override
   State<IgTextField> createState() => _IgTextFieldState();
 }
@@ -80,6 +84,7 @@ class _IgTextFieldState extends State<IgTextField> {
         : (widget.height - fontSize * 1.4) / 2;
     return TextFormField(
       key: widget.fieldKey,
+      focusNode: widget.focusNode,
       controller: widget.controller,
       inputFormatters: widget.inputFormatters,
       maxLength: widget.maxLength,

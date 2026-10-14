@@ -415,7 +415,8 @@ class _ProfileViewState extends State<ProfileView>
   }
 }
 
-class _StreamGrid extends StatelessWidget {
+/// v0.12: keeps its list when you switch tabs (no reload, no listen again).
+class _StreamGrid extends StatefulWidget {
   const _StreamGrid({
     required this.stream,
     required this.emptyIcon,
@@ -431,9 +432,22 @@ class _StreamGrid extends StatelessWidget {
   final VoidCallback? onCreate;
 
   @override
+  State<_StreamGrid> createState() => _StreamGridState();
+}
+
+class _StreamGridState extends State<_StreamGrid>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
+    final emptyIcon = widget.emptyIcon;
+    final emptyTitle = widget.emptyTitle;
+    final emptySubtitle = widget.emptySubtitle;
     return StreamBuilder<List<Post>>(
-      stream: stream,
+      stream: widget.stream,
       builder: (context, snap) {
         if (snap.hasError) {
           return SingleChildScrollView(child: ErrorView(error: snap.error));
@@ -461,12 +475,17 @@ class _RepostsTab extends StatefulWidget {
   State<_RepostsTab> createState() => _RepostsTabState();
 }
 
-class _RepostsTabState extends State<_RepostsTab> {
+class _RepostsTabState extends State<_RepostsTab>
+    with AutomaticKeepAliveClientMixin {
   String _key = '';
   Future<List<Post>>? _future;
 
   @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
     return StreamBuilder<List<String>>(
       stream: widget.ids,
       builder: (context, snap) {

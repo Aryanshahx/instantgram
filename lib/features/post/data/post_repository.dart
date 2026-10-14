@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../../core/services/api_client.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
 import '../../../core/services/media_service.dart';
@@ -305,13 +306,14 @@ class PostRepository {
   Future<void> setLiked(Post post, bool like) async {
     final ref = _posts.doc(post.id);
     final batch = _db.batch();
+    var pending = const Pending.none();
     if (like) {
       final me = await UserRepository.instance.meCached();
       batch.set(ref.collection('likes').doc(_me), {
         'createdAt': FieldValue.serverTimestamp(),
       });
       batch.update(ref, {'likesCount': FieldValue.increment(1)});
-      NotificationRepository.instance.addToBatch(
+      pending = NotificationRepository.instance.addToBatch(
         batch,
         toUid: post.authorId,
         from: me,
@@ -323,6 +325,7 @@ class PostRepository {
       batch.update(ref, {'likesCount': FieldValue.increment(-1)});
     }
     await batch.commit();
+    pending.send();
   }
 
   // ---------------- Save / repost ----------------
@@ -379,13 +382,14 @@ class PostRepository {
         .collection('reposts')
         .doc(post.id);
     final batch = _db.batch();
+    var pending = const Pending.none();
     if (repost) {
       final me = await UserRepository.instance.meCached();
       batch.set(ref, {'createdAt': FieldValue.serverTimestamp()});
       batch.update(_posts.doc(post.id), {
         'repostsCount': FieldValue.increment(1),
       });
-      NotificationRepository.instance.addToBatch(
+      pending = NotificationRepository.instance.addToBatch(
         batch,
         toUid: post.authorId,
         from: me,
@@ -399,6 +403,7 @@ class PostRepository {
       });
     }
     await batch.commit();
+    pending.send();
   }
 
   // ---------------- Comments ----------------
@@ -450,19 +455,38 @@ class PostRepository {
         'repliesCount': FieldValue.increment(1),
       });
     }
-    NotificationRepository.instance.addToBatch(
-      batch,
-      toUid: post.authorId,
-      from: me,
-      type: AppNotification.comment,
-      post: post,
-      text: t.isNotEmpty
-          ? t
-          : picture != null
-          ? (picture.isGif ? 'sent a GIF' : 'sent a photo')
-          : 'answered with a ${linked!.isClip ? 'clip' : 'post'}',
-    );
+    final what = t.isNotEmpty
+        ? t
+        : picture != null
+        ? (picture.isGif ? 'sent a GIF' : 'sent a photo')
+        : 'answered with a ${linked!.isClip ? 'clip' : 'post'}';
+    // v0.12: the person you answered gets "replied to your comment"
+    // (instead of "commented" when they are also the post author)
+    final replyTo0 = replyTo?.authorId ?? '';
+    final pendings = <Pending>[
+      if (replyTo0 != post.authorId)
+        NotificationRepository.instance.addToBatch(
+          batch,
+          toUid: post.authorId,
+          from: me,
+          type: AppNotification.comment,
+          post: post,
+          text: what,
+        ),
+      if (replyTo0.isNotEmpty)
+        NotificationRepository.instance.addToBatch(
+          batch,
+          toUid: replyTo0,
+          from: me,
+          type: AppNotification.reply,
+          post: post,
+          text: what,
+        ),
+    ];
     await batch.commit();
+    for (final p in pendings) {
+      p.send();
+    }
   }
 
   /// Card fields of a post / clip linked in a comment (v0.9).
@@ -544,15 +568,19 @@ class PostRepository {
   Future<void> setCommentLiked(
     String postId,
     String commentId,
-    bool like,
-  ) async {
+    bool like, {
+    Comment? comment,
+  }) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     final c = _posts.doc(postId).collection('comments').doc(commentId);
     final likeRef = c.collection('likes').doc(uid);
+    var added = false;
     await _db.runTransaction((tx) async {
       final had = (await tx.get(likeRef)).exists;
+      added = false;
       if (had == like) return;
+      added = like;
       if (like) {
         tx.set(likeRef, {'createdAt': FieldValue.serverTimestamp()});
       } else {
@@ -560,6 +588,22 @@ class PostRepository {
       }
       tx.update(c, {'likesCount': FieldValue.increment(like ? 1 : -1)});
     });
+    // v0.12: "liked your comment" (+ phone notification)
+    final author = comment?.authorId ?? '';
+    if (added && author.isNotEmpty && author != uid) {
+      try {
+        final me = await UserRepository.instance.meCached();
+        await NotificationRepository.instance.addNow(
+          toUid: author,
+          from: me,
+          type: AppNotification.commentLike,
+          postId: postId,
+          text: comment!.text,
+        );
+      } catch (e) {
+        debugPrint('comment like notification: $e');
+      }
+    }
   }
 
   // ---------------- Views ----------------
@@ -606,8 +650,23 @@ class PostRepository {
       });
       await batch.commit();
       AppSettings.instance.markViewed(post.id);
+      unawaited(_checkMilestone(post.id));
     } catch (e) {
       debugPrint('addView failed: $e');
+    }
+  }
+
+  /// v0.12: after a new view, if the post passed 100 / 500 / 1K ... views,
+  /// our server tells the author ("Your clip reached 1,000 views").
+  Future<void> _checkMilestone(String postId) async {
+    try {
+      final d = (await _posts.doc(postId).get()).data() ?? const {};
+      final views = (d['uniqueViews'] as num?)?.toInt() ?? 0;
+      final done = (d['viewsMilestone'] as num?)?.toInt() ?? 0;
+      if (!ViewMilestones.needsCheck(views, done)) return;
+      await ApiClient.instance.post('/api/view-milestone', {'postId': postId});
+    } catch (e) {
+      debugPrint('view milestone: $e');
     }
   }
 

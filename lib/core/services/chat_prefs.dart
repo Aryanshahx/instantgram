@@ -12,6 +12,7 @@ class ChatPrefsData {
     this.mutedChats = const {},
     this.mutedCalls = const {},
     this.cleared = const {},
+    this.pushOff = const {},
   });
 
   static const empty = ChatPrefsData();
@@ -28,6 +29,11 @@ class ChatPrefsData {
   /// "Delete chat" (for you): chat id -> messages before this are hidden.
   final Map<String, DateTime> cleared;
 
+  /// v0.12: notification kinds switched off (see [PushKinds]).
+  final Set<String> pushOff;
+
+  bool pushOn(String kind) => !pushOff.contains(kind);
+
   bool isPinned(String chatId) => pinned.contains(chatId);
   bool isMuted(String chatId) => mutedChats.contains(chatId);
   bool callsMuted(String uid) => mutedCalls.contains(uid);
@@ -42,6 +48,7 @@ class ChatPrefsData {
       pinned: list(m['pinnedChats']),
       mutedChats: list(m['mutedChats']).toSet(),
       mutedCalls: list(m['mutedCalls']).toSet(),
+      pushOff: list(m['pushOff']).toSet(),
       cleared: {
         if (c is Map)
           for (final e in c.entries)
@@ -125,6 +132,13 @@ class ChatPrefs {
         : FieldValue.arrayUnion([uid]),
   });
 
+  /// v0.12: switch one kind of phone notification on / off.
+  Future<void> setPush(String kind, bool on) => _save({
+    'pushOff': on
+        ? FieldValue.arrayRemove([kind])
+        : FieldValue.arrayUnion([kind]),
+  });
+
   /// "Delete chat" for you: hides the chat and its messages until a new
   /// message comes. Also unpins it.
   Future<void> deleteChat(String chatId) => _save({
@@ -155,4 +169,28 @@ class ChatPrefs {
     });
     return visible;
   }
+}
+
+/// v0.12: kinds of activity notifications (Settings -> Notifications).
+/// Same names as CATEGORY in backend/api/activity-push.js.
+class PushKinds {
+  PushKinds._();
+  static const likes = 'likes';
+  static const comments = 'comments';
+  static const commentLikes = 'comment_likes';
+  static const follows = 'follows';
+  static const unfollows = 'unfollows';
+  static const reposts = 'reposts';
+  static const views = 'views';
+
+  /// (kind, title, subtitle) in the order shown in Settings.
+  static const all = <(String, String, String)>[
+    (likes, 'Likes', 'Someone liked your post or clip'),
+    (comments, 'Comments and replies', 'New comments and replies to you'),
+    (commentLikes, 'Comment likes', 'Someone liked your comment'),
+    (follows, 'New followers', 'Someone started following you'),
+    (unfollows, 'Unfollows', 'Someone stopped following you'),
+    (reposts, 'Reposts', 'Someone reposted your post or clip'),
+    (views, 'Views', 'Your post or clip reached 100, 1K, 10K ... views'),
+  ];
 }

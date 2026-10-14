@@ -1201,7 +1201,7 @@ class _ForwardSheetState extends State<ForwardSheet> {
 /// v0.10 message ticks (your own messages).
 enum MessageTick { none, pending, sent, delivered, seen }
 
-/// Clock / ✓ / ✓✓ / green ✓✓.
+/// Clock / ✓ / ✓✓ / blue ✓✓.
 class TickIcon extends StatelessWidget {
   const TickIcon({super.key, required this.tick, this.onDark = false});
   final MessageTick tick;
@@ -1209,16 +1209,20 @@ class TickIcon extends StatelessWidget {
   /// true = on the dark background (photos, GIFs), false = lime bubble.
   final bool onDark;
 
+  /// Colour of seen ticks (v0.12: blue).
+  static Color seenColor({required bool onDark}) =>
+      onDark ? const Color(0xFF34B7F1) : const Color(0xFF0B5FD0);
+
   @override
   Widget build(BuildContext context) {
     final grey = onDark ? AppColors.textSecondary : Colors.black54;
-    // green that shows on the lime bubble and on dark
-    final green = onDark ? const Color(0xFF3DDC84) : const Color(0xFF0A7A36);
+    // v0.12: blue (like WhatsApp), darker on the lime bubble so it shows
+    final blue = seenColor(onDark: onDark);
     final (IconData icon, Color color, String key) = switch (tick) {
       MessageTick.pending => (Icons.schedule_rounded, grey, 'tick-pending'),
       MessageTick.sent => (Icons.done_rounded, grey, 'tick-sent'),
       MessageTick.delivered => (Icons.done_all_rounded, grey, 'tick-delivered'),
-      MessageTick.seen => (Icons.done_all_rounded, green, 'tick-seen'),
+      MessageTick.seen => (Icons.done_all_rounded, blue, 'tick-seen'),
       MessageTick.none => (Icons.done_rounded, grey, 'tick-none'),
     };
     return Icon(

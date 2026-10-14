@@ -65,21 +65,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     super.dispose();
   }
 
-  String _text(AppNotification n) {
-    switch (n.type) {
-      case AppNotification.like:
-        return 'liked your post.';
-      case AppNotification.comment:
-        return 'commented: ${n.text}';
-      case AppNotification.follow:
-        return 'started following you.';
-      case AppNotification.repost:
-        return 'reposted your post.';
-      default:
-        return n.text;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -136,23 +121,26 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       openProfile(context, n.fromUid);
                     }
                   },
-                  leading: GestureDetector(
-                    onTap: () => openProfile(context, n.fromUid),
-                    child: Avatar(
-                      url: n.fromPhotoUrl,
-                      name: n.fromUsername,
-                      size: 46,
-                      uid: n.fromUid,
-                    ),
-                  ),
+                  leading: n.type == AppNotification.views
+                      ? const _ViewsBadge()
+                      : GestureDetector(
+                          onTap: () => openProfile(context, n.fromUid),
+                          child: Avatar(
+                            url: n.fromPhotoUrl,
+                            name: n.fromUsername,
+                            size: 46,
+                            uid: n.fromUid,
+                          ),
+                        ),
                   title: Text.rich(
                     TextSpan(
                       children: [
-                        TextSpan(
-                          text: '${n.fromUsername} ',
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        TextSpan(text: _text(n)),
+                        if (n.fromUsername.isNotEmpty)
+                          TextSpan(
+                            text: '${n.fromUsername} ',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        TextSpan(text: notificationText(n)),
                         TextSpan(
                           text: '  ${timeAgo(n.createdAt)}',
                           style: const TextStyle(
@@ -173,18 +161,86 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                             child: NetImage(n.postThumb),
                           ),
                         )
-                      : (n.type == AppNotification.follow
-                            ? const Icon(
-                                Icons.person_add_alt_1,
-                                color: AppColors.lime,
-                              )
-                            : null),
+                      : _typeIcon(n.type),
                 ),
               );
             },
           );
         },
       ),
+    );
+  }
+}
+
+Widget? _typeIcon(String type) => switch (type) {
+  AppNotification.follow => const Icon(
+    Icons.person_add_alt_1,
+    color: AppColors.lime,
+  ),
+  AppNotification.unfollow => const Icon(
+    Icons.person_remove_alt_1_outlined,
+    color: AppColors.textSecondary,
+  ),
+  AppNotification.commentLike => const Icon(
+    Icons.favorite,
+    color: AppColors.like,
+    size: 20,
+  ),
+  _ => null,
+};
+
+/// Text after the username (v0.12: + reply, comment like, unfollow, views).
+String notificationText(AppNotification n) {
+  switch (n.type) {
+    case AppNotification.like:
+      return 'liked your post.';
+    case AppNotification.comment:
+      return 'commented: ${n.text}';
+    case AppNotification.reply:
+      return 'replied to your comment: ${n.text}';
+    case AppNotification.commentLike:
+      return n.text.isEmpty
+          ? 'liked your comment.'
+          : 'liked your comment: ${n.text}';
+    case AppNotification.follow:
+      return 'started following you.';
+    case AppNotification.unfollow:
+      return 'unfollowed you.';
+    case AppNotification.repost:
+      return 'reposted your post.';
+    case AppNotification.views:
+      final v = int.tryParse(n.text) ?? 0;
+      return '🎉 Your post reached ${compactViews(v)} views!';
+    default:
+      return n.text;
+  }
+}
+
+/// 1000 -> 1K, 1500000 -> 1.5M.
+String compactViews(int v) {
+  String f(double x, String u) {
+    final s = x.toStringAsFixed(x >= 10 || x == x.roundToDouble() ? 0 : 1);
+    return '$s$u';
+  }
+
+  if (v >= 1000000) return f(v / 1000000, 'M');
+  if (v >= 1000) return f(v / 1000, 'K');
+  return '$v';
+}
+
+class _ViewsBadge extends StatelessWidget {
+  const _ViewsBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 46,
+      height: 46,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: AppColors.lime.withValues(alpha: 0.15),
+      ),
+      child: const Icon(Icons.bar_chart_rounded, color: AppColors.lime),
     );
   }
 }

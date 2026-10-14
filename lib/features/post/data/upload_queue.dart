@@ -44,6 +44,9 @@ class QueuedMedia {
   UploadedMedia? main;
   UploadedMedia? thumb;
   UploadedMedia? low;
+
+  /// v0.12: voice over file on the server.
+  UploadedMedia? voice;
   PartState? mainPart;
   PartState? lowPart;
   bool published = false; // moments: one doc per item
@@ -63,11 +66,18 @@ class QueuedMedia {
     'main': _media(main),
     'thumb': _media(thumb),
     'low': _media(low),
+    'voice': _media(voice),
     'mainPart': mainPart?.toJson(),
     'lowPart': lowPart?.toJson(),
     'published': published,
     'momentId': momentId,
   };
+
+  /// What goes into the post: the uploaded voice (never the phone path).
+  VideoEdits get publishEdits {
+    final v = voice;
+    return v == null ? edits.withoutVoice() : edits.withVoice(v.url, v.key);
+  }
 
   static QueuedMedia fromJson(Map<String, dynamic> m) {
     final e = m['edits'];
@@ -88,6 +98,7 @@ class QueuedMedia {
       ..main = _readMedia(m['main'])
       ..thumb = _readMedia(m['thumb'])
       ..low = _readMedia(m['low'])
+      ..voice = _readMedia(m['voice'])
       ..mainPart = PartState.fromJson(m['mainPart'])
       ..lowPart = PartState.fromJson(m['lowPart'])
       ..published = m['published'] == true
@@ -557,6 +568,24 @@ class UploadQueue extends ChangeNotifier {
         }),
       );
     }
+    // v0.12: voice overs (posts and clips)
+    if (!t.isMoment) {
+      for (final m in t.items) {
+        final vp = m.edits.voicePath;
+        if (!m.isVideo || vp.isEmpty || m.voice != null) continue;
+        if (!await File(vp).exists()) continue; // file gone: post without it
+        slots.add(
+          _Slot(await sizeOf(vp), (p) async {
+            m.voice = await MediaService.instance.upload(
+              File(vp),
+              kind: MediaKind.audio,
+              onProgress: p,
+            );
+            _save();
+          }),
+        );
+      }
+    }
     if (t.audioPath != null && t.audio == null) {
       slots.add(
         _Slot(await sizeOf(t.audioPath), (p) async {
@@ -616,7 +645,7 @@ class UploadQueue extends ChangeNotifier {
           id: m.momentId,
           media: m.main!,
           isVideo: m.isVideo,
-          edits: m.edits,
+          edits: m.edits.withoutVoice(),
           durationMs: m.durationMs,
           audience: t.options.audience,
         );
@@ -643,7 +672,7 @@ class UploadQueue extends ChangeNotifier {
               thumbUrl: m.thumb?.url ?? '',
               thumbKey: m.thumb?.key ?? '',
               durationMs: m.isVideo ? m.durationMs : 0,
-              edits: m.isVideo ? m.edits : const VideoEdits(),
+              edits: m.isVideo ? m.publishEdits : const VideoEdits(),
               lowUrl: m.low?.url ?? '',
               lowKey: m.low?.key ?? '',
             ),
@@ -707,6 +736,11 @@ class UploadQueue extends ChangeNotifier {
   /// also the files already on the server (task cancelled).
   Future<void> _cleanup(UploadTask t, {required bool deleteUploads}) async {
     for (final m in t.items) {
+      // v0.12: our recorded voice over file
+      final vp = m.edits.voicePath;
+      if (vp.isNotEmpty && vp.contains('voiceover_')) {
+        await File(vp).delete().then((_) {}, onError: (Object _) {});
+      }
       for (final p in [m.hdPath, m.lowPath]) {
         if (p == null || p == m.path) continue;
         final f = File(p);
@@ -715,7 +749,7 @@ class UploadQueue extends ChangeNotifier {
         }
       }
       if (deleteUploads) {
-        for (final u in [m.main, m.thumb, m.low]) {
+        for (final u in [m.main, m.thumb, m.low, m.voice]) {
           if (u != null) unawaited(MediaService.instance.delete(u.key));
         }
         // half-uploaded big files: free the parts on the server

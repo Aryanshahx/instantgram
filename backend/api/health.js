@@ -1,11 +1,26 @@
 // GET /api/health  -> shows whether the server is configured.
 import { env } from '../lib/http.js';
-import { serviceAccount } from '../lib/google.js';
+import { accessToken, checkServiceAccount } from '../lib/google.js';
 import { turnProviders } from './turn.js';
 
 const NEED = ['TIGRIS_ACCESS_KEY_ID', 'TIGRIS_SECRET_ACCESS_KEY', 'TIGRIS_BUCKET', 'FIREBASE_PROJECT_ID'];
 
-export default function handler(req, res) {
+export default async function handler(req, res) {
+  // v0.12: says exactly what is wrong with FIREBASE_SERVICE_ACCOUNT;
+  // /api/health?google=1 also asks Google if the key works.
+  const { sa, problem } = checkServiceAccount();
+  let firebaseServiceAccount = problem || 'ok';
+  if (sa && String(req.url || '').includes('google=1')) {
+    try {
+      await accessToken(sa);
+      firebaseServiceAccount = 'ok (Google accepted the key)';
+    } catch (e) {
+      firebaseServiceAccount = `Google did not accept the key: create a new key and paste it again (${e.message})`;
+    }
+  }
+  if (sa && env('FIREBASE_PROJECT_ID') && sa.project_id !== env('FIREBASE_PROJECT_ID')) {
+    firebaseServiceAccount += ` (warning: key is for project ${sa.project_id}, FIREBASE_PROJECT_ID is ${env('FIREBASE_PROJECT_ID')})`;
+  }
   const missing = NEED.filter((n) => !env(n));
   // Values with spaces / new lines still work (they are cleaned), but show a hint.
   const warnings = [...NEED, 'TIGRIS_ENDPOINT', 'PUBLIC_MEDIA_BASE_URL']
@@ -21,7 +36,8 @@ export default function handler(req, res) {
     JSON.stringify({
       ok: missing.length === 0,
       app: 'instantgram',
-      version: '0.11.0',
+      version: '0.12.0',
+      firebaseServiceAccount,
       bucket: bucket || null,
       firebaseProject: env('FIREBASE_PROJECT_ID') || null,
       missing,
@@ -33,9 +49,11 @@ export default function handler(req, res) {
         callsTurn: turnProviders().length > 0,
         turnServices: turnProviders(),
         // push = phone rings when the app is closed
-        callRingWhenClosed: !!serviceAccount(),
+        callRingWhenClosed: !!sa,
         // v0.11: "username: message" notifications (also when closed)
-        messageNotifications: !!serviceAccount(),
+        messageNotifications: !!sa,
+        // v0.12: likes, comments, followers, views ... notifications
+        activityNotifications: !!sa,
       },
     }),
   );

@@ -48,10 +48,14 @@ class TextLayer {
     this.size = 0.08,
     this.pos = const Offset(0.5, 0.5),
     this.background = false,
+    this.sticker = false,
   });
 
   String text;
   Color color;
+
+  /// v0.12: an emoji sticker (no shadow, bigger).
+  final bool sticker;
 
   /// Font size as a part of the frame width.
   double size;
@@ -117,11 +121,71 @@ class EditItem {
   int get trimmedMs =>
       ((trimEnd > 0 ? trimEnd : durationMs) - trimStart).clamp(0, 1 << 30);
 
+  /// End of the trim (ms in the file).
+  int get endMs => trimEnd > 0 ? trimEnd : durationMs;
+
+  // ---- v0.12: split, texts / stickers, voice over
+  /// Split points (ms in the file).
+  final List<int> splits = [];
+
+  /// Removed parts.
+  List<VideoCut> cuts = [];
+  final List<VideoOverlay> overlays = [];
+  String voicePath = '';
+  int voiceStartMs = 0; // in the PLAYED video
+  int voiceDurMs = 0;
+
+  bool get hasVoice => voicePath.isNotEmpty && voiceDurMs > 0;
+
+  /// Cuts inside the trim only.
+  List<VideoCut> get activeCuts => VideoTime.normalize([
+    for (final c in cuts)
+      if (c.endMs > trimStart && c.startMs < endMs)
+        VideoCut(
+          c.startMs < trimStart ? trimStart : c.startMs,
+          c.endMs > endMs ? endMs : c.endMs,
+        ),
+  ]);
+
+  /// Length after trim and removed parts.
+  int get playedMs => VideoTime.playedMs(trimStart, endMs, activeCuts);
+
+  /// Parts between split points (inside the trim).
+  List<VideoCut> get segments {
+    final pts = <int>[
+      trimStart,
+      ...(splits.where((x) => x > trimStart && x < endMs).toList()..sort()),
+      endMs,
+    ];
+    return [
+      for (var i = 0; i + 1 < pts.length; i++)
+        if (pts[i + 1] > pts[i]) VideoCut(pts[i], pts[i + 1]),
+    ];
+  }
+
+  /// Part under [ms] (null = outside the trim).
+  VideoCut? segmentAt(int ms) {
+    for (final s in segments) {
+      if (ms >= s.startMs && ms < s.endMs) return s;
+    }
+    final seg = segments;
+    if (seg.isNotEmpty && ms == seg.last.endMs) return seg.last;
+    return null;
+  }
+
+  bool isCut(VideoCut seg) =>
+      activeCuts.any((c) => c.startMs <= seg.startMs && c.endMs >= seg.endMs);
+
   VideoEdits get videoEdits => VideoEdits(
     trimStartMs: trimStart,
     trimEndMs: trimEnd > 0 && trimEnd < durationMs ? trimEnd : 0,
     filter: color.matrixOrNull,
     muted: muted,
+    cuts: activeCuts,
+    overlays: List.unmodifiable(overlays),
+    voicePath: hasVoice ? voicePath : '',
+    voiceStartMs: hasVoice ? voiceStartMs : 0,
+    voiceDurMs: hasVoice ? voiceDurMs : 0,
   );
 }
 

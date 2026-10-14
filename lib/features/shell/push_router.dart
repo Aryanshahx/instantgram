@@ -8,11 +8,13 @@ import '../../core/services/chat_prefs.dart';
 import '../../core/theme/app_colors.dart';
 import '../../shared/models/user_profile.dart';
 import '../chats/presentation/chat_detail_screen.dart';
+import '../notifications/presentation/notifications_screen.dart';
 
 /// v0.11: what happens with notifications.
 /// - Tap "alice: hi" -> the chat with alice opens.
 /// - Tap "Voice call from alice" (muted call) -> the silent call screen.
 /// - App open + a message from another chat -> a small banner.
+/// - v0.12: tap "bob liked your clip" -> Notifications.
 class PushRouter {
   PushRouter._();
   static final PushRouter instance = PushRouter._();
@@ -57,6 +59,11 @@ class PushRouter {
         if ('${d['muted']}' == '1') {
           Calls.instance.openMutedFromNotification(d);
         }
+      // v0.12: likes, comments, followers, views -> Notifications
+      case 'activity':
+        Calls.instance.navigatorKey.currentState?.push(
+          MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+        );
     }
   }
 

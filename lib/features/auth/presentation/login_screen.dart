@@ -5,6 +5,8 @@ import '../../../shared/widgets/glow_background.dart';
 import '../../../shared/widgets/ig_buttons.dart';
 import '../../../shared/widgets/ig_logo.dart';
 import '../../../shared/widgets/ig_text_field.dart';
+import '../../../core/services/saved_accounts.dart';
+import '../../../shared/widgets/avatar.dart';
 import '../data/auth_service.dart';
 import 'choose_language_screen.dart';
 
@@ -20,9 +22,65 @@ class _LoginScreenState extends State<LoginScreen> {
   final _idCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _loading = false;
+  final _passFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    SavedAccounts.instance.load();
+  }
+
+  /// v0.12: tap a saved account -> log in (password saved on this phone)
+  /// or fill the email and ask for the password.
+  Future<void> _quick(SavedAccount a) async {
+    final pw = await SavedAccounts.instance.password(a.uid);
+    if (!mounted) return;
+    if (pw == null) {
+      _idCtrl.text = a.email;
+      _passFocus.requestFocus();
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      await AuthService.instance.signIn(identifier: a.email, password: pw);
+    } on AuthFailure catch (e) {
+      await SavedAccounts.instance.forgetPassword(a.uid);
+      _idCtrl.text = a.email;
+      _snack(e.message);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Widget _saved() => ValueListenableBuilder<List<SavedAccount>>(
+    valueListenable: SavedAccounts.instance.accounts,
+    builder: (context, list, _) {
+      if (list.isEmpty) return const SizedBox(height: 26);
+      return Padding(
+        padding: const EdgeInsets.only(top: 18, bottom: 14),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final a in list)
+              ActionChip(
+                key: ValueKey('saved-login-${a.uid}'),
+                avatar: Avatar(url: a.photoUrl, name: a.username, size: 22),
+                label: Text(a.label),
+                onPressed: _loading ? null : () => _quick(a),
+                backgroundColor: AppColors.surface,
+                side: const BorderSide(color: AppColors.border),
+                shape: const StadiumBorder(),
+              ),
+          ],
+        ),
+      );
+    },
+  );
 
   @override
   void dispose() {
+    _passFocus.dispose();
     _idCtrl.dispose();
     _passCtrl.dispose();
     super.dispose();
@@ -144,7 +202,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             color: AppColors.textSecondary,
                           ),
                         ),
-                        const SizedBox(height: 26),
+                        _saved(),
                         IgTextField(
                           height: 48,
                           hint: 'Email or username',
@@ -166,6 +224,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           hint: 'Password',
                           icon: Icons.lock_outline,
                           controller: _passCtrl,
+                          focusNode: _passFocus,
                           isPassword: true,
                           textInputAction: TextInputAction.done,
                           autofillHints: const [AutofillHints.password],

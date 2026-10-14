@@ -13,8 +13,10 @@ import '../../auth/data/auth_service.dart';
 import '../../chats/data/chat_receipts.dart';
 import '../../shell/push_router.dart';
 import '../../profile/presentation/saved_screen.dart';
+import 'accounts_screen.dart';
 import 'call_check_screen.dart';
 import 'history_screen.dart';
+import 'notification_settings_screen.dart';
 import 'privacy_screens.dart';
 import 'settings_pages.dart';
 import 'settings_widgets.dart';
@@ -134,6 +136,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       _Item(
         section: 'Your app',
+        icon: Icons.notifications_none,
+        title: 'Notifications',
+        subtitle: 'Likes, comments, followers, views',
+        keywords: 'notification push likes comments followers unfollow views '
+            'reposts mute',
+        onTap: (c) => _push(c, const NotificationSettingsScreen()),
+      ),
+      _Item(
+        section: 'Your app',
         icon: Icons.ring_volume_outlined,
         title: 'Calls & notifications',
         subtitle: 'Check that calls ring when the app is closed',
@@ -184,6 +195,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: 'Terms of use',
         keywords: 'terms rules conditions',
         onTap: (c) => openLink(c, AppInfo.termsUrl),
+      ),
+      _Item(
+        section: 'Login',
+        icon: Icons.switch_account_outlined,
+        title: 'Accounts',
+        subtitle: 'Add account or switch',
+        keywords: 'add account switch accounts multiple second another login',
+        onTap: (c) => _push(c, AccountsScreen(profile: p)),
       ),
       _Item(
         section: 'Login',
@@ -330,6 +349,12 @@ Future<void> confirmLogout(BuildContext context) async {
   );
   if (ok != true || !context.mounted) return;
   Navigator.of(context).popUntil((r) => r.isFirst);
+  await signOutEverything();
+}
+
+/// Log out: this phone stops ringing / getting messages for the account.
+/// v0.12: also used by Settings -> Accounts (switch / add account).
+Future<void> signOutEverything() async {
   await Calls.instance.signOut(); // no calls for this phone any more
   await Presence.instance.stop();
   ChatReceipts.instance.stop();

@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 DateTime _date(Object? v) => v is Timestamp
@@ -39,6 +41,127 @@ class Audience {
       v is String && all.contains(v) ? v : everyone;
 }
 
+/// v0.12: a removed part of a video (split + delete), source time in ms.
+class VideoCut {
+  const VideoCut(this.startMs, this.endMs);
+  final int startMs;
+  final int endMs;
+
+  int get length => endMs - startMs;
+  bool contains(int ms) => ms >= startMs && ms < endMs;
+
+  Map<String, dynamic> toMap() => {'s': startMs, 'e': endMs};
+
+  static VideoCut? fromMap(Object? v) {
+    if (v is! Map) return null;
+    final s = v['s'], e = v['e'];
+    if (s is! num || e is! num || e <= s || s < 0) return null;
+    return VideoCut(s.toInt(), e.toInt());
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is VideoCut && other.startMs == startMs && other.endMs == endMs;
+
+  @override
+  int get hashCode => Object.hash(startMs, endMs);
+
+  @override
+  String toString() => 'VideoCut($startMs-$endMs)';
+}
+
+/// v0.12: text or sticker shown on a video for a time (source ms).
+class VideoOverlay {
+  const VideoOverlay({
+    required this.kind,
+    required this.text,
+    this.color = 0xFFFFFFFF,
+    this.size = 0.08,
+    this.x = 0.5,
+    this.y = 0.5,
+    this.background = false,
+    this.startMs = 0,
+    this.endMs = 0,
+  });
+
+  static const String textKind = 'text';
+  static const String stickerKind = 'sticker';
+
+  /// [textKind] or [stickerKind].
+  final String kind;
+  final String text;
+
+  /// ARGB colour (text).
+  final int color;
+
+  /// Font size as a part of the video width.
+  final double size;
+
+  /// Center position, 0..1 of the video.
+  final double x;
+  final double y;
+  final bool background;
+
+  /// Shown from [startMs] until [endMs] (0 = until the end).
+  final int startMs;
+  final int endMs;
+
+  bool get isSticker => kind == stickerKind;
+  bool visibleAt(int ms) => ms >= startMs && (endMs <= 0 || ms < endMs);
+
+  VideoOverlay copyWith({
+    String? text,
+    int? color,
+    double? size,
+    double? x,
+    double? y,
+    bool? background,
+    int? startMs,
+    int? endMs,
+  }) => VideoOverlay(
+    kind: kind,
+    text: text ?? this.text,
+    color: color ?? this.color,
+    size: size ?? this.size,
+    x: x ?? this.x,
+    y: y ?? this.y,
+    background: background ?? this.background,
+    startMs: startMs ?? this.startMs,
+    endMs: endMs ?? this.endMs,
+  );
+
+  Map<String, dynamic> toMap() => {
+    'k': kind,
+    't': text,
+    'c': color,
+    'z': double.parse(size.toStringAsFixed(4)),
+    'x': double.parse(x.toStringAsFixed(4)),
+    'y': double.parse(y.toStringAsFixed(4)),
+    if (background) 'bg': true,
+    if (startMs > 0) 's': startMs,
+    if (endMs > 0) 'e': endMs,
+  };
+
+  static VideoOverlay? fromMap(Object? v) {
+    if (v is! Map) return null;
+    final t = v['t'];
+    if (t is! String || t.isEmpty) return null;
+    double d(Object? x, double def, double lo, double hi) =>
+        x is num ? x.toDouble().clamp(lo, hi) : def;
+    return VideoOverlay(
+      kind: v['k'] == stickerKind ? stickerKind : textKind,
+      text: t.length > 300 ? t.substring(0, 300) : t,
+      color: v['c'] is num ? (v['c'] as num).toInt() : 0xFFFFFFFF,
+      size: d(v['z'], 0.08, 0.02, 0.6),
+      x: d(v['x'], 0.5, 0, 1),
+      y: d(v['y'], 0.5, 0, 1),
+      background: v['bg'] == true,
+      startMs: v['s'] is num ? (v['s'] as num).toInt() : 0,
+      endMs: v['e'] is num ? (v['e'] as num).toInt() : 0,
+    );
+  }
+}
+
 /// Edits for a video that are applied while playing
 /// (the original file is uploaded unchanged).
 class VideoEdits {
@@ -47,6 +170,13 @@ class VideoEdits {
     this.trimEndMs = 0,
     this.filter,
     this.muted = false,
+    this.cuts = const [],
+    this.overlays = const [],
+    this.voiceUrl = '',
+    this.voiceKey = '',
+    this.voicePath = '',
+    this.voiceStartMs = 0,
+    this.voiceDurMs = 0,
   });
 
   /// 0 = from the start.
@@ -61,13 +191,68 @@ class VideoEdits {
   /// Original sound off.
   final bool muted;
 
-  bool get hasTrim => trimStartMs > 0 || trimEndMs > 0;
+  /// v0.12: removed parts (split + delete), sorted, source ms.
+  final List<VideoCut> cuts;
+
+  /// v0.12: texts and stickers with their times.
+  final List<VideoOverlay> overlays;
+
+  /// v0.12: voice over (uploaded file). Plays from [voiceStartMs] of the
+  /// PLAYED video (after trim and cuts) for [voiceDurMs].
+  final String voiceUrl;
+  final String voiceKey;
+
+  /// Recorded file on this phone (before upload; never in Firestore).
+  final String voicePath;
+  final int voiceStartMs;
+  final int voiceDurMs;
+
+  /// The player must watch the position (trim, cuts).
+  bool get hasTrim => trimStartMs > 0 || trimEndMs > 0 || cuts.isNotEmpty;
+
+  bool get hasVoice =>
+      (voiceUrl.isNotEmpty || voicePath.isNotEmpty) && voiceDurMs > 0;
+
+  /// Where to play the voice from (URL after upload, else the file).
+  String get voiceSource => voiceUrl.isNotEmpty ? voiceUrl : voicePath;
+
+  /// After the voice file is uploaded.
+  VideoEdits withVoice(String url, String key) => VideoEdits(
+    trimStartMs: trimStartMs,
+    trimEndMs: trimEndMs,
+    filter: filter,
+    muted: muted,
+    cuts: cuts,
+    overlays: overlays,
+    voiceUrl: url,
+    voiceKey: key,
+    voiceStartMs: voiceStartMs,
+    voiceDurMs: voiceDurMs,
+  );
+
+  /// Moments: no voice over.
+  VideoEdits withoutVoice() => VideoEdits(
+    trimStartMs: trimStartMs,
+    trimEndMs: trimEndMs,
+    filter: filter,
+    muted: muted,
+    cuts: cuts,
+    overlays: overlays,
+  );
 
   Map<String, dynamic> toMap() => {
     if (trimStartMs > 0) 'trimStartMs': trimStartMs,
     if (trimEndMs > 0) 'trimEndMs': trimEndMs,
     if (filter != null) 'filter': filter,
     if (muted) 'muteAudio': true,
+    if (cuts.isNotEmpty) 'cuts': [for (final c in cuts) c.toMap()],
+    if (overlays.isNotEmpty) 'overlays': [for (final o in overlays) o.toMap()],
+    if (voiceUrl.isNotEmpty) ...{
+      'voiceUrl': voiceUrl,
+      'voiceKey': voiceKey,
+    },
+    if (voicePath.isNotEmpty) 'voicePath': voicePath,
+    if (hasVoice) ...{'voiceStartMs': voiceStartMs, 'voiceDurMs': voiceDurMs},
   };
 
   factory VideoEdits.fromMap(Map<String, dynamic> m) => VideoEdits(
@@ -75,7 +260,102 @@ class VideoEdits {
     trimEndMs: _int(m['trimEndMs']),
     filter: _matrix(m['filter']),
     muted: _bool(m['muteAudio']),
+    cuts: VideoTime.normalize(
+      m['cuts'] is List
+          ? (m['cuts'] as List).map(VideoCut.fromMap).whereType<VideoCut>()
+          : const <VideoCut>[],
+    ),
+    overlays: m['overlays'] is List
+        ? (m['overlays'] as List)
+              .map(VideoOverlay.fromMap)
+              .whereType<VideoOverlay>()
+              .take(50)
+              .toList()
+        : const [],
+    voiceUrl: _str(m['voiceUrl']),
+    voiceKey: _str(m['voiceKey']),
+    voicePath: _str(m['voicePath']),
+    voiceStartMs: _int(m['voiceStartMs']),
+    voiceDurMs: _int(m['voiceDurMs']),
   );
+}
+
+/// v0.12: time maths for trim + cuts (source time = position in the file,
+/// played time = what the viewer sees after trim and cuts).
+class VideoTime {
+  VideoTime._();
+
+  /// Sorted, merged, no empty parts.
+  static List<VideoCut> normalize(Iterable<VideoCut> cuts) {
+    final l = cuts.where((c) => c.endMs > c.startMs).toList()
+      ..sort((a, b) => a.startMs.compareTo(b.startMs));
+    final out = <VideoCut>[];
+    for (final c in l) {
+      if (out.isNotEmpty && c.startMs <= out.last.endMs) {
+        final last = out.removeLast();
+        out.add(VideoCut(last.startMs, max(last.endMs, c.endMs)));
+      } else {
+        out.add(c);
+      }
+    }
+    return out;
+  }
+
+  /// Inside a removed part: where to jump to (else null).
+  static int? skipTo(int pos, List<VideoCut> cuts) {
+    for (final c in cuts) {
+      if (c.contains(pos)) return c.endMs;
+    }
+    return null;
+  }
+
+  /// First playable moment at or after [start] (skips a cut at the start).
+  static int firstPlayable(int start, List<VideoCut> cuts) {
+    var p = start;
+    for (final c in cuts) {
+      if (c.contains(p)) p = c.endMs;
+    }
+    return p;
+  }
+
+  /// Last playable moment at or before [end] (a cut at the very end
+  /// makes the video end earlier).
+  static int playableEnd(int end, List<VideoCut> cuts) {
+    var e = end;
+    for (final c in cuts.reversed) {
+      if (c.startMs < e && c.endMs >= e) e = c.startMs;
+    }
+    return e;
+  }
+
+  /// Length the viewer sees.
+  static int playedMs(int start, int end, List<VideoCut> cuts) {
+    if (end <= start) return 0;
+    var removed = 0;
+    for (final c in cuts) {
+      final s = max(c.startMs, start), e = min(c.endMs, end);
+      if (e > s) removed += e - s;
+    }
+    return max(0, end - start - removed);
+  }
+
+  /// Source position -> played time.
+  static int playedAt(int pos, int start, List<VideoCut> cuts) =>
+      playedMs(start, max(start, pos), cuts);
+
+  /// Played time -> source position.
+  static int sourceAt(int played, int start, List<VideoCut> cuts) {
+    var src = start;
+    var left = max(0, played);
+    for (final c in cuts) {
+      if (c.endMs <= src) continue;
+      final gap = c.startMs - src;
+      if (gap >= left) break;
+      if (gap > 0) left -= gap;
+      src = max(src, c.endMs);
+    }
+    return src + left;
+  }
 }
 
 /// One photo or video inside a post or clip.
@@ -302,9 +582,11 @@ class Post {
       if (m.key.isNotEmpty) m.key,
       if (m.thumbKey.isNotEmpty) m.thumbKey,
       if (m.lowKey.isNotEmpty) m.lowKey,
+      if (m.edits.voiceKey.isNotEmpty) m.edits.voiceKey,
     ],
     if (thumbKey.isNotEmpty) thumbKey,
     if (audioKey.isNotEmpty) audioKey,
+    if (edits.voiceKey.isNotEmpty) edits.voiceKey,
   }.toList();
 
   factory Post.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
@@ -1017,6 +1299,13 @@ class AppNotification {
   static const comment = 'comment';
   static const follow = 'follow';
   static const repost = 'repost';
+  // v0.12
+  static const reply = 'reply';
+  static const commentLike = 'comment_like';
+  static const unfollow = 'unfollow';
+
+  /// Written by our server: text = the number of views reached.
+  static const views = 'views';
 
   final String id;
   final String type;
@@ -1044,4 +1333,26 @@ class AppNotification {
       createdAt: _date(m['createdAt']),
     );
   }
+}
+
+/// v0.12: "Your clip reached 1,000 views" steps (same as the server).
+class ViewMilestones {
+  ViewMilestones._();
+  static const steps = [
+    100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000,
+    10000000,
+  ];
+
+  /// Highest step reached (0 = none).
+  static int reached(int views) {
+    var m = 0;
+    for (final s in steps) {
+      if (views >= s) m = s;
+    }
+    return m;
+  }
+
+  /// Ask the server? (a new step was passed and not announced yet)
+  static bool needsCheck(int views, int announced) =>
+      reached(views) > announced;
 }

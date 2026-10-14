@@ -12,6 +12,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 // v0.11: notification channels (messages, muted calls) + settings pages.
+// v0.12: + activity channel (likes, comments, followers, views).
 class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,6 +67,10 @@ class MainActivity : FlutterActivity() {
         val messages = NotificationChannel(
             "messages", "Messages", NotificationManager.IMPORTANCE_HIGH
         ).apply { description = "New chat messages" }
+        // v0.12: likes, comments, new followers, views ...
+        val activity = NotificationChannel(
+            "activity", "Activity", NotificationManager.IMPORTANCE_HIGH
+        ).apply { description = "Likes, comments, followers and views" }
         // calls from people you muted: shown, but no sound and no vibration
         val muted = NotificationChannel(
             "calls_muted", "Muted calls", NotificationManager.IMPORTANCE_HIGH
@@ -75,6 +80,6 @@ class MainActivity : FlutterActivity() {
             enableVibration(false)
             vibrationPattern = longArrayOf(0L)
         }
-        nm.createNotificationChannels(listOf(messages, muted))
+        nm.createNotificationChannels(listOf(messages, muted, activity))
     }
 }

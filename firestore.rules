@@ -151,7 +151,8 @@ service cloud.firestore {
         allow read, delete: if signedIn() && me() == uid;
         allow create: if signedIn() && uid != me()
           && request.resource.data.fromUid == me()
-          && request.resource.data.type in ['like', 'comment', 'follow', 'repost'];
+          && request.resource.data.type in ['like', 'comment', 'follow', 'repost',
+               'reply', 'comment_like', 'unfollow'];
         allow update: if signedIn() && me() == uid && changed().hasOnly(['read']);
       }
     }
@@ -514,12 +515,15 @@ service cloud.firestore {
 
     // ---------------- v0.11: your chat settings ----------------
     // prefs/{uid} = {pinnedChats, mutedChats, mutedCalls, cleared, updatedAt}
+    // v0.12: + pushOff = notification kinds you switched off (likes, ...)
     // Only you. Our server reads mutedChats / mutedCalls with its own key.
     match /prefs/{uid} {
       allow read, delete: if signedIn() && me() == uid;
       allow create, update: if signedIn() && me() == uid
         && request.resource.data.keys().hasOnly(['pinnedChats', 'mutedChats',
-             'mutedCalls', 'cleared', 'updatedAt'])
+             'mutedCalls', 'cleared', 'updatedAt', 'pushOff'])
+        && request.resource.data.get('pushOff', []) is list
+        && request.resource.data.get('pushOff', []).size() <= 20
         && request.resource.data.get('pinnedChats', []) is list
         && request.resource.data.get('pinnedChats', []).size() <= 20
         && request.resource.data.get('mutedChats', []) is list

@@ -147,7 +147,8 @@ void paintTextLayer(
   double fh, {
   double textScale = 1,
 }) {
-  final fs = (t.size * fw).clamp(10.0, 120.0) * textScale;
+  // v0.12: limits as a part of the width (same on screen and in the file)
+  final fs = (t.size * fw).clamp(fw * 0.02, fw * 0.5) * textScale;
   final padH = t.background ? fs * 0.4 : 0.0;
   final padV = t.background ? fs * 0.15 : 0.0;
   final tp = TextPainter(
@@ -159,9 +160,9 @@ void paintTextLayer(
         fontSize: fs,
         fontWeight: FontWeight.w800,
         height: 1.15,
-        shadows: t.background
+        shadows: t.background || t.sticker
             ? null
-            : const [Shadow(blurRadius: 6, color: Colors.black54)],
+            : [Shadow(blurRadius: fs * 0.12, color: Colors.black54)],
       ),
     ),
     textAlign: TextAlign.center,

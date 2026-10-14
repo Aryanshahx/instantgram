@@ -12,7 +12,7 @@
 // Only the caller of a call that is really ringing can send it.
 import { requireUser } from '../lib/firebase-auth.js';
 import { HttpError, postHandler } from '../lib/http.js';
-import { getDoc, sendFcm, serviceAccount } from '../lib/google.js';
+import { getDoc, notSetUp, sendFcm, serviceAccount } from '../lib/google.js';
 
 const MAX_AGE_MS = 60_000;
 export const TEST_DELAY_MS = 6000;
@@ -104,7 +104,7 @@ export async function handle(
   const action = ['ring', 'cancel', 'test'].includes(body.action) ? body.action : '';
   if (!action) throw new HttpError(400, 'Bad request');
   if (!sa) {
-    throw new HttpError(503, 'Ringing when the app is closed is not set up (FIREBASE_SERVICE_ACCOUNT missing)');
+    throw notSetUp('Ringing when the app is closed');
   }
   if (action === 'test') {
     const tokens = await tokensOf(sa, uid, fetchFn);

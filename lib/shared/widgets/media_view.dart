@@ -13,6 +13,7 @@ import '../../core/theme/app_colors.dart';
 import '../../features/editor/filters.dart';
 import '../models/post.dart';
 import 'net_image.dart';
+import 'video_extras.dart';
 import '../../core/services/video_cache.dart';
 
 /// Tests: don't create real video players.
@@ -35,6 +36,7 @@ Widget videoSurface(
   VideoPlayerController c,
   List<double>? filter, {
   BoxFit fit = BoxFit.contain,
+  List<VideoOverlay> overlays = const [],
 }) {
   final v = c.value;
   final s = v.size;
@@ -51,12 +53,46 @@ Widget videoSurface(
       child: video,
     );
   }
+  // v0.12: texts / stickers scale with the video
+  if (overlays.isNotEmpty) {
+    video = Stack(
+      fit: StackFit.expand,
+      children: [
+        video,
+        VideoOverlayLayer(overlays: overlays, controller: c),
+      ],
+    );
+  }
   return ClipRect(
     child: FittedBox(
       fit: fit,
       child: SizedBox(width: w, height: h, child: video),
     ),
   );
+}
+
+/// v0.12: jumps over removed parts (split + delete). Returns true when it
+/// jumped (or restarted because the rest is removed).
+class CutSkipper {
+  DateTime _last = DateTime.fromMillisecondsSinceEpoch(0);
+
+  bool check(
+    VideoPlayerController c,
+    VideoEdits e, {
+    required int startMs,
+    required int endMs,
+  }) {
+    if (e.cuts.isEmpty) return false;
+    final pos = c.value.position.inMilliseconds;
+    final to = VideoTime.skipTo(pos, e.cuts);
+    if (to == null) return false;
+    final now = DateTime.now();
+    if (now.difference(_last).inMilliseconds < 400) return true; // seeking
+    _last = now;
+    final end = endMs > 0 ? endMs : c.value.duration.inMilliseconds;
+    c.seekTo(Duration(milliseconds: to >= end - 150 ? startMs : to));
+    return true;
+  }
 }
 
 /// One photo, shown whole (no crop) on black.
@@ -123,6 +159,10 @@ class _MediaVideoState extends State<MediaVideo> {
 
   double get _volume => (widget.muted || _edits.muted) ? 0 : 1;
 
+  // v0.12: removed parts + voice over
+  final _skipper = CutSkipper();
+  VoiceTrack? _voice;
+
   @override
   void initState() {
     super.initState();
@@ -134,6 +174,8 @@ class _MediaVideoState extends State<MediaVideo> {
     super.didUpdateWidget(old);
     if (old.item.url != widget.item.url) {
       _release();
+      _voice?.dispose();
+      _voice = null;
       if (widget.active) _init();
       return;
     }
@@ -148,7 +190,17 @@ class _MediaVideoState extends State<MediaVideo> {
         _release(); // frees the video decoder while off screen
       }
     }
-    if (widget.muted != old.muted) _c?.setVolume(_volume);
+    if (widget.muted != old.muted) {
+      _c?.setVolume(_volume);
+      _voice?.muted = widget.muted;
+    }
+  }
+
+  void _attachVoice(VideoPlayerController c) {
+    if (!_edits.hasVoice) return;
+    final v = _voice ??= VoiceTrack(_edits);
+    v.muted = widget.muted;
+    v.attach(c);
   }
 
   // v0.8: through the disk cache (watching again = no new download)
@@ -157,8 +209,16 @@ class _MediaVideoState extends State<MediaVideo> {
 
   void _applyTrim(VideoPlayerController c) {
     final total = c.value.duration.inMilliseconds;
-    _startMs = _edits.trimStartMs.clamp(0, total);
-    _endMs = _edits.trimEndMs > _startMs ? _edits.trimEndMs.clamp(0, total) : 0;
+    _startMs = VideoTime.firstPlayable(
+      _edits.trimStartMs,
+      _edits.cuts,
+    ).clamp(0, total);
+    // v0.12: a removed part at the end ends the video earlier
+    final rawEnd = _edits.trimEndMs > _startMs
+        ? _edits.trimEndMs.clamp(0, total)
+        : total;
+    final end = VideoTime.playableEnd(rawEnd, _edits.cuts);
+    _endMs = end < total && end > _startMs ? end : 0;
   }
 
   Future<void> _init() async {
@@ -196,6 +256,7 @@ class _MediaVideoState extends State<MediaVideo> {
       c.addListener(_tick);
       if (!mounted || _c != c) return;
       setState(() => _ready = true);
+      _attachVoice(c);
       if (widget.active) c.play();
     } catch (_) {
       if (!mounted || _c != c) return;
@@ -242,6 +303,7 @@ class _MediaVideoState extends State<MediaVideo> {
     }
     old.removeListener(_tick);
     c.addListener(_tick);
+    _attachVoice(c);
     _openUrl = low;
     setState(() {
       _c = c;
@@ -259,6 +321,7 @@ class _MediaVideoState extends State<MediaVideo> {
     final end = _endMs > 0 ? _endMs : c.value.duration.inMilliseconds;
     final watched = pos - _startMs;
     if (watched > _maxPos) _maxPos = watched;
+    if (_skipper.check(c, _edits, startMs: _startMs, endMs: _endMs)) return;
     if (end > 0 && pos >= end - 150) {
       _completed = true;
       if (_edits.hasTrim) c.seekTo(Duration(milliseconds: _startMs));
@@ -275,6 +338,7 @@ class _MediaVideoState extends State<MediaVideo> {
     _c = null;
     _ready = false;
     c.removeListener(_tick);
+    _voice?.detach();
     if (wasReady) {
       // v0.8: keep it ready, scrolling back starts at once
       VideoPool.instance.keep(
@@ -295,6 +359,7 @@ class _MediaVideoState extends State<MediaVideo> {
   @override
   void dispose() {
     _release();
+    _voice?.dispose();
     super.dispose();
   }
 
@@ -312,7 +377,12 @@ class _MediaVideoState extends State<MediaVideo> {
                 ? const SizedBox.shrink()
                 : NetImage(cover, fit: widget.fit),
           if (_ready && c != null)
-            videoSurface(c, _edits.filter, fit: widget.fit),
+            videoSurface(
+              c,
+              _edits.filter,
+              fit: widget.fit,
+              overlays: _edits.overlays,
+            ),
           if (_failed)
             const Center(
               child: Text(

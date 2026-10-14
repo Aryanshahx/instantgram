@@ -304,13 +304,14 @@ class UserRepository {
     batch.update(_users.doc(me.uid), {
       'followingCount': FieldValue.increment(1),
     });
-    NotificationRepository.instance.addToBatch(
+    final pending = NotificationRepository.instance.addToBatch(
       batch,
       toUid: target.uid,
       from: me,
       type: AppNotification.follow,
     );
     await batch.commit();
+    pending.send();
   }
 
   Future<void> unfollow(UserProfile target) async {
@@ -323,7 +324,19 @@ class UserRepository {
     batch.update(_users.doc(myUid), {
       'followingCount': FieldValue.increment(-1),
     });
+    // v0.12: "unfollowed you" (they can switch this off in Settings)
+    var pending = const Pending.none();
+    try {
+      final me = await meCached();
+      pending = NotificationRepository.instance.addToBatch(
+        batch,
+        toUid: target.uid,
+        from: me,
+        type: AppNotification.unfollow,
+      );
+    } catch (_) {}
     await batch.commit();
+    pending.send();
   }
 
   /// Followers or following list.

@@ -6,7 +6,7 @@
 // Only the sender of a fresh message (< 2 minutes) can trigger it.
 import { requireUser } from '../lib/firebase-auth.js';
 import { HttpError, postHandler } from '../lib/http.js';
-import { getDoc, sendFcm, serviceAccount } from '../lib/google.js';
+import { getDoc, notSetUp, sendFcm, serviceAccount } from '../lib/google.js';
 import { prefsOf, tokensOf } from './call-push.js';
 
 const MAX_AGE_MS = 120_000;
@@ -78,7 +78,7 @@ export async function handle(uid, body, { sa = serviceAccount(), fetchFn = fetch
     throw new HttpError(400, 'Bad request');
   }
   if (!parts.includes(uid)) throw new HttpError(403, 'Not your chat');
-  if (!sa) throw new HttpError(503, 'Notifications are not set up (FIREBASE_SERVICE_ACCOUNT missing)');
+  if (!sa) throw notSetUp('Notifications');
   const other = parts[0] === uid ? parts[1] : parts[0];
   if (other === uid) return { sent: 0 };
   const m = checkMessage(await getDoc(sa, `chats/${chatId}/messages/${messageId}`, fetchFn), uid);

@@ -9,7 +9,9 @@ import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/avatar.dart';
+import '../../../shared/widgets/media_view.dart' show CutSkipper;
 import '../../../shared/widgets/net_image.dart';
+import '../../../shared/widgets/video_extras.dart';
 import '../../editor/filters.dart';
 import '../../profile/data/user_repository.dart';
 import '../data/story_repository.dart';
@@ -107,12 +109,32 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
       if (!mounted || id != _loadId) return;
       final e = st.edits;
       final total = c.value.duration.inMilliseconds;
-      final start = e.trimStartMs.clamp(0, total);
+      // v0.12: removed parts (split + delete) are skipped
+      final start = VideoTime.firstPlayable(
+        e.trimStartMs,
+        e.cuts,
+      ).clamp(0, total);
       var end = e.trimEndMs > 0 ? e.trimEndMs.clamp(start, total) : total;
-      if (end - start > kMomentMaxMs) end = start + kMomentMaxMs;
-      final len = (end - start).clamp(1000, kMomentMaxMs);
+      end = VideoTime.playableEnd(end, e.cuts).clamp(start, total);
+      if (VideoTime.playedMs(start, end, e.cuts) > kMomentMaxMs) {
+        end = VideoTime.sourceAt(kMomentMaxMs, start, e.cuts).clamp(
+          start,
+          total,
+        );
+      }
+      final len = VideoTime.playedMs(
+        start,
+        end,
+        e.cuts,
+      ).clamp(1000, kMomentMaxMs);
       await c.setVolume(e.muted ? 0 : 1);
       if (start > 0) await c.seekTo(Duration(milliseconds: start));
+      if (e.cuts.isNotEmpty) {
+        final skipper = CutSkipper();
+        c.addListener(
+          () => skipper.check(c, e, startMs: start, endMs: end),
+        );
+      }
       _timer.duration = Duration(milliseconds: len);
       setState(() => _videoReady = true);
       if (!_paused) {
@@ -253,7 +275,14 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     return Center(
       child: AspectRatio(
         aspectRatio: c.value.aspectRatio,
-        child: applyMatrix(st.edits.filter, VideoPlayer(c)),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            applyMatrix(st.edits.filter, VideoPlayer(c)),
+            // v0.12: texts / stickers
+            VideoOverlayLayer(overlays: st.edits.overlays, controller: c),
+          ],
+        ),
       ),
     );
   }

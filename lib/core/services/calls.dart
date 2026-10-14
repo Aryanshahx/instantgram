@@ -570,10 +570,7 @@ class Calls {
       }
       return 'Sent! It should ring now.';
     } on ApiException catch (e) {
-      if (e.statusCode == 503) {
-        return 'The server is not set up for ringing yet '
-            '(FIREBASE_SERVICE_ACCOUNT on Vercel).';
-      }
+      if (e.statusCode == 503) return CallsText.notSetUp(e.message);
       return e.message;
     } catch (e) {
       return 'Could not reach the server. Check internet.';
@@ -616,5 +613,22 @@ class Calls {
     try {
       await FlutterCallkitIncoming.endAllCalls();
     } catch (_) {}
+  }
+}
+
+/// v0.12: texts for the call check (testable).
+class CallsText {
+  CallsText._();
+
+  /// The server says exactly what is wrong with FIREBASE_SERVICE_ACCOUNT.
+  static String notSetUp(String serverMessage) {
+    final m = serverMessage.trim();
+    final why = m.contains('FIREBASE_SERVICE_ACCOUNT')
+        ? m
+        : 'FIREBASE_SERVICE_ACCOUNT on Vercel is missing or wrong.';
+    return '$why\n\nFix: Firebase console -> Project settings -> Service '
+        'accounts -> Generate new private key. Open the .json file, copy '
+        'ALL of it into Vercel -> Settings -> Environment Variables -> '
+        'FIREBASE_SERVICE_ACCOUNT (Production), then Redeploy.';
   }
 }

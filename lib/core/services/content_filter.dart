@@ -123,32 +123,47 @@ class ContentFilter {
 
   /// Re-filters [source] whenever the lists change.
   Stream<List<T>> watch<T>(Stream<List<T>> source, bool Function(T item) test) {
-    late StreamController<List<T>> ctrl;
-    StreamSubscription<List<T>>? sub;
+    // v0.12: every listener gets its own subscription, so the same stream
+    // can be listened again (tabs on the profile rebuild their lists).
+    // Before, a second listen crashed: "Stream has already been listened to".
     List<T>? last;
-    void emit() {
-      final l = last;
-      if (l != null && !ctrl.isClosed) ctrl.add(l.where(test).toList());
-    }
+    return Stream<List<T>>.multi((c) {
+      var closed = false;
+      StreamSubscription<List<T>>? sub;
+      void emit() {
+        final l = last;
+        if (l != null && !closed) c.add(l.where(test).toList());
+      }
 
-    ctrl = StreamController<List<T>>(
-      onListen: () {
-        version.addListener(emit);
+      // newest list right away (a shared source only sends changes later)
+      emit();
+      version.addListener(emit);
+      try {
         sub = source.listen(
           (v) {
             last = v;
             emit();
           },
-          onError: ctrl.addError,
-          onDone: ctrl.close,
+          onError: (Object e, StackTrace st) {
+            if (!closed) c.addError(e, st);
+          },
+          onDone: () {
+            closed = true;
+            version.removeListener(emit);
+            c.close();
+          },
         );
-      },
-      onCancel: () async {
+      } on StateError {
+        // a one-time source that is already in use: keep the last list
+      }
+      c.onPause = () => sub?.pause();
+      c.onResume = () => sub?.resume();
+      c.onCancel = () {
+        closed = true;
         version.removeListener(emit);
-        await sub?.cancel();
-      },
-    );
-    return ctrl.stream;
+        return sub?.cancel();
+      };
+    });
   }
 
   Stream<List<Post>> visiblePosts(Stream<List<Post>> source) =>

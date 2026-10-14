@@ -21,9 +21,11 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/async_views.dart';
 import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/follow_chip.dart';
 import '../../../shared/widgets/media_view.dart';
 import '../../../shared/widgets/net_image.dart';
 import '../../../shared/widgets/seek_bar.dart';
+import '../../../shared/widgets/video_extras.dart';
 import '../../post/data/post_repository.dart';
 import '../data/clips_warmup.dart';
 import '../../post/presentation/comments_sheet.dart';
@@ -457,6 +459,8 @@ class _ClipPlayerState extends State<ClipPlayer>
       (widget.muted || _edits.muted || widget.clip.hasMusic) ? 0 : 1;
 
   VideoEdits get _edits => _cur.edits;
+  final _skipper = CutSkipper();
+  VoiceTrack? _voice;
   int _startMs = 0;
   int _endMs = 0; // 0 = until the end
 
@@ -510,6 +514,7 @@ class _ClipPlayerState extends State<ClipPlayer>
           if (!mounted || _ctrl != c) return;
           setState(() => _ready = true);
           c.setVolume(_effectiveVolume);
+          _attachVoice(c);
           if (widget.active && !_mustStayPaused) _play();
         })
         .catchError((Object e) {
@@ -584,6 +589,7 @@ class _ClipPlayerState extends State<ClipPlayer>
         _failed = false;
       });
       c.setVolume(_effectiveVolume);
+      _attachVoice(c);
       if (widget.active && !_mustStayPaused) _play();
     } finally {
       _recovering = false;
@@ -605,8 +611,32 @@ class _ClipPlayerState extends State<ClipPlayer>
 
   void _applyTrim(VideoPlayerController c) {
     final total = c.value.duration.inMilliseconds;
-    _startMs = _edits.trimStartMs.clamp(0, total);
-    _endMs = _edits.trimEndMs > _startMs ? _edits.trimEndMs.clamp(0, total) : 0;
+    _startMs = VideoTime.firstPlayable(
+      _edits.trimStartMs,
+      _edits.cuts,
+    ).clamp(0, total);
+    // v0.12: a removed part at the end ends the video earlier
+    final rawEnd = _edits.trimEndMs > _startMs
+        ? _edits.trimEndMs.clamp(0, total)
+        : total;
+    final end = VideoTime.playableEnd(rawEnd, _edits.cuts);
+    _endMs = end < total && end > _startMs ? end : 0;
+  }
+
+  /// v0.12: voice over of this item follows the player.
+  void _attachVoice(VideoPlayerController c) {
+    final e = _edits;
+    if (!e.hasVoice) {
+      _voice?.dispose();
+      _voice = null;
+      return;
+    }
+    if (_voice == null || !identical(_voice!.edits, e)) {
+      _voice?.dispose();
+      _voice = VoiceTrack(e);
+    }
+    _voice!.muted = widget.muted;
+    _voice!.attach(c);
   }
 
   void _watchStall(VideoPlayerController c) {
@@ -654,6 +684,7 @@ class _ClipPlayerState extends State<ClipPlayer>
     _openUrl = low;
     old.removeListener(_onTick);
     c.addListener(_onTick);
+    _attachVoice(c);
     setState(() {
       _ctrl = c;
       _ready = true;
@@ -674,6 +705,7 @@ class _ClipPlayerState extends State<ClipPlayer>
     _stall = null;
     final c = _ctrl;
     _ctrl = null;
+    _voice?.detach();
     if (c != null) {
       c.removeListener(_onTick);
       if (_ready && !_failed) {
@@ -794,7 +826,11 @@ class _ClipPlayerState extends State<ClipPlayer>
     final atEnd =
         pos >= _endOrTotal - 120 ||
         (!v.isPlaying && pos >= v.duration.inMilliseconds - 250);
-    if (!atEnd) return;
+    if (!atEnd) {
+      // v0.12: jump over removed parts
+      _skipper.check(c, _edits, startMs: _startMs, endMs: _endMs);
+      return;
+    }
     _completed = true;
     final more = _item < _items.length - 1;
     if (widget.autoScroll || more) {
@@ -837,6 +873,7 @@ class _ClipPlayerState extends State<ClipPlayer>
     }
     if (widget.muted != old.muted) {
       c?.setVolume(_effectiveVolume);
+      _voice?.muted = widget.muted;
       if (widget.clip.hasMusic && widget.active) {
         MusicPlayer.instance.setVolume(widget.muted ? 0 : 1);
       }
@@ -846,6 +883,7 @@ class _ClipPlayerState extends State<ClipPlayer>
   @override
   void dispose() {
     _closeItem();
+    _voice?.dispose();
     if (widget.clip.hasMusic) MusicPlayer.instance.stop(_musicOwner);
     _itemPages.dispose();
     _heart.dispose();
@@ -1302,6 +1340,8 @@ class _ClipPlayerState extends State<ClipPlayer>
                     ],
                   ),
                 ),
+                // v0.12: Follow button next to the name
+                FollowChip(targetUid: c.authorId),
               ],
             ),
           ),
@@ -1338,7 +1378,11 @@ class _ClipPlayerState extends State<ClipPlayer>
       child: LayoutBuilder(
         builder: (context, box) {
           Widget child = live != null
-              ? videoSurface(live, m.edits.filter)
+              ? videoSurface(
+                  live,
+                  m.edits.filter,
+                  overlays: m.edits.overlays,
+                )
               : SizedBox.expand(
                   child: NetImage(m.thumbUrl, fit: BoxFit.contain),
                 );
