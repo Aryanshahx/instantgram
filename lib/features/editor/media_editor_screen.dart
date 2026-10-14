@@ -18,6 +18,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/time_ago.dart';
 import '../../shared/models/post.dart';
 import '../../shared/widgets/video_extras.dart';
+import '../../shared/widgets/stickers.dart';
 import '../post/presentation/create_post_screen.dart';
 import 'edit_models.dart';
 import 'filters.dart';
@@ -39,8 +40,7 @@ Future<void> openEditor(
 
 // v0.12: + split, music (was at the top), voice over, stickers
 enum _Tool {
-  trim,
-  split,
+  // v0.13: trim + split are on the timeline (always visible for videos)
   music,
   voice,
   text,
@@ -52,13 +52,6 @@ enum _Tool {
 }
 
 /// v0.12: emoji stickers.
-const List<String> kStickers = [
-  '😂', '😍', '🔥', '❤️', '👍', '🎉', '😎', '🥳', '😭', '😮', '🤩', '💯', //
-  '✨', '🌟', '💖', '🙌', '👏', '🤣', '😘', '🥰', '😜', '🤔', '😴', '🤯', //
-  '😡', '💀', '👀', '🙏', '💪', '🎂', '🎵', '📍', '☀️', '🌈', '🌙', '⚡', //
-  '🍕', '☕', '⚽', '🏆', '🚀', '💎', '🌸', '🐶', '🐱', '🦋', '💔', '🤝', //
-];
-
 enum _Adjust {
   brightness('Brightness', Icons.wb_sunny_outlined),
   contrast('Contrast', Icons.contrast),
@@ -97,7 +90,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
       .map((m) => EditItem(m, mode: widget.mode))
       .toList();
   int _index = 0;
-  late _Tool _tool = _items.first.isVideo ? _Tool.trim : _Tool.filters;
+  late _Tool _tool = _items.first.isVideo ? _Tool.text : _Tool.filters;
   _Adjust _adjust = _Adjust.brightness;
   bool _exporting = false;
   bool _showGrid = false;
@@ -132,8 +125,6 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
 
   List<_Tool> get _tools => _item.isVideo
       ? [
-          _Tool.trim,
-          _Tool.split,
           if (_musicAllowed) _Tool.music,
           if (_voiceAllowed) _Tool.voice,
           _Tool.text,
@@ -361,7 +352,9 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     if (!mounted) return;
     if (path == null || ms < 700) {
       if (path != null) _deleteFile(path);
-      if (keep) _snack('Too short. Tap record and speak while the video plays.');
+      if (keep) {
+        _snack('Too short. Tap record and speak while the video plays.');
+      }
       return;
     }
     final room = math.max(0, item.playedMs - _recStartPlayed);
@@ -398,9 +391,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
   }
 
   void _deleteFile(String path) {
-    unawaited(
-      File(path).delete().then((_) {}, onError: (Object _) {}),
-    );
+    unawaited(File(path).delete().then((_) {}, onError: (Object _) {}));
   }
 
   /// Old recordings that were never posted (older than 3 days).
@@ -470,7 +461,9 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
             out.add(c);
             continue;
           }
-          if (c.startMs < seg.startMs) out.add(VideoCut(c.startMs, seg.startMs));
+          if (c.startMs < seg.startMs) {
+            out.add(VideoCut(c.startMs, seg.startMs));
+          }
           if (c.endMs > seg.endMs) out.add(VideoCut(seg.endMs, c.endMs));
         }
         item.cuts = VideoTime.normalize(out);
@@ -777,6 +770,16 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     final textScale = mounted
         ? MediaQuery.textScalerOf(context).scale(100) / 100
         : 1.0;
+    // v0.13: sticker pictures
+    final stickers = <String, ui.Image>{};
+    for (final t in item.texts) {
+      if (t.sticker &&
+          StickerPack.isPack(t.text) &&
+          !stickers.containsKey(t.text)) {
+        final img = await StickerPack.load(t.text);
+        if (img != null) stickers[t.text] = img;
+      }
+    }
     final ui.Image image;
     try {
       image = await renderPhoto(
@@ -789,11 +792,15 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
           colorMatrix: item.color.isNone ? null : item.color.matrix,
           texts: item.texts,
           textScale: textScale,
+          stickers: stickers,
         ),
         outWidth: targetW,
       );
     } finally {
       src.dispose();
+      for (final s in stickers.values) {
+        s.dispose();
+      }
     }
     final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
     final width = image.width, height = image.height;
@@ -943,6 +950,8 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
             : [Shadow(blurRadius: fs * 0.12, color: Colors.black54)],
       ),
     );
+    final picture = t.sticker && StickerPack.isPack(t.text);
+    final limits = _sizeLimits(t.text, t.sticker);
     return Positioned(
       left: t.pos.dx * fw,
       top: t.pos.dy * fh,
@@ -956,30 +965,30 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
               (t.pos.dy + d.focalPointDelta.dy / fh).clamp(0.0, 1.0),
             );
             if (d.pointerCount > 1) {
-              t.size = (_gestureSize * d.scale).clamp(0.03, 0.5);
+              t.size = (_gestureSize * d.scale).clamp(limits.$1, limits.$2);
             }
           }),
-          onTap: () => t.sticker
-              ? _removeSticker(item, t)
-              : _editText(item, t),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: fw * 0.9),
-            child: t.background
-                ? Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: fs * 0.4,
-                      vertical: fs * 0.15,
-                    ),
-                    decoration: BoxDecoration(
-                      color: t.color.computeLuminance() > 0.5
-                          ? Colors.black87
-                          : Colors.white,
-                      borderRadius: BorderRadius.circular(fs * 0.3),
-                    ),
-                    child: text,
-                  )
-                : text,
-          ),
+          onTap: () => t.sticker ? _removeSticker(item, t) : _editText(item, t),
+          child: picture
+              ? StickerImage(text: t.text, width: t.size * fw)
+              : ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: fw * 0.9),
+                  child: t.background
+                      ? Container(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: fs * 0.4,
+                            vertical: fs * 0.15,
+                          ),
+                          decoration: BoxDecoration(
+                            color: t.color.computeLuminance() > 0.5
+                                ? Colors.black87
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(fs * 0.3),
+                          ),
+                          child: text,
+                        )
+                      : text,
+                ),
         ),
       ),
     );
@@ -992,7 +1001,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
       builder: (c) => SafeArea(
         child: ListTile(
           leading: const Icon(Icons.delete_outline, color: AppColors.like),
-          title: Text('Remove ${t.text}'),
+          title: const Text('Remove sticker'),
           onTap: () => Navigator.pop(c, true),
         ),
       ),
@@ -1000,16 +1009,18 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     if (ok == true && mounted) setState(() => item.texts.remove(t));
   }
 
-  void _addSticker(String emoji) {
+  /// v0.13: built-in sticker pack ([id] from [StickerPack.ids]).
+  void _addSticker(String id) {
     final item = _item;
+    final text = StickerPack.textFor(id);
     HapticFeedback.selectionClick();
     setState(() {
       if (item.isVideo) {
         item.overlays.add(
           VideoOverlay(
             kind: VideoOverlay.stickerKind,
-            text: emoji,
-            size: 0.16,
+            text: text,
+            size: StickerPack.defaultSize,
             x: 0.5,
             y: 0.42,
           ),
@@ -1018,8 +1029,8 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
       } else {
         item.texts.add(
           TextLayer(
-            text: emoji,
-            size: 0.16,
+            text: text,
+            size: StickerPack.defaultSize,
             pos: const Offset(0.5, 0.42),
             sticker: true,
           ),
@@ -1027,6 +1038,12 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
       }
     });
   }
+
+  /// Size limits while pinching (pack stickers are pictures: bigger).
+  static (double, double) _sizeLimits(String text, bool sticker) =>
+      sticker && StickerPack.isPack(text)
+      ? (StickerPack.minSize, StickerPack.maxSize)
+      : (0.03, 0.5);
 
   /// Video: add (index null) or change a text.
   Future<void> _editOverlay(int? index) async {
@@ -1225,7 +1242,10 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                               x: (o.x + d.focalPointDelta.dx / fw).clamp(0, 1),
                               y: (o.y + d.focalPointDelta.dy / fh).clamp(0, 1),
                               size: d.pointerCount > 1
-                                  ? (_gestureSize * d.scale).clamp(0.03, 0.5)
+                                  ? (_gestureSize * d.scale).clamp(
+                                      _sizeLimits(o.text, o.isSticker).$1,
+                                      _sizeLimits(o.text, o.isSticker).$2,
+                                    )
                                   : o.size,
                             );
                           }),
@@ -1268,12 +1288,8 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
         return _cropPanel();
       case _Tool.text:
         return _item.isVideo ? _videoTextPanel() : _textPanel();
-      case _Tool.trim:
-        return _trimPanel();
       case _Tool.sound:
         return _soundPanel();
-      case _Tool.split:
-        return _splitPanel();
       case _Tool.music:
         return _musicPanel();
       case _Tool.voice:
@@ -1337,7 +1353,11 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
             item.overlays.removeAt(i);
             _selOverlay = null;
           }),
-          icon: const Icon(Icons.delete_outline, size: 16, color: AppColors.like),
+          icon: const Icon(
+            Icons.delete_outline,
+            size: 16,
+            color: AppColors.like,
+          ),
           label: const Text('Delete'),
         ),
         if (!whole)
@@ -1355,7 +1375,8 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
 
   Widget _videoTextPanel() {
     final sel = _selOverlay;
-    final hasSel = sel != null &&
+    final hasSel =
+        sel != null &&
         sel < _item.overlays.length &&
         !_item.overlays[sel].isSticker;
     return Column(
@@ -1382,7 +1403,8 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
 
   Widget _stickersPanel() {
     final sel = _selOverlay;
-    final stickerSel = _item.isVideo &&
+    final stickerSel =
+        _item.isVideo &&
         sel != null &&
         sel < _item.overlays.length &&
         _item.overlays[sel].isSticker;
@@ -1393,20 +1415,23 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
             key: const ValueKey('sticker-grid'),
             crossAxisCount: 2,
             scrollDirection: Axis.horizontal,
+            childAspectRatio: 0.82,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             mainAxisSpacing: 4,
             crossAxisSpacing: 4,
             children: [
-              for (final e in kStickers)
+              for (final id in StickerPack.ids)
                 InkWell(
-                  key: ValueKey('sticker-$e'),
+                  key: ValueKey('sticker-$id'),
                   borderRadius: BorderRadius.circular(10),
-                  onTap: () => _addSticker(e),
-                  child: Center(
-                    child: Text(
-                      e,
-                      textScaler: TextScaler.noScaling,
-                      style: const TextStyle(fontSize: 30),
+                  onTap: () => _addSticker(id),
+                  child: Padding(
+                    padding: const EdgeInsets.all(3),
+                    child: Center(
+                      child: StickerImage(
+                        text: StickerPack.textFor(id),
+                        width: 64,
+                      ),
                     ),
                   ),
                 ),
@@ -1431,68 +1456,6 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                 ),
         ),
       ],
-    );
-  }
-
-  Widget _splitPanel() {
-    final item = _item;
-    final c = _video;
-    if (!_videoReady || c == null) return _hint('Loading video…');
-    return ValueListenableBuilder<VideoPlayerValue>(
-      valueListenable: c,
-      builder: (context, v, _) {
-        final seg = item.segmentAt(v.position.inMilliseconds);
-        final onCut = seg != null && item.isCut(seg);
-        final parts = item.segments.length;
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  FilledButton.icon(
-                    key: const ValueKey('split-here'),
-                    style: _limeButton,
-                    onPressed: _splitHere,
-                    icon: const Icon(Icons.vertical_split, size: 18),
-                    label: const Text('Split'),
-                  ),
-                  OutlinedButton.icon(
-                    key: const ValueKey('split-delete'),
-                    style: _darkButton,
-                    onPressed: parts > 1 && !onCut ? _deletePart : null,
-                    icon: const Icon(
-                      Icons.delete_outline,
-                      size: 18,
-                      color: AppColors.like,
-                    ),
-                    label: const Text('Delete part'),
-                  ),
-                  OutlinedButton.icon(
-                    key: const ValueKey('split-restore'),
-                    style: _darkButton,
-                    onPressed: item.cuts.isEmpty && item.splits.isEmpty
-                        ? null
-                        : _restorePart,
-                    icon: const Icon(Icons.undo, size: 18),
-                    label: Text(onCut ? 'Bring back' : 'Reset'),
-                  ),
-                ],
-              ),
-              _hint(
-                parts > 1
-                    ? '$parts parts · move the white line to a part, then '
-                          'delete it · length ${durationLabel(item.playedMs)}'
-                    : 'Move the white line on the timeline, then tap Split',
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 
@@ -1528,9 +1491,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
             icon: const Icon(Icons.mic),
             label: const Text('Record voice'),
           ),
-          _hint(
-            'Starts at the white line. The video plays while you speak.',
-          ),
+          _hint('Starts at the white line. The video plays while you speak.'),
         ],
       );
     }
@@ -1822,143 +1783,6 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     );
   }
 
-  Widget _trimPanel() {
-    final item = _item;
-    if (!_videoReady || item.durationMs <= 0) {
-      return const Center(
-        child: Text(
-          'Loading video…',
-          style: TextStyle(color: AppColors.textSecondary),
-        ),
-      );
-    }
-    final max = maxVideoMs(widget.mode);
-    final total = item.durationMs.toDouble();
-    final start = item.trimStart.toDouble().clamp(0.0, total);
-    final end = (item.trimEnd > 0 ? item.trimEnd : item.durationMs)
-        .toDouble()
-        .clamp(start, total);
-    final thumbs = item.thumbs;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            height: 56,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Positioned.fill(
-                  left: 22,
-                  right: 22,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Row(
-                      children: [
-                        for (var i = 0; i < 8; i++)
-                          Expanded(
-                            child: thumbs != null && thumbs[i] != null
-                                ? Image.memory(
-                                    thumbs[i] as Uint8List,
-                                    fit: BoxFit.cover,
-                                    height: 56,
-                                    gaplessPlayback: true,
-                                  )
-                                : Container(
-                                    color: i.isEven
-                                        ? const Color(0xFF1D2029)
-                                        : const Color(0xFF262B35),
-                                  ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-                SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 56,
-                    activeTrackColor: AppColors.lime.withValues(alpha: 0.18),
-                    inactiveTrackColor: Colors.black.withValues(alpha: 0.55),
-                    rangeTrackShape: const RectangularRangeSliderTrackShape(),
-                    rangeThumbShape: const RoundRangeSliderThumbShape(
-                      enabledThumbRadius: 9,
-                    ),
-                    thumbColor: AppColors.lime,
-                    overlayShape: SliderComponentShape.noOverlay,
-                  ),
-                  child: RangeSlider(
-                    values: RangeValues(start, end),
-                    min: 0,
-                    max: total,
-                    onChanged: (r) {
-                      var s = r.start, e = r.end;
-                      final movedStart = (s - start).abs() > (e - end).abs();
-                      if (e - s > max) {
-                        if (movedStart) {
-                          e = s + max;
-                        } else {
-                          s = e - max;
-                        }
-                      }
-                      if (e - s < 1000) {
-                        if (movedStart) {
-                          s = (e - 1000).clamp(0, total);
-                        } else {
-                          e = (s + 1000).clamp(0, total);
-                        }
-                      }
-                      setState(() {
-                        item.trimStart = s.round();
-                        item.trimEnd = e.round();
-                      });
-                      _video?.seekTo(
-                        Duration(
-                          milliseconds: movedStart
-                              ? s.round()
-                              : (e - 800).round(),
-                        ),
-                      );
-                    },
-                    onChangeEnd: (_) {
-                      _video?.seekTo(Duration(milliseconds: item.trimStart));
-                      _video?.play();
-                      _attachVoicePreview();
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Text(
-                durationLabel(item.trimStart),
-                style: const TextStyle(fontSize: 12),
-              ),
-              const Spacer(),
-              Text(
-                'Length ${durationLabel(item.trimmedMs)}'
-                '  ·  max ${durationLabel(max)}',
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.lime,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                durationLabel(end.round()),
-                style: const TextStyle(fontSize: 12),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _soundPanel() {
     final item = _item;
     return Center(
@@ -1991,9 +1815,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     _Tool.adjust => 'Adjust',
     _Tool.crop => 'Crop',
     _Tool.text => 'Text',
-    _Tool.trim => 'Trim',
     _Tool.sound => 'Sound',
-    _Tool.split => 'Split',
     _Tool.music => 'Music',
     _Tool.voice => 'Voice',
     _Tool.stickers => 'Stickers',
@@ -2004,9 +1826,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     _Tool.adjust => Icons.tune,
     _Tool.crop => Icons.crop_rotate,
     _Tool.text => Icons.text_fields,
-    _Tool.trim => Icons.content_cut,
     _Tool.sound => Icons.volume_up_outlined,
-    _Tool.split => Icons.vertical_split_outlined,
     _Tool.music => Icons.music_note_outlined,
     _Tool.voice => Icons.mic_none,
     _Tool.stickers => Icons.emoji_emotions_outlined,
@@ -2014,32 +1834,101 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
 
   // ---------------------------------------------------------------- timeline
 
-  static const double _tlPad = 16;
+  static const double _tlPad = 18;
 
-  /// v0.12: timeline of the trimmed video. Rows: video (removed parts dark,
-  /// split lines), music, voice over, one row per text / sticker. The white
-  /// line = where you are: tap or drag to move it.
+  /// v0.13: the whole video editor on one timeline:
+  /// - lime handles at both ends = trim,
+  /// - Split / Delete part / Restore act at the white line,
+  /// - voice over and texts / stickers: drag to move, drag the ends to
+  ///   choose when a text shows.
   Widget _timeline() {
     final item = _item;
     final c = _video;
     if (!item.isVideo || c == null || !_videoReady || item.durationMs <= 0) {
       return const SizedBox.shrink();
     }
+    final total = item.durationMs;
     final start = item.trimStart, end = item.endMs;
-    final len = math.max(1, end - start);
     final cuts = item.activeCuts;
+    final maxLen = maxVideoMs(widget.mode);
     return LayoutBuilder(
       builder: (context, box) {
         final w = math.max(1.0, box.maxWidth - _tlPad * 2);
-        double xOf(int ms) =>
-            _tlPad + ((ms - start) / len).clamp(0.0, 1.0) * w;
+        double xOf(int ms) => _tlPad + (ms / total).clamp(0.0, 1.0) * w;
         int msOf(double x) =>
-            (start + ((x - _tlPad) / w).clamp(0.0, 1.0) * len).round();
-        int msPerPx(double dx) => (dx / w * len).round();
+            (((x - _tlPad) / w).clamp(0.0, 1.0) * total).round();
+        int msPerPx(double dx) => (dx / w * total).round();
 
         void seek(double x) {
-          final ms = msOf(x);
+          final ms = msOf(x).clamp(start, end);
           c.seekTo(Duration(milliseconds: ms));
+        }
+
+        // ---- trim handles
+        void trimTo({int? s, int? e}) {
+          var ns = s ?? item.trimStart;
+          var ne = e ?? item.endMs;
+          if (s != null) {
+            ns = ns.clamp(0, ne - 1000);
+            if (ne - ns > maxLen) ne = ns + maxLen;
+          } else {
+            ne = ne.clamp(ns + 1000, total);
+            if (ne - ns > maxLen) ns = ne - maxLen;
+          }
+          setState(() {
+            item.trimStart = ns;
+            item.trimEnd = ne;
+          });
+          c.seekTo(
+            Duration(milliseconds: s != null ? ns : math.max(ns, ne - 600)),
+          );
+        }
+
+        void trimDone() {
+          c.seekTo(
+            Duration(
+              milliseconds: VideoTime.firstPlayable(
+                item.trimStart,
+                item.activeCuts,
+              ),
+            ),
+          );
+          if (!_recording) c.play();
+          _attachVoicePreview();
+        }
+
+        Widget handle(
+          Key key,
+          double x,
+          GestureDragUpdateCallback onDrag, {
+          required bool left,
+        }) {
+          return Positioned(
+            key: key,
+            left: x - (left ? 16 : 0),
+            width: 16,
+            top: 0,
+            bottom: 0,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragStart: (_) {
+                if (c.value.isPlaying) c.pause();
+              },
+              onHorizontalDragUpdate: onDrag,
+              onHorizontalDragEnd: (_) => trimDone(),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppColors.lime,
+                  borderRadius: BorderRadius.horizontal(
+                    left: left ? const Radius.circular(6) : Radius.zero,
+                    right: left ? Radius.zero : const Radius.circular(6),
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Container(width: 3, height: 16, color: Colors.black54),
+              ),
+            ),
+          );
         }
 
         Widget bar({
@@ -2047,84 +1936,83 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
           required int s,
           required int e,
           required Color color,
-          required String label,
+          required Widget label,
           bool selected = false,
           VoidCallback? onTap,
+          GestureDragStartCallback? onMoveStart,
           GestureDragUpdateCallback? onMove,
+          VoidCallback? onDone,
           GestureDragUpdateCallback? onStart,
           GestureDragUpdateCallback? onEnd,
         }) {
           final left = xOf(s), right = xOf(e);
-          final width = math.max(16.0, right - left);
+          final width = math.max(24.0, right - left);
+          final keyName = (key as ValueKey).value;
+          Widget end(bool isStart, GestureDragUpdateCallback f) => Positioned(
+            left: isStart ? -10 : null,
+            right: isStart ? null : -10,
+            top: -2,
+            bottom: -2,
+            width: 24,
+            child: GestureDetector(
+              key: ValueKey('$keyName-${isStart ? 'start' : 'end'}'),
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragUpdate: f,
+              onHorizontalDragEnd: (_) => onDone?.call(),
+              child: const _Handle(),
+            ),
+          );
           return Positioned(
             key: key,
             left: left,
             width: width,
-            top: 1,
-            bottom: 1,
+            top: 2,
+            bottom: 2,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: onTap,
+              onHorizontalDragStart: onMoveStart,
               onHorizontalDragUpdate: onMove,
+              onHorizontalDragEnd: onMove == null
+                  ? null
+                  : (_) => onDone?.call(),
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
                   Positioned.fill(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
                       alignment: Alignment.centerLeft,
                       decoration: BoxDecoration(
-                        color: color.withValues(alpha: selected ? 0.55 : 0.3),
-                        borderRadius: BorderRadius.circular(4),
+                        color: color.withValues(alpha: selected ? 0.6 : 0.32),
+                        borderRadius: BorderRadius.circular(6),
                         border: Border.all(
                           color: selected ? Colors.white : color,
-                          width: selected ? 1.5 : 1,
+                          width: selected ? 1.6 : 1,
                         ),
                       ),
-                      child: Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.clip,
-                        textScaler: TextScaler.noScaling,
-                        style: const TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
+                      child: label,
                     ),
                   ),
-                  if (onStart != null)
-                    Positioned(
-                      left: -8,
-                      top: -2,
-                      bottom: -2,
-                      width: 18,
-                      child: GestureDetector(
-                        key: ValueKey('${(key as ValueKey).value}-start'),
-                        behavior: HitTestBehavior.opaque,
-                        onHorizontalDragUpdate: onStart,
-                        child: const _Handle(),
-                      ),
-                    ),
-                  if (onEnd != null)
-                    Positioned(
-                      right: -8,
-                      top: -2,
-                      bottom: -2,
-                      width: 18,
-                      child: GestureDetector(
-                        key: ValueKey('${(key as ValueKey).value}-end'),
-                        behavior: HitTestBehavior.opaque,
-                        onHorizontalDragUpdate: onEnd,
-                        child: const _Handle(),
-                      ),
-                    ),
+                  if (onStart != null) end(true, onStart),
+                  if (onEnd != null) end(false, onEnd),
                 ],
               ),
             ),
           );
         }
+
+        Text barText(String t) => Text(
+          t,
+          maxLines: 1,
+          overflow: TextOverflow.clip,
+          textScaler: TextScaler.noScaling,
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+          ),
+        );
 
         Widget row(double h, List<Widget> children) => SizedBox(
           height: h,
@@ -2132,45 +2020,64 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
           child: Stack(clipBehavior: Clip.none, children: children),
         );
 
-        // ---- video row
+        // ---- video row: whole file, trim frame, removed parts, splits
         final thumbs = item.thumbs;
         const slots = 10;
-        final videoRow = row(40, [
+        final videoRow = row(48, [
           Positioned(
             left: _tlPad,
             width: w,
             top: 0,
             bottom: 0,
-            child: Row(
-              children: [
-                for (var k = 0; k < slots; k++)
-                  Expanded(
-                    child: Builder(
-                      builder: (_) {
-                        final t = start + (k + 0.5) * len / slots;
-                        final idx = thumbs == null
-                            ? -1
-                            : (t / item.durationMs * thumbs.length)
-                                  .floor()
-                                  .clamp(0, thumbs.length - 1);
-                        final b = idx >= 0 ? thumbs![idx] : null;
-                        return b != null
-                            ? Image.memory(
-                                b as Uint8List,
-                                fit: BoxFit.cover,
-                                height: 40,
-                                gaplessPlayback: true,
-                              )
-                            : Container(
-                                color: k.isEven
-                                    ? const Color(0xFF1D2029)
-                                    : const Color(0xFF262B35),
-                              );
-                      },
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Row(
+                children: [
+                  for (var k = 0; k < slots; k++)
+                    Expanded(
+                      child: Builder(
+                        builder: (_) {
+                          final t = (k + 0.5) * total / slots;
+                          final idx = thumbs == null
+                              ? -1
+                              : (t / total * thumbs.length).floor().clamp(
+                                  0,
+                                  thumbs.length - 1,
+                                );
+                          final b = idx >= 0 ? thumbs![idx] : null;
+                          return b != null
+                              ? Image.memory(
+                                  b as Uint8List,
+                                  fit: BoxFit.cover,
+                                  height: 48,
+                                  gaplessPlayback: true,
+                                )
+                              : Container(
+                                  color: k.isEven
+                                      ? const Color(0xFF1D2029)
+                                      : const Color(0xFF262B35),
+                                );
+                        },
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
+          ),
+          // outside the trim
+          Positioned(
+            left: _tlPad,
+            width: math.max(0, xOf(start) - _tlPad),
+            top: 0,
+            bottom: 0,
+            child: Container(color: Colors.black.withValues(alpha: 0.68)),
+          ),
+          Positioned(
+            left: xOf(end),
+            width: math.max(0, _tlPad + w - xOf(end)),
+            top: 0,
+            bottom: 0,
+            child: Container(color: Colors.black.withValues(alpha: 0.68)),
           ),
           for (final cut in cuts)
             Positioned(
@@ -2183,7 +2090,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                 color: Colors.black.withValues(alpha: 0.75),
                 alignment: Alignment.center,
                 child: xOf(cut.endMs) - xOf(cut.startMs) > 18
-                    ? const Icon(Icons.close, size: 14, color: AppColors.like)
+                    ? const Icon(Icons.close, size: 16, color: AppColors.like)
                     : null,
               ),
             ),
@@ -2191,47 +2098,159 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
             if (sp > start && sp < end)
               Positioned(
                 key: ValueKey('tl-split-$sp'),
-                left: xOf(sp) - 1,
-                width: 2,
-                top: -3,
-                bottom: -3,
-                child: const ColoredBox(color: AppColors.lime),
+                left: xOf(sp) - 1.5,
+                width: 3,
+                top: 0,
+                bottom: 0,
+                child: const ColoredBox(color: Colors.white),
               ),
+          // trim frame
+          Positioned(
+            left: xOf(start),
+            width: math.max(0, xOf(end) - xOf(start)),
+            top: 0,
+            bottom: 0,
+            child: IgnorePointer(
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.symmetric(
+                    horizontal: BorderSide(color: AppColors.lime, width: 2.5),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          handle(
+            const ValueKey('trim-start'),
+            xOf(start),
+            (d) => trimTo(s: item.trimStart + msPerPx(d.delta.dx)),
+            left: true,
+          ),
+          handle(
+            const ValueKey('trim-end'),
+            xOf(end),
+            (d) => trimTo(e: item.endMs + msPerPx(d.delta.dx)),
+            left: false,
+          ),
         ]);
 
+        // ---- voice over: drag to move
+        Widget? voiceRow;
+        if (item.hasVoice) {
+          final vs = VideoTime.sourceAt(item.voiceStartMs, start, cuts);
+          final ve = VideoTime.sourceAt(
+            item.voiceStartMs + item.voiceDurMs,
+            start,
+            cuts,
+          );
+          voiceRow = row(26, [
+            bar(
+              key: const ValueKey('tl-voice'),
+              s: vs,
+              e: math.min(ve, end),
+              color: const Color(0xFF4DA3FF),
+              label: barText('🎤 Voice ${durationLabel(item.voiceDurMs)}'),
+              selected: _tool == _Tool.voice,
+              onTap: () => setState(() => _tool = _Tool.voice),
+              onMoveStart: (_) {
+                if (c.value.isPlaying) c.pause();
+                setState(() => _tool = _Tool.voice);
+              },
+              onMove: (d) {
+                final src =
+                    (VideoTime.sourceAt(
+                              item.voiceStartMs,
+                              item.trimStart,
+                              item.activeCuts,
+                            ) +
+                            msPerPx(d.delta.dx))
+                        .clamp(item.trimStart, item.endMs);
+                final played = VideoTime.playedAt(
+                  src,
+                  item.trimStart,
+                  item.activeCuts,
+                );
+                setState(
+                  () => item.voiceStartMs = played.clamp(
+                    0,
+                    math.max(0, item.playedMs - 300),
+                  ),
+                );
+              },
+              onDone: _attachVoicePreview,
+            ),
+          ]);
+        }
+
         final rows = <Widget>[
-          // time
+          // time + split tools
           SizedBox(
-            height: 16,
+            height: 34,
             child: ValueListenableBuilder<VideoPlayerValue>(
               valueListenable: c,
               builder: (context, v, _) {
-                final played = VideoTime.playedAt(
-                  v.position.inMilliseconds,
-                  start,
-                  cuts,
+                final pos = v.position.inMilliseconds;
+                final played = VideoTime.playedAt(pos, start, cuts);
+                final seg = item.segmentAt(pos);
+                final onCut = seg != null && item.isCut(seg);
+                final parts = item.segments.length;
+                Widget tool(
+                  String k,
+                  IconData icon,
+                  String label,
+                  VoidCallback? f, {
+                  Color? color,
+                }) => TextButton.icon(
+                  key: ValueKey(k),
+                  onPressed: f,
+                  style: TextButton.styleFrom(
+                    foregroundColor: color ?? Colors.white,
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    textStyle: const TextStyle(
+                      fontFamily: AppTheme.fontFamily,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  icon: Icon(icon, size: 17),
+                  label: Text(label),
                 );
                 return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: _tlPad),
+                  padding: const EdgeInsets.symmetric(horizontal: _tlPad - 6),
                   child: Row(
                     children: [
-                      Text(
-                        '${durationLabel(played)} / '
-                        '${durationLabel(item.playedMs)}',
-                        key: const ValueKey('tl-time'),
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
+                      Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: Text(
+                          '${durationLabel(played)} / ${durationLabel(item.playedMs)}',
+                          key: const ValueKey('tl-time'),
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                       const Spacer(),
-                      if (item.segments.length > 1)
-                        Text(
-                          '${item.segments.length} parts',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.textSecondary,
-                          ),
+                      tool(
+                        'split-here',
+                        Icons.vertical_split_outlined,
+                        'Split',
+                        _splitHere,
+                      ),
+                      tool(
+                        'split-delete',
+                        Icons.delete_outline,
+                        'Delete',
+                        parts > 1 && !onCut ? _deletePart : null,
+                        color: AppColors.like,
+                      ),
+                      if (item.cuts.isNotEmpty || item.splits.isNotEmpty)
+                        tool(
+                          'split-restore',
+                          Icons.undo,
+                          onCut ? 'Bring back' : 'Reset',
+                          _restorePart,
                         ),
                     ],
                   ),
@@ -2241,33 +2260,20 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
           ),
           videoRow,
           if (_audio != null && _musicAllowed)
-            row(20, [
+            row(22, [
               bar(
                 key: const ValueKey('tl-music'),
                 s: start,
                 e: end,
                 color: AppColors.lime,
-                label: '♪ ${_audio!.name}',
+                label: barText('♪ ${_audio!.name}'),
+                selected: _tool == _Tool.music,
                 onTap: () => setState(() => _tool = _Tool.music),
               ),
             ]),
-          if (item.hasVoice)
-            row(20, [
-              bar(
-                key: const ValueKey('tl-voice'),
-                s: VideoTime.sourceAt(item.voiceStartMs, start, cuts),
-                e: VideoTime.sourceAt(
-                  item.voiceStartMs + item.voiceDurMs,
-                  start,
-                  cuts,
-                ),
-                color: const Color(0xFF4DA3FF),
-                label: '🎤 Voice ${durationLabel(item.voiceDurMs)}',
-                onTap: () => setState(() => _tool = _Tool.voice),
-              ),
-            ]),
+          if (item.hasVoice) voiceRow!,
           for (var i = 0; i < item.overlays.length; i++)
-            row(22, [
+            row(28, [
               () {
                 final o = item.overlays[i];
                 final s0 = math.max(o.startMs, start);
@@ -2284,6 +2290,11 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                   );
                 }
 
+                void select() => setState(() {
+                  _selOverlay = i;
+                  _tool = o.isSticker ? _Tool.stickers : _Tool.text;
+                });
+
                 return bar(
                   key: ValueKey('tl-ov-$i'),
                   s: s0,
@@ -2291,32 +2302,57 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                   color: o.isSticker
                       ? const Color(0xFFFFC53D)
                       : const Color(0xFFB97CFF),
-                  label: o.isSticker ? o.text : 'T  ${o.text}',
+                  label: o.isSticker && StickerPack.isPack(o.text)
+                      ? Align(
+                          alignment: Alignment.centerLeft,
+                          child: StickerImage(text: o.text, width: 34),
+                        )
+                      : barText(o.isSticker ? o.text : 'T  ${o.text}'),
                   selected: sel,
-                  onTap: () => setState(() {
-                    _selOverlay = i;
-                    _tool = o.isSticker ? _Tool.stickers : _Tool.text;
-                  }),
-                  onMove: sel
-                      ? (d) {
-                          final dm = msPerPx(d.delta.dx);
-                          final l = e0 - s0;
-                          final ns = (s0 + dm).clamp(start, end - l);
-                          setTimes(ns, ns + l);
-                        }
-                      : null,
-                  onStart: sel
-                      ? (d) => setTimes(
-                          (s0 + msPerPx(d.delta.dx)).clamp(start, e0 - 300),
-                          e0,
-                        )
-                      : null,
-                  onEnd: sel
-                      ? (d) => setTimes(
-                          s0,
-                          (e0 + msPerPx(d.delta.dx)).clamp(s0 + 300, end),
-                        )
-                      : null,
+                  onTap: select,
+                  // v0.13: drag right away (no need to select first)
+                  onMoveStart: (_) {
+                    if (c.value.isPlaying) c.pause();
+                    if (!sel) select();
+                  },
+                  onMove: (d) {
+                    final cur = item.overlays[i];
+                    final cs = math.max(cur.startMs, item.trimStart);
+                    final ce = cur.endMs > 0
+                        ? math.min(cur.endMs, item.endMs)
+                        : item.endMs;
+                    final l = ce - cs;
+                    final ns = (cs + msPerPx(d.delta.dx)).clamp(
+                      item.trimStart,
+                      item.endMs - l,
+                    );
+                    setTimes(ns, ns + l);
+                  },
+                  onStart: (d) {
+                    final cur = item.overlays[i];
+                    final cs = math.max(cur.startMs, item.trimStart);
+                    final ce = cur.endMs > 0
+                        ? math.min(cur.endMs, item.endMs)
+                        : item.endMs;
+                    setTimes(
+                      (cs + msPerPx(d.delta.dx)).clamp(
+                        item.trimStart,
+                        ce - 300,
+                      ),
+                      ce,
+                    );
+                  },
+                  onEnd: (d) {
+                    final cur = item.overlays[i];
+                    final cs = math.max(cur.startMs, item.trimStart);
+                    final ce = cur.endMs > 0
+                        ? math.min(cur.endMs, item.endMs)
+                        : item.endMs;
+                    setTimes(
+                      cs,
+                      (ce + msPerPx(d.delta.dx)).clamp(cs + 300, item.endMs),
+                    );
+                  },
                 );
               }(),
             ]),
@@ -2337,7 +2373,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                         Positioned(
                           key: const ValueKey('tl-playhead'),
                           left: x - 1,
-                          top: 14,
+                          top: 32,
                           bottom: 0,
                           width: 2,
                           child: const DecoratedBox(
@@ -2372,10 +2408,10 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
             if (_scrubWasPlaying && !_recording) c.play();
           },
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 150),
+            constraints: const BoxConstraints(maxHeight: 190),
             child: SingleChildScrollView(
               physics: const ClampingScrollPhysics(),
-              padding: const EdgeInsets.only(top: 4, bottom: 6),
+              padding: const EdgeInsets.only(top: 2, bottom: 6),
               child: content,
             ),
           ),

@@ -1,3 +1,5 @@
+import 'net_priority.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -14,7 +16,18 @@ import 'uploader.dart';
 /// What the file is used for (decides the folder in Tigris + size limits).
 /// What a file is for (folder on the server). v0.9: chat photos / GIFs
 /// and voice messages.
-enum MediaKind { post, clip, story, avatar, cover, thumb, audio, comment, chat, voice }
+enum MediaKind {
+  post,
+  clip,
+  story,
+  avatar,
+  cover,
+  thumb,
+  audio,
+  comment,
+  chat,
+  voice,
+}
 
 /// What the create flow may pick.
 enum PickKind {
@@ -305,7 +318,8 @@ class MediaService {
       file = File(path);
     } else {
       // content:// file -> copy it to a temp file
-      final bytes = f.bytes ??
+      final bytes =
+          f.bytes ??
           (f.xFile.path.isEmpty ? null : await f.xFile.readAsBytes());
       if (bytes == null) throw StateError('Could not open this file');
       final dir = await Directory.systemTemp.createTemp('ig_audio');
@@ -430,7 +444,11 @@ class MediaService {
     //    has it
     if (resume != null && resume.size == size && resume.partSize >= 5 << 20) {
       final missing = [
-        for (var n = 1; n <= Uploader.planParts(size, resume.partSize).length; n++)
+        for (
+          var n = 1;
+          n <= Uploader.planParts(size, resume.partSize).length;
+          n++
+        )
           if (!resume.etags.containsKey(n)) n,
       ];
       try {
@@ -442,7 +460,9 @@ class MediaService {
             'parts': missing,
           });
           final m = (r['partUrls'] as Map?) ?? const {};
-          urls = {for (final e in m.entries) int.parse('${e.key}'): '${e.value}'};
+          urls = {
+            for (final e in m.entries) int.parse('${e.key}'): '${e.value}',
+          };
         }
         state = resume;
       } on ApiException catch (e) {
@@ -488,6 +508,8 @@ class MediaService {
         for (var i = 0; i < parts.length; i++)
           if (!st.etags.containsKey(i + 1))
             () async {
+              // v0.13: pull to refresh goes first
+              await NetPriority.waitQuiet();
               final url = urls[i + 1];
               if (url == null) {
                 throw const ApiException('Upload failed: missing part link');
@@ -534,7 +556,6 @@ class MediaService {
       rethrow;
     }
   }
-
 
   /// Turns a Tigris XML error into a short, readable message.
   static String _storageError(int status, String body) {

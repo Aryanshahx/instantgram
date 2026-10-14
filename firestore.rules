@@ -36,6 +36,8 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if signedIn() && me() == uid
         && request.resource.data.uid == uid
+        // v0.13: only the admin website sets these
+        && !request.resource.data.keys().hasAny(['verified', 'banned'])
         && (!('country' in request.resource.data)
             || (request.resource.data.country is string
                 && request.resource.data.country.size() <= 3));
@@ -407,6 +409,8 @@ service cloud.firestore {
         && request.resource.data.members == resource.data.members
         // v0.10 ticks: you only set YOUR seen / delivered time
         && onlyMyKey('seen') && onlyMyKey('delivered')
+        // v0.13: "typing…" (only your own key)
+        && onlyMyKey('typing')
         // v0.11: disappearing messages (off / once seen / 24 h / 7 days)
         && request.resource.data.get('disappear', 'off') in ['off', 'seen', '24h', '7d'];
       allow delete: if false;
@@ -491,6 +495,36 @@ service cloud.firestore {
 
     // ---------------- v0.10: Active status ----------------
     // presence/{uid} = {lastActive, hidden}
+    // v0.13: set by the admin website only (verified badges ...)
+    match /config/{doc} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // v0.13: reports for the admin website (users can only add)
+    match /reports/{rid} {
+      allow read, update, delete: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['kind', 'reporterUid',
+             'reporterUsername', 'targetId', 'postId', 'targetUid',
+             'reason', 'message', 'createdAt'])
+        && request.resource.data.reporterUid == me()
+        && request.resource.data.kind in ['post', 'clip', 'comment', 'user']
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.get('reporterUsername', '') is string
+        && request.resource.data.get('reporterUsername', '').size() <= 40
+        && request.resource.data.get('targetId', '') is string
+        && request.resource.data.get('targetId', '').size() <= 128
+        && request.resource.data.get('postId', '') is string
+        && request.resource.data.get('postId', '').size() <= 128
+        && request.resource.data.get('targetUid', '') is string
+        && request.resource.data.get('targetUid', '').size() <= 128
+        && request.resource.data.get('reason', '') is string
+        && request.resource.data.get('reason', '').size() <= 80
+        && request.resource.data.get('message', '') is string
+        && request.resource.data.get('message', '').size() <= 2000;
+    }
+
     match /presence/{uid} {
       allow read: if signedIn();
       allow create, update: if signedIn() && me() == uid
@@ -521,7 +555,10 @@ service cloud.firestore {
       allow read, delete: if signedIn() && me() == uid;
       allow create, update: if signedIn() && me() == uid
         && request.resource.data.keys().hasOnly(['pinnedChats', 'mutedChats',
-             'mutedCalls', 'cleared', 'updatedAt', 'pushOff'])
+             'mutedCalls', 'cleared', 'updatedAt', 'pushOff', 'vanishChats'])
+        // v0.13: disappearing messages only on your phone
+        && request.resource.data.get('vanishChats', {}) is map
+        && request.resource.data.get('vanishChats', {}).size() <= 1000
         && request.resource.data.get('pushOff', []) is list
         && request.resource.data.get('pushOff', []).size() <= 20
         && request.resource.data.get('pinnedChats', []) is list

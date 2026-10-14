@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>InstantGram Admin</title>
+<style>
+  :root {
+    --bg: #0d0f14; --card: #161a22; --card2: #1d222c; --line: #2a303c;
+    --text: #f2f4f8; --muted: #8e96a6; --lime: #c6ff3d; --red: #ff4d6d; --blue: #3897f0;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--lime); }
+  button { font: inherit; cursor: pointer; border: 0; border-radius: 10px; padding: 8px 14px;
+    background: var(--card2); color: var(--text); font-weight: 600; }
+  button:hover { filter: brightness(1.15); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.lime { background: var(--lime); color: #111; }
+  button.red { background: rgba(255,77,109,.15); color: var(--red); }
+  button.blue { background: rgba(56,151,240,.15); color: var(--blue); }
+  button.ghost { background: transparent; color: var(--muted); }
+  input, textarea, select { font: inherit; color: var(--text); background: var(--card2);
+    border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; width: 100%; }
+  input:focus, textarea:focus { outline: 2px solid var(--lime); border-color: transparent; }
+  .hide { display: none !important; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .grow { flex: 1; }
+  .logo { font-weight: 800; font-size: 20px; letter-spacing: -.3px; }
+  .logo b { color: var(--lime); }
+
+  /* login */
+  #login { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
+  .box { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 26px; width: 100%; max-width: 360px; }
+  .box h1 { margin: 0 0 4px; font-size: 22px; }
+  .box label { display: block; margin: 14px 0 6px; color: var(--muted); font-size: 12px; }
+  .msg { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: rgba(255,77,109,.12); color: #ffb3c1; font-size: 13px; word-break: break-word; }
+  .msg.ok { background: rgba(198,255,61,.12); color: var(--lime); }
+
+  /* app */
+  header { position: sticky; top: 0; z-index: 5; background: rgba(13,15,20,.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line); padding: 10px 16px; }
+  nav { display: flex; gap: 4px; overflow-x: auto; }
+  nav button { background: transparent; color: var(--muted); padding: 7px 12px; white-space: nowrap; }
+  nav button.on { background: rgba(198,255,61,.12); color: var(--lime); }
+  main { max-width: 1100px; margin: 0 auto; padding: 18px 16px 60px; }
+  h2 { margin: 6px 0 14px; font-size: 18px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+  .stat .n { font-size: 26px; font-weight: 800; }
+  .stat .l { color: var(--muted); font-size: 12px; }
+  .list { display: flex; flex-direction: column; gap: 6px; }
+  .item { display: flex; gap: 12px; align-items: center; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 10px 12px; cursor: pointer; }
+  .item:hover { border-color: #3a4252; }
+  .av { width: 40px; height: 40px; border-radius: 50%; background: var(--card2) center/cover; flex: none;
+    display: grid; place-items: center; font-weight: 800; color: var(--muted); }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 700; margin-left: 4px; }
+  .tag.red { background: rgba(255,77,109,.15); color: var(--red); }
+  .tag.blue { background: rgba(56,151,240,.15); color: var(--blue); }
+  .tag.lime { background: rgba(198,255,61,.12); color: var(--lime); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .tile { position: relative; aspect-ratio: 3/4; border-radius: 12px; overflow: hidden; background: var(--card2) center/cover; cursor: pointer; border: 1px solid var(--line); }
+  .tile .meta { position: absolute; inset: auto 0 0 0; padding: 18px 8px 6px; font-size: 11px;
+    background: linear-gradient(transparent, rgba(0,0,0,.85)); }
+  .tile .kind { position: absolute; top: 6px; left: 6px; }
+  .more { margin: 14px auto 0; display: block; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tabs button.on { background: var(--lime); color: #111; }
+
+  /* drawer */
+  #shade { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 10; }
+  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100%); background: var(--bg);
+    border-left: 1px solid var(--line); z-index: 11; overflow-y: auto; padding: 16px 18px 40px; }
+  .media { display: flex; gap: 8px; overflow-x: auto; margin: 10px 0; }
+  .media img, .media video { height: 320px; max-width: 100%; border-radius: 12px; background: #000; }
+  .comment { padding: 8px 0; border-bottom: 1px solid var(--line); display: flex; gap: 8px; }
+  .kv { display: grid; grid-template-columns: 120px 1fr; gap: 4px 10px; font-size: 13px; margin: 10px 0; }
+  .kv div:nth-child(odd) { color: var(--muted); }
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--card2);
+    border: 1px solid var(--line); padding: 10px 16px; border-radius: 12px; z-index: 20; max-width: 90vw; }
+  .progress { height: 8px; background: var(--card2); border-radius: 9px; overflow: hidden; margin-top: 10px; }
+  .progress div { height: 100%; width: 0; background: var(--lime); transition: width .3s; }
+</style>
+</head>
+<body>
+
+<!-- ============ login ============ -->
+<section id="login" class="hide">
+  <form class="box" id="loginForm" autocomplete="on">
+    <div class="logo">Instant<b>Gram</b></div>
+    <h1>Admin</h1>
+    <div class="muted small">Log in with your InstantGram admin account.</div>
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="username" required value="techlabs.hyper@gmail.com">
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required>
+    <button class="lime" style="width:100%;margin-top:18px" id="loginBtn">Log in</button>
+    <div id="loginMsg" class="msg hide"></div>
+    <button type="button" id="verifyBtn" class="hide" style="width:100%;margin-top:10px">Send verification email</button>
+  </form>
+</section>
+
+<!-- ============ app ============ -->
+<section id="app" class="hide">
+  <header>
+    <div class="row" style="margin-bottom:8px">
+      <div class="logo grow">Instant<b>Gram</b> <span class="muted small">admin</span></div>
+      <span id="who" class="muted small"></span>
+      <button class="ghost small" id="logout">Log out</button>
+    </div>
+    <nav id="nav">
+      <button data-page="dash" class="on">Dashboard</button>
+      <button data-page="users">Users</button>
+      <button data-page="posts">Posts &amp; clips</button>
+      <button data-page="reports">Reports</button>
+      <button data-page="notice">Send notice</button>
+    </nav>
+  </header>
+  <main>
+    <div id="page-dash">
+      <div class="row"><h2 class="grow">Dashboard</h2><button id="dashRefresh">Refresh</button></div>
+      <div class="cards" id="stats"></div>
+      <h2 style="margin-top:24px">Newest users</h2>
+      <div class="list" id="dashUsers"></div>
+      <h2 style="margin-top:24px">Newest posts</h2>
+      <div class="grid" id="dashPosts"></div>
+    </div>
+
+    <div id="page-users" class="hide">
+      <h2>Users</h2>
+      <form class="row" id="userSearch" style="margin-bottom:12px">
+        <input id="userQ" class="grow" placeholder="Search username, email or user id" style="flex:1;width:auto">
+        <button class="lime">Search</button>
+      </form>
+      <div class="list" id="userList"></div>
+      <button class="more hide" id="userMore">Load more</button>
+    </div>
+
+    <div id="page-posts" class="hide">
+      <h2>Posts &amp; clips</h2>
+      <div class="tabs" id="postTabs">
+        <button data-type="all" class="on">All</button>
+        <button data-type="clip">Clips</button>
+        <button data-type="photo">Posts</button>
+        <button data-type="moment">Moments</button>
+      </div>
+      <div class="grid" id="postGrid"></div>
+      <button class="more hide" id="postMore">Load more</button>
+    </div>
+
+    <div id="page-reports" class="hide">
+      <div class="row"><h2 class="grow">Reports</h2><button id="repRefresh">Refresh</button></div>
+      <div class="muted small" style="margin-bottom:10px">Reports from the app (new since v0.13). Press Done after you handled one.</div>
+      <div class="list" id="repList"></div>
+      <button class="more hide" id="repMore">Load more</button>
+    </div>
+
+    <div id="page-notice" class="hide">
+      <h2>Send notice</h2>
+      <div class="box" style="max-width:560px">
+        <label class="muted small">Send to</label>
+        <div class="row" style="margin:6px 0 12px">
+          <label class="row"><input type="radio" name="to" value="all" checked style="width:auto"> Everyone</label>
+          <label class="row"><input type="radio" name="to" value="one" style="width:auto"> One user</label>
+        </div>
+        <div id="noticeOne" class="hide" style="margin-bottom:12px">
+          <input id="noticeUser" placeholder="username">
+          <div class="small muted" id="noticeUserInfo" style="margin-top:6px"></div>
+        </div>
+        <label class="muted small">Title</label>
+        <input id="noticeTitle" value="InstantGram" maxlength="80" style="margin:6px 0 12px">
+        <label class="muted small">Message</label>
+        <textarea id="noticeText" rows="5" maxlength="900" style="margin-top:6px" placeholder="Write your message"></textarea>
+        <button class="lime" id="noticeSend" style="margin-top:14px">Send</button>
+        <div class="progress hide" id="noticeBar"><div></div></div>
+        <div class="small muted" id="noticeStatus" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </main>
+</section>
+
+<div id="shade" class="hide"></div>
+<aside id="drawer" class="hide"></aside>
+<div id="toast" class="hide"></div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const safeUrl = (u) => (/^https:\/\//.test(String(u || '')) ? String(u) : '');
+  const fmt = (n) => (n == null ? '–' : Number(n).toLocaleString('en-US'));
+  const when = (t) => {
+    if (!t) return '';
+    const d = new Date(t); if (isNaN(d)) return '';
+    const s = (Date.now() - d) / 1000;
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+    if (s < 86400 * 30) return `${Math.floor(s / 86400)} d ago`;
+    return d.toLocaleDateString();
+  };
+  const full = (t) => (t ? new Date(t).toLocaleString() : '–');
+
+  // ---------------- session ----------------
+  const KEY = 'ig_admin_session';
+  let sess = null;
+  try { sess = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { sess = null; }
+  const save = () => (sess ? localStorage.setItem(KEY, JSON.stringify(sess)) : localStorage.removeItem(KEY));
+
+  async function raw(body, token) {
+    const r = await fetch('/api/admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => ({ error: `Server error (${r.status})` }));
+    if (!r.ok) { const e = new Error(j.error || `Error ${r.status}`); e.status = r.status; throw e; }
+    return j;
+  }
+
+  async function fresh() {
+    if (!sess) throw Object.assign(new Error('Not logged in'), { status: 401 });
+    if (Date.now() > sess.until - 120000) {
+      const s = await raw({ action: 'refresh', refreshToken: sess.refreshToken });
+      sess = { ...sess, ...s, until: Date.now() + s.expiresIn * 1000 };
+      save();
+    }
+    return sess.idToken;
+  }
+
+  async function api(action, body = {}) {
+    try {
+      return await raw({ action, ...body }, await fresh());
+    } catch (e) {
+      if (e.status === 401) { logout(e.message); }
+      throw e;
+    }
+  }
+
+  function toast(text, ms = 2600) {
+    const t = $('toast'); t.textContent = text; t.classList.remove('hide');
+    clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.add('hide'), ms);
+  }
+  const fail = (e) => toast(e.message || String(e), 6000);
+
+  // ---------------- login ----------------
+  let pendingVerify = '';
+  function showMsg(text, ok = false) {
+    const m = $('loginMsg'); m.textContent = text; m.className = ok ? 'msg ok' : 'msg';
+  }
+  $('loginForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    $('loginBtn').disabled = true; $('verifyBtn').classList.add('hide');
+    try {
+      const s = await raw({ action: 'login', email: $('email').value, password: $('password').value });
+      if (!s.emailVerified) {
+        pendingVerify = s.idToken;
+        showMsg('Your email is not verified yet. Press the button, open the email, click the link, then log in again.');
+        $('verifyBtn').classList.remove('hide');
+        return;
+      }
+      sess = { ...s, until: Date.now() + s.expiresIn * 1000 };
+      save(); $('password').value = '';
+      start();
+    } catch (e) { showMsg(e.message); }
+    finally { $('loginBtn').disabled = false; }
+  });
+  $('verifyBtn').addEventListener('click', async () => {
+    try { await raw({ action: 'sendVerify', idToken: pendingVerify }); showMsg('Email sent. Check your inbox (and spam), click the link, then log in again.', true); $('verifyBtn').classList.add('hide'); }
+    catch (e) { showMsg(e.message); }
+  });
+  function logout(reason) {
+    sess = null; save();
+    $('app').classList.add('hide'); $('login').classList.remove('hide'); closeDrawer();
+    if (reason && reason !== true) showMsg(reason);
+  }
+  $('logout').addEventListener('click', () => logout(true));
+
+  // ---------------- navigation ----------------
+  const loaded = {};
+  function go(page) {
+    for (const b of $('nav').children) b.classList.toggle('on', b.dataset.page === page);
+    for (const p of ['dash', 'users', 'posts', 'reports', 'notice']) $(`page-${p}`).classList.toggle('hide', p !== page);
+    if (!loaded[page]) { loaded[page] = true; ({ dash: loadDash, users: () => loadUsers(true), posts: () => loadPosts(true), reports: () => loadReports(true), notice: () => {} })[page](); }
+  }
+  $('nav').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) go(b.dataset.page); });
+
+  async function start() {
+    $('login').classList.add('hide'); $('app').classList.remove('hide');
+    try {
+      const me = await api('me');
+      $('who').textContent = me.email;
+      if (!me.ready) toast('FIREBASE_SERVICE_ACCOUNT is missing on Vercel: data can not load.', 9000);
+    } catch (e) { if (e.status !== 401) fail(e); return; }
+    for (const k of Object.keys(loaded)) delete loaded[k];
+    go('dash');
+  }
+
+  // ---------------- cards ----------------
+  const avatar = (u) => {
+    const url = safeUrl(u.photoUrl);
+    return url ? `<div class="av" style="background-image:url('${esc(url)}')"></div>` : `<div class="av">${esc((u.username || '?')[0].toUpperCase())}</div>`;
+  };
+  const userRow = (u) => `
+    <div class="item" data-uid="${esc(u.uid)}">
+      ${avatar(u)}
+      <div class="grow" style="min-width:0">
+        <div><b>@${esc(u.username || '(no username)')}</b>${u.verified ? '<span class="tag blue">verified</span>' : ''}${u.banned ? '<span class="tag red">blocked</span>' : ''}${u.private ? '<span class="tag lime">private</span>' : ''}</div>
+        <div class="muted small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.name)} · ${esc(u.email)}</div>
+      </div>
+      <div class="muted small" style="text-align:right">${fmt(u.followers)} followers<br>${fmt(u.posts)} posts · ${esc(when(u.createdAt))}</div>
+    </div>`;
+  const tile = (p) => {
+    const bg = safeUrl(p.thumb);
+    const label = p.kind === 'moment' ? 'moment' : p.type === 'clip' ? 'clip' : 'post';
+    return `<div class="tile" data-pid="${esc(p.id)}" data-kind="${esc(p.kind)}" style="${bg ? `background-image:url('${esc(bg)}')` : ''}">
+      <span class="tag lime kind">${label}${p.count > 1 ? ` · ${p.count}` : ''}</span>
+      ${!bg && p.isVideo ? '<div style="position:absolute;inset:0;display:grid;place-items:center;font-size:30px">▶</div>' : ''}
+      <div class="meta"><b>@${esc(p.authorUsername)}</b><br>${p.kind === 'moment' ? esc(when(p.createdAt)) : `♥ ${fmt(p.likes)} · 💬 ${fmt(p.comments)} · 👁 ${fmt(p.views)}`}</div>
+    </div>`;
+  };
+  document.addEventListener('click', (e) => {
+    const u = e.target.closest('[data-uid]'); if (u && !e.target.closest('button')) return openUser(u.dataset.uid);
+    const p = e.target.closest('[data-pid]'); if (p && !e.target.closest('button')) return openPost(p.dataset.pid, p.dataset.kind);
+  });
+
+  // ---------------- dashboard ----------------
+  async function loadDash() {
+    $('stats').innerHTML = '<div class="muted">Loading…</div>';
+    try {
+      const s = await api('stats');
+      const items = [
+        ['Users', s.users], ['New today', s.users24h], ['New this week', s.users7d],
+        ['Online now', s.online], ['Active today', s.active24h],
+        ['Posts + clips', s.posts], ['Clips', s.clips], ['Posts', s.photos], ['Live moments', s.moments],
+        ['Chats', s.chats], ['Open reports', s.reports], ['Blocked', s.banned], ['Verified', s.verified], ['Phones (push)', s.phones],
+      ];
+      $('stats').innerHTML = items.map(([l, n]) => `<div class="stat"><div class="n">${fmt(n)}</div><div class="l">${l}</div></div>`).join('');
+    } catch (e) { $('stats').innerHTML = `<div class="msg">${esc(e.message)}</div>`; }
+    api('users', {}).then((r) => { $('dashUsers').innerHTML = r.users.slice(0, 6).map(userRow).join('') || '<div class="muted">No users</div>'; }).catch((e) => { $('dashUsers').innerHTML = `<div class="msg">${esc(e.message)}</div>`; });
+    api('posts', { type: 'all' }).then((r) => { $('dashPosts').innerHTML = r.posts.slice(0, 12).map(tile).join('') || '<div class="muted">No posts</div>'; }).catch((e) => { $('dashPosts').innerHTML = `<div class="msg">${esc(e.message)}</div>`; });
+  }
+  $('dashRefresh').addEventListener('click', loadDash);
+
+  // ---------------- users ----------------
+  let userCursor = '';
+  async function loadUsers(reset) {
+    if (reset) { userCursor = ''; $('userList').innerHTML = '<div class="muted">Loading…</div>'; }
+    try {
+      const q = $('userQ').value.trim();
+      const r = await api('users', { q, cursor: userCursor });
+      if (reset) $('userList').innerHTML = '';
+      $('userList').insertAdjacentHTML('beforeend', r.users.map(userRow).join('') || (reset ? '<div class="muted">No users found</div>' : ''));
+      userCursor = r.cursor; $('userMore').classList.toggle('hide', !r.cursor);
+    } catch (e) { $('userList').innerHTML = `<div class="msg">${esc(e.message)}</div>`; }
+  }
+  $('userSearch').addEventListener('submit', (e) => { e.preventDefault(); loadUsers(true); });
+  $('userMore').addEventListener('click', () => loadUsers(false));
+
+  // ---------------- posts ----------------
+  let postType = 'all', postCursor = '';
+  async function loadPosts(reset) {
+    if (reset) { postCursor = ''; $('postGrid').innerHTML = '<div class="muted">Loading…</div>'; }
+    try {
+      const r = await api('posts', { type: postType, cursor: postCursor });
+      if (reset) $('postGrid').innerHTML = '';
+      $('postGrid').insertAdjacentHTML('beforeend', r.posts.map(tile).join('') || (reset ? '<div class="muted">Nothing here</div>' : ''));
+      postCursor = r.cursor; $('postMore').classList.toggle('hide', !r.cursor);
+    } catch (e) { $('postGrid').innerHTML = `<div class="msg">${esc(e.message)}</div>`; }
+  }
+  $('postTabs').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    postType = b.dataset.type;
+    for (const x of $('postTabs').children) x.classList.toggle('on', x === b);
+    loadPosts(true);
+  });
+  $('postMore').addEventListener('click', () => loadPosts(false));
+
+  // ---------------- reports ----------------
+  let repCursor = '';
+  const repRow = (r) => `
+    <div class="item" style="cursor:default;align-items:flex-start" id="rep-${esc(r.id)}">
+      <div class="grow">
+        <div><span class="tag red">${esc(r.kind)}</span> <b>${esc(r.reason)}</b> <span class="muted small">· ${esc(when(r.createdAt))} · by @${esc(r.reporterUsername || r.reporterUid)}</span></div>
+        ${r.message ? `<div style="margin-top:4px;white-space:pre-wrap">${esc(r.message)}</div>` : ''}
+        <div class="row" style="margin-top:8px">
+          ${r.postId ? `<button class="small" data-open-post="${esc(r.postId)}">Open post</button>` : ''}
+          ${r.targetUid ? `<button class="small" data-open-user="${esc(r.targetUid)}">Open user</button>` : ''}
+          <button class="lime small" data-done="${esc(r.id)}">Done</button>
+        </div>
+      </div>
+    </div>`;
+  async function loadReports(reset) {
+    if (reset) { repCursor = ''; $('repList').innerHTML = '<div class="muted">Loading…</div>'; }
+    try {
+      const r = await api('reports', { cursor: repCursor });
+      if (reset) $('repList').innerHTML = '';
+      $('repList').insertAdjacentHTML('beforeend', r.reports.map(repRow).join('') || (reset ? '<div class="muted">No open reports 🎉</div>' : ''));
+      repCursor = r.cursor; $('repMore').classList.toggle('hide', !r.cursor);
+    } catch (e) { $('repList').innerHTML = `<div class="msg">${esc(e.message)}</div>`; }
+  }
+  $('repRefresh').addEventListener('click', () => loadReports(true));
+  $('repMore').addEventListener('click', () => loadReports(false));
+  document.addEventListener('click', async (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.openPost) return openPost(b.dataset.openPost, 'post');
+    if (b.dataset.openUser) return openUser(b.dataset.openUser);
+    if (b.dataset.done) {
+      b.disabled = true;
+      try { await api('resolveReport', { id: b.dataset.done }); const el = document.getElementById(`rep-${b.dataset.done}`); if (el) el.remove(); toast('Report closed'); }
+      catch (err) { fail(err); b.disabled = false; }
+    }
+  });
+
+  // ---------------- drawer ----------------
+  function openDrawer(html) { $('drawer').innerHTML = html; $('drawer').classList.remove('hide'); $('shade').classList.remove('hide'); $('drawer').scrollTop = 0; }
+  function closeDrawer() { $('drawer').classList.add('hide'); $('shade').classList.add('hide'); $('drawer').querySelectorAll('video').forEach((v) => v.pause()); }
+  $('shade').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+  const drawerHead = (title) => `<div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">${title}</h2><button class="ghost" data-close>✕</button></div>`;
+  $('drawer').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeDrawer(); });
+
+  async function openUser(uid) {
+    openDrawer(drawerHead('User') + '<div class="muted">Loading…</div>');
+    try {
+      const r = await api('user', { uid });
+      const u = r.user;
+      openDrawer(`${drawerHead(`@${esc(u.username)}`)}
+        <div class="row">${avatar(u)}<div class="grow"><b>${esc(u.name)}</b>${u.verified ? '<span class="tag blue">verified</span>' : ''}${u.banned ? '<span class="tag red">blocked</span>' : ''}<div class="muted small">${r.online ? '🟢 online' : r.lastActive ? `active ${esc(when(r.lastActive))}` : ''}</div></div></div>
+        ${u.bio ? `<div style="margin:10px 0;white-space:pre-wrap">${esc(u.bio)}</div>` : ''}
+        <div class="kv">
+          <div>Email</div><div>${esc(u.email)} ${r.auth.emailVerified ? '✔' : ''}</div>
+          <div>User id</div><div class="small">${esc(u.uid)}</div>
+          <div>Followers</div><div>${fmt(u.followers)} · following ${fmt(u.following)}</div>
+          <div>Posts</div><div>${fmt(u.posts)}</div>
+          <div>Country</div><div>${esc(u.country || '–')} · language ${esc(u.language || '–')}</div>
+          <div>Joined</div><div>${esc(full(u.createdAt || r.auth.createdAt))}</div>
+          <div>Last login</div><div>${esc(full(r.auth.lastLoginAt))}</div>
+          <div>Phones</div><div>${fmt(r.phones)} (for notifications)</div>
+          ${r.auth.error ? `<div>Login account</div><div class="small">${esc(r.auth.error)}</div>` : ''}
+        </div>
+        <div class="row" style="margin:12px 0">
+          <button class="blue" id="uVerify">${u.verified ? 'Remove badge' : 'Give verified badge'}</button>
+          <button class="red" id="uBan">${u.banned ? 'Unblock' : 'Block account'}</button>
+          <button id="uNotice">Send notice</button>
+        </div>
+        ${r.reports.length ? `<h3>Reports about this user (${r.reports.length})</h3>${r.reports.map((x) => `<div class="small" style="margin:4px 0">• ${esc(x.reason)} — ${esc(x.message || '')} <span class="muted">${esc(when(x.createdAt))}</span></div>`).join('')}` : ''}
+        <h3>Posts &amp; clips</h3>
+        <div class="grid">${r.posts.map(tile).join('') || '<div class="muted">No posts</div>'}</div>`);
+      $('uVerify').onclick = async () => {
+        try { await api('verify', { uid, on: !u.verified }); toast(u.verified ? 'Badge removed' : 'Verified badge given ✔'); openUser(uid); } catch (e) { fail(e); }
+      };
+      $('uBan').onclick = async () => {
+        if (!u.banned && !confirm(`Block @${u.username}? They are logged out and can't log in any more.`)) return;
+        try { await api('ban', { uid, on: !u.banned }); toast(u.banned ? 'Unblocked' : 'Account blocked'); openUser(uid); } catch (e) { fail(e); }
+      };
+      $('uNotice').onclick = () => { closeDrawer(); go('notice'); document.querySelector('input[name=to][value=one]').click(); $('noticeUser').value = u.username; pickUser(); };
+    } catch (e) { openDrawer(drawerHead('User') + `<div class="msg">${esc(e.message)}</div>`); }
+  }
+
+  async function openPost(id, kind) {
+    openDrawer(drawerHead('Post') + '<div class="muted">Loading…</div>');
+    try {
+      const r = await api('post', { id, kind });
+      const p = r.post;
+      const media = p.media.map((m) => {
+        const url = safeUrl(m.url);
+        if (!url) return '';
+        return m.video ? `<video src="${esc(url)}" poster="${esc(safeUrl(m.thumb))}" controls playsinline preload="metadata"></video>` : `<img src="${esc(url)}" alt="">`;
+      }).join('');
+      openDrawer(`${drawerHead(p.kind === 'moment' ? 'Moment' : p.type === 'clip' ? 'Clip' : 'Post')}
+        <div class="row"><b class="grow" data-uid="${esc(p.authorId)}" style="cursor:pointer">@${esc(p.authorUsername)}</b><span class="muted small">${esc(full(p.createdAt))}</span></div>
+        <div class="media">${media}</div>
+        ${p.caption ? `<div style="white-space:pre-wrap;margin-bottom:8px">${esc(p.caption)}</div>` : ''}
+        ${p.kind === 'moment' ? `<div class="muted small">Ends ${esc(full(p.expiresAt))}</div>` : `<div class="muted small">♥ ${fmt(p.likes)} · 💬 ${fmt(p.comments)} · 👁 ${fmt(p.views)}</div>`}
+        <div class="row" style="margin:12px 0"><button class="red" id="pDel">Delete ${p.kind === 'moment' ? 'moment' : p.type === 'clip' ? 'clip' : 'post'}</button></div>
+        ${p.kind === 'moment' ? '' : `<h3>Comments (${r.comments.length})</h3>${r.comments.map((c) => `
+          <div class="comment" id="c-${esc(c.id)}">
+            <div class="grow"><b data-uid="${esc(c.authorId)}" style="cursor:pointer">@${esc(c.authorUsername)}</b> <span class="muted small">${esc(when(c.createdAt))}</span>
+              <div style="white-space:pre-wrap">${esc(c.text)}</div>
+              ${safeUrl(c.imageUrl) ? `<img src="${esc(safeUrl(c.imageUrl))}" alt="" style="max-height:120px;border-radius:8px;margin-top:4px">` : ''}</div>
+            <button class="red small" data-del-comment="${esc(c.id)}">Delete</button>
+          </div>`).join('') || '<div class="muted">No comments</div>'}`}`);
+      $('pDel').onclick = async () => {
+        if (!confirm('Delete it for everyone? This can not be undone.')) return;
+        try { await api('deletePost', { id, kind: p.kind }); toast('Deleted'); closeDrawer(); document.querySelectorAll(`[data-pid="${CSS.escape(id)}"]`).forEach((el) => el.remove()); } catch (e) { fail(e); }
+      };
+      $('drawer').querySelectorAll('[data-del-comment]').forEach((b) => {
+        b.onclick = async () => {
+          if (!confirm('Delete this comment?')) return;
+          try { await api('deleteComment', { postId: id, id: b.dataset.delComment }); document.getElementById(`c-${b.dataset.delComment}`)?.remove(); toast('Comment deleted'); } catch (e) { fail(e); }
+        };
+      });
+    } catch (e) { openDrawer(drawerHead('Post') + `<div class="msg">${esc(e.message)}</div>`); }
+  }
+
+  // ---------------- notice ----------------
+  let noticeUid = '';
+  document.querySelectorAll('input[name=to]').forEach((r) => r.addEventListener('change', () => {
+    $('noticeOne').classList.toggle('hide', document.querySelector('input[name=to]:checked').value !== 'one');
+  }));
+  let pickTimer = 0;
+  async function pickUser() {
+    noticeUid = '';
+    const q = $('noticeUser').value.trim().replace(/^@/, '').toLowerCase();
+    if (!q) { $('noticeUserInfo').textContent = ''; return; }
+    try {
+      const r = await api('users', { q });
+      const u = r.users.find((x) => x.username === q) || null;
+      noticeUid = u ? u.uid : '';
+      $('noticeUserInfo').textContent = u ? `✔ @${u.username} (${u.name || u.email})` : 'No user with this username';
+    } catch (e) { $('noticeUserInfo').textContent = e.message; }
+  }
+  $('noticeUser').addEventListener('input', () => { clearTimeout(pickTimer); pickTimer = setTimeout(pickUser, 400); });
+  $('noticeSend').addEventListener('click', async () => {
+    const all = document.querySelector('input[name=to]:checked').value === 'all';
+    const title = $('noticeTitle').value.trim() || 'InstantGram';
+    const text = $('noticeText').value.trim();
+    if (!text) return toast('Write the message');
+    if (!all && !noticeUid) return toast('Pick a user first');
+    if (all && !confirm('Send this notice to EVERYONE?')) return;
+    $('noticeSend').disabled = true;
+    const bar = $('noticeBar'), status = $('noticeStatus');
+    let sent = 0, failed = 0, people = 0, page = '';
+    try {
+      if (!all) {
+        const r = await api('notice', { to: noticeUid, title, text });
+        status.textContent = `Done: saved in the app's notifications, ${r.sent} phone(s) got it${r.failed ? `, ${r.failed} old phone(s) failed` : ''}.`;
+      } else {
+        bar.classList.remove('hide');
+        for (let round = 0; round < 1000; round++) {
+          const r = await api('notice', { to: 'all', title, text, page });
+          sent += r.sent; failed += r.failed; people += r.people;
+          bar.firstElementChild.style.width = r.done ? '100%' : `${Math.min(95, 10 + round * 8)}%`;
+          status.textContent = `${fmt(people)} people · ${fmt(sent)} phones got it${failed ? ` · ${fmt(failed)} old phones failed` : ''}${r.done ? ' · Done ✔' : ' …'}`;
+          if (r.done) break;
+          page = r.page;
+        }
+      }
+      $('noticeText').value = '';
+    } catch (e) { status.textContent = `Stopped: ${e.message}`; }
+    finally { $('noticeSend').disabled = false; }
+  });
+
+  // ---------------- go ----------------
+  if (sess && sess.refreshToken) start(); else $('login').classList.remove('hide');
+})();
+</script>
+</body>
+</html>

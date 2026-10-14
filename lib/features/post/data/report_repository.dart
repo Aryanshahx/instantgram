@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/config/app_info.dart';
@@ -76,6 +77,46 @@ class ReportRepository {
   static final ReportRepository instance = ReportRepository._();
 
   static const String to = AppInfo.supportEmail;
+
+  static const List<String> kinds = ['post', 'clip', 'comment', 'user'];
+
+  /// v0.13: the report as saved in `reports` (the admin website lists
+  /// them). The email is still opened too.
+  static Map<String, dynamic> reportData({
+    required String kind,
+    required String reporterUid,
+    String reporterUsername = '',
+    String targetId = '',
+    String postId = '',
+    String targetUid = '',
+    String reason = '',
+    String message = '',
+  }) {
+    String cut(String s, int n) => s.length > n ? s.substring(0, n) : s;
+    return {
+      'kind': kinds.contains(kind) ? kind : 'post',
+      'reporterUid': reporterUid,
+      'reporterUsername': cut(reporterUsername, 40),
+      'targetId': cut(targetId, 128),
+      'postId': cut(postId, 128),
+      'targetUid': cut(targetUid, 128),
+      'reason': cut(reason, 80),
+      'message': cut(message.trim(), 2000),
+    };
+  }
+
+  /// Saves a report for the admin (never throws; the email still works).
+  Future<void> save(Map<String, dynamic> data) async {
+    if ((data['reporterUid'] as String? ?? '').isEmpty) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('reports')
+          .add({...data, 'createdAt': FieldValue.serverTimestamp()})
+          .timeout(const Duration(seconds: 10));
+    } catch (e) {
+      debugPrint('report save: $e');
+    }
+  }
 
   /// Email for reporting a post / clip.
   static ReportEmail postEmail({

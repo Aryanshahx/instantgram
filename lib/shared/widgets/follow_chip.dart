@@ -16,6 +16,7 @@ class FollowChip extends StatefulWidget {
     this.following,
     this.requested,
     this.onFollow,
+    this.onUnfollow,
   });
 
   final String targetUid;
@@ -25,6 +26,7 @@ class FollowChip extends StatefulWidget {
   final Stream<bool>? following;
   final Stream<bool>? requested;
   final Future<void> Function()? onFollow;
+  final Future<void> Function()? onUnfollow;
 
   @override
   State<FollowChip> createState() => _FollowChipState();
@@ -77,18 +79,12 @@ class _FollowChipState extends State<FollowChip> {
     final r =
         widget.requested ??
         UserRepository.instance.hasRequested(widget.targetUid);
-    _fSub = f.listen(
-      (v) {
-        if (mounted) setState(() => _following = v);
-      },
-      onError: (Object _) {},
-    );
-    _rSub = r.listen(
-      (v) {
-        if (mounted) setState(() => _requested = v);
-      },
-      onError: (Object _) {},
-    );
+    _fSub = f.listen((v) {
+      if (mounted) setState(() => _following = v);
+    }, onError: (Object _) {});
+    _rSub = r.listen((v) {
+      if (mounted) setState(() => _requested = v);
+    }, onError: (Object _) {});
   }
 
   void _cancel() {
@@ -121,9 +117,47 @@ class _FollowChipState extends State<FollowChip> {
     } catch (e) {
       if (mounted) {
         setState(() => _done = false);
-        ScaffoldMessenger.maybeOf(
-          context,
-        )?.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+        ScaffoldMessenger.maybeOf(context)
+            ?.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// v0.13: "Following" -> ask, then unfollow.
+  Future<void> _unfollow() async {
+    if (_busy) return;
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      builder: (c) => SafeArea(
+        child: ListTile(
+          key: const ValueKey('follow-unfollow'),
+          leading: const Icon(Icons.person_remove_alt_1_outlined),
+          title: const Text('Unfollow'),
+          onTap: () => Navigator.pop(c, true),
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _done = false;
+      _following = false;
+    });
+    try {
+      final custom = widget.onUnfollow;
+      if (custom != null) {
+        await custom();
+      } else {
+        final user = await UserRepository.instance.getUser(widget.targetUid);
+        if (user != null) await UserRepository.instance.unfollow(user);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _following = true);
+        ScaffoldMessenger.maybeOf(context)
+            ?.showSnackBar(SnackBar(content: Text(friendlyError(e))));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -132,16 +166,20 @@ class _FollowChipState extends State<FollowChip> {
 
   @override
   Widget build(BuildContext context) {
-    final hidden =
-        _me == null ||
-        _me == widget.targetUid ||
-        _following != false ||
-        (_done && !_requested);
+    // v0.13: people you follow show "Following" (was hidden)
+    final hidden = _me == null || _me == widget.targetUid || _following == null;
     Widget child;
     if (hidden) {
       child = const SizedBox.shrink(key: ValueKey('follow-hidden'));
-    } else if (_requested) {
+    } else if (_requested && _following != true) {
       child = _pill('Requested', key: const ValueKey('follow-requested'));
+    } else if (_following == true || _done) {
+      child = GestureDetector(
+        key: const ValueKey('follow-following'),
+        behavior: HitTestBehavior.opaque,
+        onTap: _unfollow,
+        child: _pill('Following', dim: true),
+      );
     } else {
       child = GestureDetector(
         key: const ValueKey('follow-chip'),
@@ -154,17 +192,13 @@ class _FollowChipState extends State<FollowChip> {
       duration: const Duration(milliseconds: 180),
       transitionBuilder: (c, a) => FadeTransition(
         opacity: a,
-        child: SizeTransition(
-          sizeFactor: a,
-          axis: Axis.horizontal,
-          child: c,
-        ),
+        child: SizeTransition(sizeFactor: a, axis: Axis.horizontal, child: c),
       ),
       child: child,
     );
   }
 
-  Widget _pill(String text, {Key? key}) {
+  Widget _pill(String text, {Key? key, bool dim = false}) {
     return Padding(
       key: key,
       padding: const EdgeInsets.only(left: 8),
@@ -172,7 +206,10 @@ class _FollowChipState extends State<FollowChip> {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white, width: 1.1),
+          border: Border.all(
+            color: dim ? Colors.white54 : Colors.white,
+            width: 1.1,
+          ),
           color: Colors.black26,
         ),
         child: Text(

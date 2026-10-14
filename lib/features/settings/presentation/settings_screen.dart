@@ -21,6 +21,7 @@ import 'privacy_screens.dart';
 import 'settings_pages.dart';
 import 'settings_widgets.dart';
 import 'time_screen.dart';
+import '../../../core/services/account_status.dart';
 
 /// One searchable row in Settings.
 class _Item {
@@ -67,11 +68,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
-  void _push(BuildContext context, Widget page) => Navigator.of(context)
-      .push(MaterialPageRoute<void>(builder: (_) => page))
-      .then((_) {
-        if (mounted) setState(() {}); // e.g. Activity status On / Off
-      });
+  void _push(BuildContext context, Widget page) =>
+      Navigator.of(context)
+          .push(MaterialPageRoute<void>(builder: (_) => page))
+          .then((_) {
+            if (mounted) setState(() {}); // e.g. Activity status On / Off
+          });
 
   List<_Item> _items() {
     final p = widget.profile;
@@ -139,7 +141,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         icon: Icons.notifications_none,
         title: 'Notifications',
         subtitle: 'Likes, comments, followers, views',
-        keywords: 'notification push likes comments followers unfollow views '
+        keywords:
+            'notification push likes comments followers unfollow views '
             'reposts mute',
         onTap: (c) => _push(c, const NotificationSettingsScreen()),
       ),
@@ -360,6 +363,7 @@ Future<void> signOutEverything() async {
   ChatReceipts.instance.stop();
   ChatPrefs.instance.stop();
   PushRouter.instance.stop();
+  AccountStatus.instance.stop();
   await AuthService.instance.signOut();
 }
 

@@ -27,6 +27,10 @@ import '../reels/presentation/clips_screen.dart';
 import '../search/presentation/explore_screen.dart';
 import 'push_router.dart';
 import 'widgets/floating_nav_bar.dart';
+import '../../core/config/app_info.dart';
+import '../../core/services/account_status.dart';
+import '../../core/theme/app_colors.dart';
+import '../settings/presentation/settings_screen.dart' show signOutEverything;
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key, required this.uid});
@@ -82,6 +86,8 @@ class _MainShellState extends State<MainShell> {
     ChatReceipts.instance.start(widget.uid);
     // v0.11: pinned / muted chats
     ChatPrefs.instance.start(widget.uid);
+    // v0.13: verified badges + blocked accounts (admin website)
+    AccountStatus.instance.start(widget.uid, onBanned: _banned);
     try {
       final me = await UserRepository.instance.meCached();
       await Calls.instance.signIn(
@@ -95,6 +101,33 @@ class _MainShellState extends State<MainShell> {
     } catch (e) {
       debugPrint('calls: $e');
     }
+  }
+
+  /// v0.13: the admin blocked this account -> tell the user, log out.
+  Future<void> _banned() async {
+    if (!mounted) return;
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (d) => AlertDialog(
+        icon: const Icon(Icons.block, size: 36, color: AppColors.like),
+        title: const Text('Account blocked'),
+        content: const Text(
+          'This account was blocked for breaking the InstantGram rules. '
+          'If you think this is a mistake, email ${AppInfo.supportEmail}.',
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('banned-ok'),
+            onPressed: () => Navigator.pop(d),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    AccountStatus.instance.stop();
+    await signOutEverything();
   }
 
   void _onShared(UploadTask t) {
@@ -126,6 +159,7 @@ class _MainShellState extends State<MainShell> {
     VideoPool.instance.clear();
     MomentsIndex.instance.stop();
     ContentFilter.instance.stop();
+    AccountStatus.instance.stop();
     super.dispose();
   }
 

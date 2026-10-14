@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -71,6 +73,20 @@ class _ReportSheetState extends State<_ReportSheet> {
       message: _msg.text,
       reporterUsername: who,
       reporterUid: uid,
+    );
+    unawaited(
+      ReportRepository.instance.save(
+        ReportRepository.reportData(
+          kind: widget.post.isClip ? 'clip' : 'post',
+          reporterUid: uid,
+          reporterUsername: who,
+          targetId: widget.post.id,
+          postId: widget.post.id,
+          targetUid: widget.post.authorId,
+          reason: r.title,
+          message: _msg.text,
+        ),
+      ),
     );
     if (!mounted) return;
     final ok = await openEmail(

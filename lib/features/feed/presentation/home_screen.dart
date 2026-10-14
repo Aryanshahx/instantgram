@@ -1,3 +1,6 @@
+import '../../../core/services/net_priority.dart';
+import '../../../shared/widgets/refresh_note.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../../core/services/media_prefetch.dart';
@@ -88,9 +91,17 @@ class _HomeFeedState extends State<_HomeFeed> {
     return _stream;
   }
 
+  /// v0.13: waits for the server (background downloads pause meanwhile).
   Future<void> _onRefresh() async {
+    final authors = _authors;
+    final ok = authors == null
+        ? true
+        : await NetPriority.refresh(
+            () => PostRepository.instance.refreshFeed(authors),
+          );
+    if (!mounted) return;
     setState(() => _refresh++);
-    await Future<void>.delayed(const Duration(milliseconds: 700));
+    if (!ok) refreshFailed(context);
   }
 
   @override

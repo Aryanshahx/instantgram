@@ -68,9 +68,11 @@ void main() {
       await t.pumpAndSettle();
       expect(taps, 1);
       expect(find.byKey(const ValueKey('follow-chip')), findsNothing);
+      // v0.13: shows "Following" after the tap
+      expect(find.byKey(const ValueKey('follow-following')), findsOneWidget);
     });
 
-    testWidgets('hidden when following or own clip', (t) async {
+    testWidgets('no Follow when following (v0.13: Following) or own clip', (t) async {
       await t.pumpWidget(
         _app(
           Column(
@@ -93,6 +95,7 @@ void main() {
       );
       await t.pumpAndSettle();
       expect(find.byKey(const ValueKey('follow-chip')), findsNothing);
+      expect(find.byKey(const ValueKey('follow-following')), findsOneWidget);
     });
   });
 

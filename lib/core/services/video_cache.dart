@@ -1,3 +1,5 @@
+import 'net_priority.dart';
+
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
@@ -382,6 +384,7 @@ class VideoCache {
   /// Downloads the first [bytes] of [remote] (next videos start at once).
   Future<void> prefetch(String remote, {int? bytes}) async {
     if (_dir == null || !remote.startsWith('http')) return;
+    if (NetPriority.quiet) return;
     final want = bytes ?? prefetchBytes;
     final name = nameFor(remote);
     if (_writers.contains(name)) return;
@@ -413,6 +416,11 @@ class VideoCache {
         await out.writeFrom(chunk);
         got += chunk.length;
         if (got >= want) break; // 200 = whole file: stop early
+        if (NetPriority.quiet) {
+          // v0.13: a refresh runs: stop, go on another time
+          _prefetched.remove(key);
+          break;
+        }
       }
     } catch (e) {
       _prefetched.remove(key);

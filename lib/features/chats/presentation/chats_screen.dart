@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/services/chat_prefs.dart';
 import '../../../core/services/content_filter.dart';
+import '../../../core/services/server_clock.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/time_ago.dart';
@@ -87,7 +88,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: Text(
                 name,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
             _MenuItem(
@@ -179,104 +183,107 @@ class _ChatsScreenState extends State<ChatsScreen> {
       child: ValueListenableBuilder<ChatPrefsData>(
         valueListenable: ChatPrefs.instance.value,
         builder: (context, prefs, _) => StreamBuilder<List<Chat>>(
-        stream: _chats,
-        builder: (context, snap) {
-          final q = _query.toLowerCase();
-          final chats = ChatPrefs.sortChats<Chat>(
-            (snap.data ?? const <Chat>[])
-                .where(
-                  (c) =>
-                      !ContentFilter.instance.isBlocked(c.otherUid(me)) &&
-                      (q.isEmpty ||
-                          c.usernameOf(c.otherUid(me)).toLowerCase().contains(q)),
-                )
-                .toList(),
-            prefs,
-            id: (c) => c.id,
-            updatedAt: (c) => c.updatedAt,
-          );
+          stream: _chats,
+          builder: (context, snap) {
+            final q = _query.toLowerCase();
+            final chats = ChatPrefs.sortChats<Chat>(
+              (snap.data ?? const <Chat>[])
+                  .where(
+                    (c) =>
+                        !ContentFilter.instance.isBlocked(c.otherUid(me)) &&
+                        (q.isEmpty ||
+                            c
+                                .usernameOf(c.otherUid(me))
+                                .toLowerCase()
+                                .contains(q)),
+                  )
+                  .toList(),
+              prefs,
+              id: (c) => c.id,
+              updatedAt: (c) => c.updatedAt,
+            );
 
-          return ListView(
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 110),
-            children: [
-              const Padding(
-                padding: EdgeInsets.only(left: 2),
-                child: Text('Chats', style: AppTheme.pageTitle),
-              ),
-              const SizedBox(height: 14),
-              IgTextField(
-                hint: 'Find someone to message',
-                icon: Icons.search,
-                height: 46,
-                onChanged: _onChanged,
-              ),
-              const SizedBox(height: 12),
-              if (snap.hasError)
-                ErrorView(error: snap.error)
-              else if (!snap.hasData)
-                const LoadingView()
-              else ...[
-                for (final c in chats)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: _ChatTile(
-                      key: ValueKey('chat-${c.id}'),
-                      chat: c,
-                      me: me,
-                      pinned: prefs.isPinned(c.id),
-                      muted: prefs.isMuted(c.id),
-                      callsMuted: prefs.callsMuted(c.otherUid(me)),
-                      onLongPress: () => _menu(c, me),
-                      onTap: () {
-                        final other = c.otherUid(me);
-                        openChat(
-                          context,
-                          UserProfile(
-                            uid: other,
-                            name: '',
-                            username: c.usernameOf(other),
-                            photoUrl: c.photoOf(other),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                if (_people.isNotEmpty) ...[
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(4, 8, 4, 4),
-                    child: Text(
-                      'Start a new chat',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
+            return ListView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 110),
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(left: 2),
+                  child: Text('Chats', style: AppTheme.pageTitle),
+                ),
+                const SizedBox(height: 14),
+                IgTextField(
+                  hint: 'Find someone to message',
+                  icon: Icons.search,
+                  height: 46,
+                  onChanged: _onChanged,
+                ),
+                const SizedBox(height: 12),
+                if (snap.hasError)
+                  ErrorView(error: snap.error)
+                else if (!snap.hasData)
+                  const LoadingView()
+                else ...[
+                  for (final c in chats)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _ChatTile(
+                        key: ValueKey('chat-${c.id}'),
+                        chat: c,
+                        me: me,
+                        pinned: prefs.isPinned(c.id),
+                        muted: prefs.isMuted(c.id),
+                        callsMuted: prefs.callsMuted(c.otherUid(me)),
+                        onLongPress: () => _menu(c, me),
+                        onTap: () {
+                          final other = c.otherUid(me);
+                          openChat(
+                            context,
+                            UserProfile(
+                              uid: other,
+                              name: '',
+                              username: c.usernameOf(other),
+                              photoUrl: c.photoOf(other),
+                            ),
+                          );
+                        },
                       ),
                     ),
-                  ),
-                  for (final u in _people)
-                    UserTile(
-                      user: u,
-                      onTap: () => openChat(context, u),
-                      trailing: const Icon(
-                        Icons.send_rounded,
-                        size: 20,
-                        color: AppColors.lime,
+                  if (_people.isNotEmpty) ...[
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(4, 8, 4, 4),
+                      child: Text(
+                        'Start a new chat',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
+                    ),
+                    for (final u in _people)
+                      UserTile(
+                        user: u,
+                        onTap: () => openChat(context, u),
+                        trailing: const Icon(
+                          Icons.send_rounded,
+                          size: 20,
+                          color: AppColors.lime,
+                        ),
+                      ),
+                  ],
+                  if (chats.isEmpty && _people.isEmpty)
+                    EmptyState(
+                      icon: Icons.chat_bubble_outline,
+                      title: q.isEmpty ? 'No chats yet' : 'Nobody found',
+                      subtitle: q.isEmpty
+                          ? 'Search a username above to send a message.'
+                          : 'Try another username.',
                     ),
                 ],
-                if (chats.isEmpty && _people.isEmpty)
-                  EmptyState(
-                    icon: Icons.chat_bubble_outline,
-                    title: q.isEmpty ? 'No chats yet' : 'Nobody found',
-                    subtitle: q.isEmpty
-                        ? 'Search a username above to send a message.'
-                        : 'Try another username.',
-                  ),
               ],
-            ],
-          );
-        },
-      ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -352,8 +359,14 @@ class _ChatTile extends StatelessWidget {
         state = 'Delivered';
       }
     }
-    final preview = chat.lastMessage.isEmpty
+    // v0.13: "typing…", and messages that disappeared for you
+    final typing = chat.isTyping(other, ServerClock.now());
+    final preview = typing
+        ? 'typing…'
+        : chat.lastMessage.isEmpty
         ? 'Say hi 👋'
+        : vanishedForMe(chat, me, ChatPrefs.instance.value.value)
+        ? '⏳ Messages disappeared'
         : fromMe
         ? '$state · You: ${chat.lastMessage}'
         : chat.lastMessage;
@@ -381,7 +394,11 @@ class _ChatTile extends StatelessWidget {
                     size: 44,
                     uid: other,
                   ),
-                  Positioned(right: -1, bottom: -1, child: ActiveDot(uid: other)),
+                  Positioned(
+                    right: -1,
+                    bottom: -1,
+                    child: ActiveDot(uid: other),
+                  ),
                 ],
               ),
               const SizedBox(width: 12),
@@ -432,7 +449,9 @@ class _ChatTile extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: unread ? FontWeight.w700 : FontWeight.w400,
-                        color: fromMe
+                        color: typing
+                            ? AppColors.lime
+                            : fromMe
                             ? AppColors.textSecondary
                             : AppColors.textPrimary,
                       ),
@@ -479,4 +498,20 @@ class _ChatTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// v0.13: the last message is gone for you (disappearing only on your
+/// phone).
+bool vanishedForMe(Chat chat, String me, ChatPrefsData prefs, {DateTime? now}) {
+  final mode = prefs.vanishMode(chat.id);
+  final since = prefs.vanishSince(chat.id);
+  if (mode == Disappear.off || since == null) return false;
+  if (chat.updatedAt.isBefore(since)) return false;
+  final life = Disappear.lifetime(mode);
+  if (life != null) {
+    return (now ?? ServerClock.now()).isAfter(chat.updatedAt.add(life));
+  }
+  final seen = chat.seenAt(me);
+  return chat.lastSenderId == me ||
+      (seen != null && !chat.updatedAt.isAfter(seen));
 }

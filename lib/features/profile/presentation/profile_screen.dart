@@ -1,3 +1,8 @@
+import 'dart:async';
+
+import '../../../core/services/net_priority.dart';
+import '../../../shared/widgets/refresh_note.dart';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +33,7 @@ import '../data/user_repository.dart';
 import 'edit_profile_screen.dart';
 import 'profile_image_crop.dart';
 import 'user_list_screen.dart';
+import '../../../shared/widgets/verified_badge.dart';
 
 /// Profile of any user. [standalone] = opened as its own page (shows back button).
 class ProfileScreen extends StatelessWidget {
@@ -219,6 +225,18 @@ class _ProfileViewState extends State<ProfileView>
       reporterUsername: reporter,
       reporterUid: reporterUid,
     );
+    unawaited(
+      ReportRepository.instance.save(
+        ReportRepository.reportData(
+          kind: 'user',
+          reporterUid: reporterUid,
+          reporterUsername: reporter,
+          targetId: p.uid,
+          targetUid: p.uid,
+          reason: 'Account',
+        ),
+      ),
+    );
     final ok = await openEmail(
       context,
       to: ReportRepository.to,
@@ -388,9 +406,14 @@ class _ProfileViewState extends State<ProfileView>
     );
   }
 
+  /// v0.13: waits for the server (background downloads pause meanwhile).
   Future<void> _onRefresh() async {
+    final ok = await NetPriority.refresh(
+      () => PostRepository.instance.refreshUser(widget.profile.uid),
+    );
+    if (!mounted) return;
     setState(_initStreams);
-    await Future<void>.delayed(const Duration(milliseconds: 700));
+    if (!ok) refreshFailed(context);
   }
 
   Widget _tab(int i, IconData icon, String label) {
@@ -667,13 +690,21 @@ class _Header extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                p.displayName,
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.5,
-                ),
+              Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      p.displayName,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                  ),
+                  VerifiedBadge(uid: p.uid, size: 20),
+                ],
               ),
               const SizedBox(height: 2),
               Row(

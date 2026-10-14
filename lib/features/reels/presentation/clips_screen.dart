@@ -35,6 +35,7 @@ import '../../post/presentation/post_menu.dart';
 import '../../profile/data/user_repository.dart';
 import '../../../core/services/video_cache.dart';
 import '../../../shared/widgets/bounce.dart';
+import '../../../shared/widgets/verified_badge.dart';
 
 /// Full-screen vertical clips.
 /// [clips] given -> play that list (from a profile / explore).
@@ -1322,16 +1323,24 @@ class _ClipPlayerState extends State<ClipPlayer>
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        c.authorUsername,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          shadows: [
-                            Shadow(blurRadius: 6, color: Colors.black54),
-                          ],
-                        ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              c.authorUsername,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                shadows: [
+                                  Shadow(blurRadius: 6, color: Colors.black54),
+                                ],
+                              ),
+                            ),
+                          ),
+                          VerifiedBadge(uid: c.authorId, size: 14),
+                        ],
                       ),
                       if (c.hasMusic) ...[
                         const SizedBox(height: 3),
@@ -1378,11 +1387,7 @@ class _ClipPlayerState extends State<ClipPlayer>
       child: LayoutBuilder(
         builder: (context, box) {
           Widget child = live != null
-              ? videoSurface(
-                  live,
-                  m.edits.filter,
-                  overlays: m.edits.overlays,
-                )
+              ? videoSurface(live, m.edits.filter, overlays: m.edits.overlays)
               : SizedBox.expand(
                   child: NetImage(m.thumbUrl, fit: BoxFit.contain),
                 );

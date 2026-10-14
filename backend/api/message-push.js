@@ -57,6 +57,8 @@ export function buildMessages({ chatId, fromUid, fromName, fromPhoto, preview },
       ttl: '86400s',
       notification: {
         channel_id: 'messages',
+        icon: 'ic_stat_instantgram', // v0.13: InstantGram logo
+        color: '#C6FF3D',
         // one notification per chat (the newest message replaces it)
         tag: `chat_${chatId}`,
         title: fromName || 'New message',

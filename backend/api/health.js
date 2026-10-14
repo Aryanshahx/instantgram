@@ -36,7 +36,7 @@ export default async function handler(req, res) {
     JSON.stringify({
       ok: missing.length === 0,
       app: 'instantgram',
-      version: '0.12.0',
+      version: '0.13.0',
       firebaseServiceAccount,
       bucket: bucket || null,
       firebaseProject: env('FIREBASE_PROJECT_ID') || null,

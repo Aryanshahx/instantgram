@@ -91,6 +91,8 @@ export function buildMessages(n, tokens) {
       ttl: '86400s',
       notification: {
         channel_id: 'activity',
+        icon: 'ic_stat_instantgram', // v0.13: InstantGram logo
+        color: '#C6FF3D',
         // one notification per kind + post / person (newest replaces it)
         tag: `act_${n.type}_${n.postId || n.fromUid || ''}`.slice(0, 120),
         title: 'InstantGram',

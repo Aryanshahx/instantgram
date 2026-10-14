@@ -1,3 +1,6 @@
+import '../../../core/services/net_priority.dart';
+import '../../../shared/widgets/refresh_note.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -56,15 +59,15 @@ class _ExploreScreenState extends State<ExploreScreen> {
       .asBroadcastStream();
 
   /// Swipe down: load the newest clips again (and search again).
+  /// v0.13: waits for the server (background downloads pause meanwhile).
   Future<void> _refresh() async {
-    final s = _newStream();
-    setState(() => _recentClips = s);
+    final ok = await NetPriority.refresh(
+      () => PostRepository.instance.refreshRecent(type: Post.clip, limit: 100),
+    );
+    if (!mounted) return;
+    setState(() => _recentClips = _newStream());
     if (_word.isNotEmpty) _onChanged(_searchCtrl.text);
-    try {
-      await s.first.timeout(const Duration(seconds: 8));
-    } catch (_) {
-      // the grid shows the error / keeps the old clips
-    }
+    if (!ok) refreshFailed(context);
   }
 
   String get _word => _query.replaceFirst('#', '').trim().toLowerCase();

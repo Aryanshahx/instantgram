@@ -226,6 +226,55 @@ class PostRepository {
     );
   }
 
+  // ---------------- v0.13: pull to refresh (from the server) ----------------
+
+  static const _server = GetOptions(source: Source.server);
+
+  /// Gets the newest feed from the server (open lists update by themselves).
+  Future<void> refreshFeed(List<String> authorIds, {int perChunk = 40}) async {
+    final ids = authorIds.toSet().toList();
+    await Future.wait([
+      for (var i = 0; i < ids.length; i += 30)
+        _posts
+            .where(
+              'authorId',
+              whereIn: ids.sublist(
+                i,
+                i + 30 > ids.length ? ids.length : i + 30,
+              ),
+            )
+            .orderBy('createdAt', descending: true)
+            .limit(perChunk)
+            .get(_server),
+    ]);
+  }
+
+  Future<void> refreshRecent({String? type, int limit = 60}) async {
+    Query<Map<String, dynamic>> q = _posts;
+    if (type != null) q = q.where('type', isEqualTo: type);
+    await q.orderBy('createdAt', descending: true).limit(limit).get(_server);
+  }
+
+  Future<void> refreshUser(String uid) async {
+    await Future.wait([
+      for (final type in [Post.photo, Post.clip])
+        _posts
+            .where('authorId', isEqualTo: uid)
+            .where('type', isEqualTo: type)
+            .orderBy('createdAt', descending: true)
+            .limit(120)
+            .get(_server),
+      _db
+          .collection('users')
+          .doc(uid)
+          .collection('reposts')
+          .orderBy('createdAt', descending: true)
+          .limit(300)
+          .get(_server),
+      _db.collection('users').doc(uid).get(_server),
+    ]);
+  }
+
   /// Latest posts from everyone. [type] = Post.photo / Post.clip / null (all)
   Stream<List<Post>> recent({String? type, int limit = 60}) {
     Query<Map<String, dynamic>> q = _posts;
@@ -840,12 +889,9 @@ class CommentPicture {
     this.height = 0,
   }) : isGif = false;
 
-  const CommentPicture.gif({
-    required this.url,
-    this.width = 0,
-    this.height = 0,
-  }) : key = '',
-       isGif = true;
+  const CommentPicture.gif({required this.url, this.width = 0, this.height = 0})
+    : key = '',
+      isGif = true;
 
   final String url;
   final String key;

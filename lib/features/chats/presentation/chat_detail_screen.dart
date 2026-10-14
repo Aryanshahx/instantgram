@@ -12,6 +12,7 @@ import '../../../core/services/content_filter.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/media_service.dart';
 import '../../../core/services/presence.dart';
+import '../../../core/services/server_clock.dart';
 import '../../../core/services/system_settings.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/errors.dart';
@@ -98,6 +99,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   DateTime _lastSweep = DateTime(2000);
   Timer? _expiryTick;
   String? _modeNow; // set right away when you change it
+  // v0.13 typing
+  DateTime _typingSent = DateTime(2000);
+  bool _typingOn = false;
+  Timer? _typingExpiry;
   double _pull = 0; // slide up & hold distance
   bool _armed = false;
 
@@ -125,23 +130,36 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         _gotChat = true;
         _seenBefore = c?.seenAt(_me);
       }
-      if (c != null) _repo.rememberMode(_chatId, c.disappear);
-      setState(() {
-        _chatNow = c;
-        _modeNow = null;
-      });
+      setState(() => _chatNow = c);
+      // v0.13: hide "typing…" when it gets old
+      _typingExpiry?.cancel();
+      if (c != null && c.isTyping(widget.other.uid, ServerClock.now())) {
+        _typingExpiry = Timer(Chat.typingFor, () {
+          if (mounted) setState(() {});
+        });
+      }
       _checkSeen();
     }, onError: (Object e) => debugPrint('chat: $e'));
-    _life = AppLifecycleListener(onResume: _checkSeen);
+    _life = AppLifecycleListener(onResume: _checkSeen, onHide: _stopTyping);
+    ChatPrefs.instance.value.addListener(_onPrefs);
     // 24 h / 7 day messages go away while you look
     _expiryTick = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted && _all.any((m) => m.expireAt != null)) setState(() {});
+      if (mounted &&
+          (_mode != Disappear.off || _all.any((m) => m.expireAt != null))) {
+        setState(() {});
+      }
     });
   }
 
   // ------------------------------------------------ v0.11 disappearing
 
-  String get _mode => _modeNow ?? _chatNow?.disappear ?? Disappear.off;
+  /// v0.13: only on my phone (Settings of this chat for me).
+  String get _mode =>
+      _modeNow ?? ChatPrefs.instance.value.value.vanishMode(_chatId);
+
+  void _onPrefs() {
+    if (mounted) setState(() {});
+  }
 
   Future<void> _setMode(String mode) async {
     if (mode == _mode) return;
@@ -149,10 +167,23 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (!_live) return;
     try {
       await _repo.setDisappear(_other, mode);
+      if (mounted) setState(() => _modeNow = null);
     } catch (e) {
       if (mounted) setState(() => _modeNow = null);
       _snack(friendlyError(e));
     }
+  }
+
+  // ------------------------------------------------------- v0.13 typing
+
+  bool get _otherTyping =>
+      _chatNow?.isTyping(widget.other.uid, ServerClock.now()) ?? false;
+
+  void _stopTyping() {
+    if (!_typingOn) return;
+    _typingOn = false;
+    _typingSent = DateTime(2000);
+    if (_live) _repo.setTyping(_chatId, false);
   }
 
   /// Slide up and hold, then let go: on (24 h) <-> off.
@@ -204,11 +235,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   /// Hides / deletes messages that are gone.
   List<Message> _visible(List<Message> all) {
     _all = all;
+    final prefs = ChatPrefs.instance.value.value;
     final msgs = ChatRepository.visible(
       all,
       me: _me,
-      clearedAt: ChatPrefs.instance.value.value.clearedAt(_chatId),
+      clearedAt: prefs.clearedAt(_chatId),
       seenBefore: _seenBefore,
+      vanishMode: _mode,
+      vanishSince: prefs.vanishSince(_chatId) ?? DateTime.now(),
     );
     for (final m in msgs) {
       if (m.vanish && m.senderId != _me && !m.pending) _vanishShown[m.id] = m;
@@ -236,43 +270,55 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       context: context,
       backgroundColor: AppColors.surface,
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 2),
-              child: Text(
-                'Disappearing messages',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 6),
-              child: Text(
-                'New messages disappear for both of you. Tip: slide up and '
-                'hold in the chat to switch it on or off.',
-                style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5),
-              ),
-            ),
-            for (final mode in Disappear.all)
-              ListTile(
-                key: ValueKey('disappear-$mode'),
-                dense: true,
-                leading: Icon(
-                  mode == _mode
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_off,
-                  color: mode == _mode ? AppColors.lime : AppColors.textSecondary,
+        // scrolls on small screens (no overflow)
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 2),
+                child: Text(
+                  'Disappearing messages',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                 ),
-                title: Text(
-                  Disappear.label(mode),
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                ),
-                onTap: () => Navigator.pop(ctx, mode),
               ),
-            const SizedBox(height: 6),
-          ],
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 6),
+                child: Text(
+                  'Only on your phone: new messages disappear for you. The '
+                  'other person still sees them. Tip: slide up and hold in '
+                  'the chat to switch it on or off.',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ),
+              for (final mode in Disappear.all)
+                ListTile(
+                  key: ValueKey('disappear-$mode'),
+                  dense: true,
+                  leading: Icon(
+                    mode == _mode
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: mode == _mode
+                        ? AppColors.lime
+                        : AppColors.textSecondary,
+                  ),
+                  title: Text(
+                    Disappear.label(mode),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  onTap: () => Navigator.pop(ctx, mode),
+                ),
+              const SizedBox(height: 6),
+            ],
+          ),
         ),
       ),
     );
@@ -322,6 +368,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   void _onText() {
     final has = _ctrl.text.trim().isNotEmpty;
     if (has != _hadText) setState(() => _hadText = has);
+    // v0.13: tell the other person "typing…" (at most every 4 s)
+    if (!_live) return;
+    if (has) {
+      final now = DateTime.now();
+      if (now.difference(_typingSent) > const Duration(seconds: 4)) {
+        _typingSent = now;
+        _typingOn = true;
+        _repo.setTyping(_chatId, true);
+      }
+    } else {
+      _stopTyping();
+    }
   }
 
   @override
@@ -334,6 +392,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       _repo.sweep(_chatId, const [], seenVanish: _vanishShown.values.toList());
     }
     _expiryTick?.cancel();
+    _typingExpiry?.cancel();
+    _stopTyping();
+    ChatPrefs.instance.value.removeListener(_onPrefs);
     _chatSub?.cancel();
     _life?.dispose();
     _flashTimer?.cancel();
@@ -396,6 +457,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final text = _ctrl.text.trim();
     if (text.isEmpty || _sending) return;
     final quote = _quote;
+    // the message itself clears "typing…" (no extra write)
+    _typingOn = false;
+    _typingSent = DateTime(2000);
     _ctrl.clear();
     await _run(null, () async {
       try {
@@ -763,12 +827,23 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    ActiveLabel(
-                      uid: o.uid,
-                      stream:
-                          widget.presence ??
-                          (_live ? null : Stream<PresenceState?>.value(null)),
-                    ),
+                    if (_otherTyping)
+                      const Text(
+                        'typing…',
+                        key: ValueKey('chat-typing'),
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: AppColors.lime,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      )
+                    else
+                      ActiveLabel(
+                        uid: o.uid,
+                        stream:
+                            widget.presence ??
+                            (_live ? null : Stream<PresenceState?>.value(null)),
+                      ),
                   ],
                 ),
               ),
@@ -931,6 +1006,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               },
             ),
           ),
+          if (_otherTyping) TypingBubble(name: o.username),
           if (_mode != Disappear.off) _modeBar(),
           if (ContentFilter.instance.isBlocked(widget.other.uid))
             const SafeArea(
@@ -957,9 +1033,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final p = (_pull / ChatDetailScreen.pullToVanish).clamp(0.0, 1.0);
     final on = _mode != Disappear.off;
     final text = _armed
-        ? (on ? 'Release to turn off disappearing messages'
+        ? (on
+              ? 'Release to turn off disappearing messages'
               : 'Release to turn on disappearing messages')
-        : (on ? 'Slide up to turn off disappearing messages'
+        : (on
+              ? 'Slide up to turn off disappearing messages'
               : 'Slide up to turn on disappearing messages');
     return Positioned(
       left: 0,
@@ -1022,7 +1100,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             const Icon(Icons.timer_outlined, size: 15, color: AppColors.lime),
             const SizedBox(width: 6),
             Text(
-              'Disappearing messages · ${Disappear.label(_mode)}',
+              'Disappearing for you · ${Disappear.label(_mode)}',
               style: const TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,

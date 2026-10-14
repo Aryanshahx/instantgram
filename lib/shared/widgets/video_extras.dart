@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:video_player/video_player.dart';
 
+import 'stickers.dart';
 import '../../core/theme/app_theme.dart';
 import '../models/post.dart';
 
@@ -24,6 +25,10 @@ class OverlayView extends StatelessWidget {
     final o = overlay;
     final fs = (o.size * frameWidth).clamp(6.0, 2000.0);
     final color = Color(o.color);
+    if (o.isSticker && StickerPack.isPack(o.text)) {
+      // v0.13: built-in sticker picture (size = width)
+      return StickerImage(text: o.text, width: o.size * frameWidth);
+    }
     if (o.isSticker) {
       return Text(
         o.text,

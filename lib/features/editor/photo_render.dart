@@ -68,6 +68,7 @@ class PhotoRenderSpec {
     this.colorMatrix,
     this.texts = const [],
     this.textScale = 1,
+    this.stickers = const {},
   });
 
   final PhotoLayout layout;
@@ -81,6 +82,9 @@ class PhotoRenderSpec {
 
   /// App text size (Settings → Accessibility), so text matches the editor.
   final double textScale;
+
+  /// v0.13: loaded sticker pictures (`stk:ID` -> image).
+  final Map<String, ui.Image> stickers;
 }
 
 /// Draws the edited photo at [outWidth] pixels wide (height follows the
@@ -128,7 +132,12 @@ Future<ui.Image> renderPhoto(
   canvas.restore();
 
   for (final t in spec.texts) {
-    paintTextLayer(canvas, t, fw, fh, textScale: spec.textScale);
+    final img = spec.stickers[t.text];
+    if (img != null) {
+      paintSticker(canvas, img, t, fw, fh);
+    } else {
+      paintTextLayer(canvas, t, fw, fh, textScale: spec.textScale);
+    }
   }
 
   final picture = rec.endRecording();
@@ -137,6 +146,30 @@ Future<ui.Image> renderPhoto(
   } finally {
     picture.dispose();
   }
+}
+
+/// v0.13: a pack sticker ([TextLayer.size] = width part of the frame).
+void paintSticker(
+  Canvas canvas,
+  ui.Image img,
+  TextLayer t,
+  double fw,
+  double fh,
+) {
+  final w = t.size * fw;
+  final h = w * img.height / math.max(1, img.width);
+  canvas.drawImageRect(
+    img,
+    Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
+    Rect.fromCenter(
+      center: Offset(t.pos.dx * fw, t.pos.dy * fh),
+      width: w,
+      height: h,
+    ),
+    Paint()
+      ..filterQuality = FilterQuality.high
+      ..isAntiAlias = true,
+  );
 }
 
 /// Same look as the editor's text widget.

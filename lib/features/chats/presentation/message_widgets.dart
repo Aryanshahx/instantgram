@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -158,12 +159,13 @@ class _SwipeToReplyState extends State<SwipeToReply>
   @override
   void initState() {
     super.initState();
-    _back = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 180),
-    )..addListener(() {
-        if (mounted) setState(() => _dx = _from * (1 - _back.value));
-      });
+    _back =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 180),
+        )..addListener(() {
+          if (mounted) setState(() => _dx = _from * (1 - _back.value));
+        });
   }
 
   @override
@@ -370,7 +372,9 @@ class MessageBubble extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(right: 3),
                   child: Icon(
-                    m.vanish ? Icons.visibility_off_outlined : Icons.timer_outlined,
+                    m.vanish
+                        ? Icons.visibility_off_outlined
+                        : Icons.timer_outlined,
                     key: ValueKey('vanish-${m.id}'),
                     size: 11,
                     color: _bare ? AppColors.textSecondary : sub,
@@ -1230,6 +1234,75 @@ class TickIcon extends StatelessWidget {
       key: ValueKey(key),
       size: tick == MessageTick.pending ? 12 : 15,
       color: color,
+    );
+  }
+}
+
+/// v0.13: "name is typing" with three moving dots (above the composer).
+class TypingBubble extends StatefulWidget {
+  const TypingBubble({super.key, required this.name});
+  final String name;
+
+  @override
+  State<TypingBubble> createState() => _TypingBubbleState();
+}
+
+class _TypingBubbleState extends State<TypingBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _a = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _a.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      key: const ValueKey('typing-bubble'),
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(14, 2, 14, 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: AnimatedBuilder(
+          animation: _a,
+          builder: (context, _) => Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < 3; i++)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Transform.translate(
+                    offset: Offset(
+                      0,
+                      -3 *
+                          math.max(
+                            0,
+                            math.sin((_a.value * 2 - i * 0.25) * math.pi),
+                          ),
+                    ),
+                    child: Container(
+                      width: 7,
+                      height: 7,
+                      decoration: const BoxDecoration(
+                        color: AppColors.textSecondary,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

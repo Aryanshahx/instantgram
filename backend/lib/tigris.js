@@ -130,6 +130,21 @@ export async function deleteOwned({ uid, key }) {
   return { deleted: true };
 }
 
+/** v0.13 (admin website): deletes app files. Never throws -> deleted count. */
+export async function deleteKeys(keys, send = (c) => s3().send(c)) {
+  let n = 0;
+  for (const key of keys) {
+    if (typeof key !== 'string' || key.includes('..') || !KINDS.some((k) => key.startsWith(`${k}/`))) continue;
+    try {
+      await send(new DeleteObjectCommand({ Bucket: requireEnv('TIGRIS_BUCKET'), Key: key }));
+      n++;
+    } catch (e) {
+      console.warn('tigris delete', key, e?.name || e);
+    }
+  }
+  return n;
+}
+
 // ---------------- multipart (big videos, parts in parallel) ----------------
 
 const MIN_PART = 5 * MB;

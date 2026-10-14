@@ -11,6 +11,9 @@ import { HttpError } from './http.js';
 const SCOPES = [
   'https://www.googleapis.com/auth/firebase.messaging',
   'https://www.googleapis.com/auth/datastore',
+  // v0.13: admin website (block accounts)
+  'https://www.googleapis.com/auth/identitytoolkit',
+  'https://www.googleapis.com/auth/cloud-platform',
 ].join(' ');
 
 /**
@@ -225,6 +228,123 @@ export async function sendFcm(sa, message, fetchFn = fetch) {
     console.warn('fcm', r.status, j?.error?.status || '', j?.error?.message || '');
   }
   return r.ok;
+}
+
+// ---------------- v0.13: admin website helpers ----------------
+
+function dbRoot(sa) {
+  return `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents`;
+}
+
+async function gfetch(sa, url, init, what, fetchFn) {
+  const token = await accessToken(sa, fetchFn);
+  const r = await fetchFn(url, {
+    ...init,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init?.headers || {}) },
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    console.error(what, r.status, j?.error?.message || j);
+    const msg = String(j?.error?.message || '');
+    // missing index: Google sends a link to create it
+    const link = /https:\/\/console\.firebase\.google\.com\S+/.exec(msg);
+    throw new HttpError(r.status === 404 ? 404 : 500, link ? `Needs a database index. Open: ${link[0]}` : `Google: ${what} failed (${r.status}) ${msg}`.trim());
+  }
+  return j;
+}
+
+/** Document id from a REST "name". */
+export function idOf(name) {
+  return String(name || '').split('/').pop();
+}
+
+/**
+ * Runs a structured query. [parent] = '' (root) or e.g. 'posts/abc'.
+ * -> [{ id, path, data, createTime }]
+ */
+export async function runQuery(sa, structuredQuery, parent = '', fetchFn = fetch) {
+  const url = `${dbRoot(sa)}${parent ? `/${parent}` : ''}:runQuery`;
+  const j = await gfetch(sa, url, { method: 'POST', body: JSON.stringify({ structuredQuery }) }, 'query', fetchFn);
+  return (Array.isArray(j) ? j : [])
+    .filter((x) => x.document)
+    .map((x) => ({
+      id: idOf(x.document.name),
+      path: String(x.document.name).split('/documents/')[1] || '',
+      data: fromFields(x.document.fields),
+      createTime: x.document.createTime || null,
+    }));
+}
+
+/** Counts documents (cheap: 1 read per 1000). [where] optional. */
+export async function countQuery(sa, collectionId, where = null, { allDescendants = false } = {}, fetchFn = fetch) {
+  const structuredQuery = { from: [{ collectionId, allDescendants }] };
+  if (where) structuredQuery.where = where;
+  const j = await gfetch(
+    sa,
+    `${dbRoot(sa)}:runAggregationQuery`,
+    { method: 'POST', body: JSON.stringify({ structuredAggregationQuery: { structuredQuery, aggregations: [{ alias: 'n', count: {} }] } }) },
+    'count',
+    fetchFn,
+  );
+  const row = (Array.isArray(j) ? j : []).find((x) => x.result);
+  return Number(row?.result?.aggregateFields?.n?.integerValue || 0);
+}
+
+/** Several writes at once (max 500). Write = { delete: path } |
+ *  { update: path, fields, mask?: [..] } | { transform: path, transforms: [...] } */
+export async function commitWrites(sa, writes, fetchFn = fetch) {
+  if (!writes.length) return;
+  const name = (p) => `projects/${sa.project_id}/databases/(default)/documents/${p}`;
+  const body = {
+    writes: writes.map((w) => {
+      if (w.delete) return { delete: name(w.delete) };
+      if (w.transform) return { transform: { document: name(w.transform), fieldTransforms: w.transforms } };
+      return {
+        update: { name: name(w.update), fields: toFields(w.fields) },
+        updateMask: { fieldPaths: w.mask || Object.keys(w.fields) },
+        ...(w.mustExist ? { currentDocument: { exists: true } } : {}),
+      };
+    }),
+  };
+  await gfetch(sa, `${dbRoot(sa)}:commit`, { method: 'POST', body: JSON.stringify(body) }, 'write', fetchFn);
+}
+
+/** One page of a collection -> { docs: [{id, data}], next } */
+export async function listPage(sa, collection, { pageSize = 100, pageToken = '', fields = [] } = {}, fetchFn = fetch) {
+  const q = new URLSearchParams({ pageSize: String(pageSize) });
+  if (pageToken) q.set('pageToken', pageToken);
+  for (const f of fields) q.append('mask.fieldPaths', f);
+  const j = await gfetch(sa, `${dbRoot(sa)}/${collection}?${q}`, { method: 'GET' }, 'list', fetchFn);
+  return {
+    docs: (j.documents || []).map((d) => ({ id: idOf(d.name), data: fromFields(d.fields) })),
+    next: j.nextPageToken || '',
+  };
+}
+
+/** Firebase Auth (admin): one account, or null. */
+export async function authLookup(sa, uid, fetchFn = fetch) {
+  const j = await gfetch(
+    sa,
+    `https://identitytoolkit.googleapis.com/v1/projects/${sa.project_id}/accounts:lookup`,
+    { method: 'POST', body: JSON.stringify({ localId: [uid] }) },
+    'auth lookup',
+    fetchFn,
+  );
+  return (j.users || [])[0] || null;
+}
+
+/** Firebase Auth (admin): block / unblock login. Blocking also logs the
+ *  account out everywhere (old tokens stop working). */
+export async function authSetDisabled(sa, uid, disabled, fetchFn = fetch) {
+  const body = { localId: uid, disableUser: !!disabled };
+  if (disabled) body.validSince = String(Math.floor(Date.now() / 1000));
+  await gfetch(
+    sa,
+    `https://identitytoolkit.googleapis.com/v1/projects/${sa.project_id}/accounts:update`,
+    { method: 'POST', body: JSON.stringify(body) },
+    'auth update',
+    fetchFn,
+  );
 }
 
 /** Tests. */

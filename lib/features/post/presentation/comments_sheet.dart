@@ -529,7 +529,12 @@ class _CommentsSheetState extends State<CommentsSheet> {
       context: context,
       backgroundColor: AppColors.surface,
       builder: (ctx) {
-        Widget item(String id, IconData icon, String label, {bool danger = false}) {
+        Widget item(
+          String id,
+          IconData icon,
+          String label, {
+          bool danger = false,
+        }) {
           final color = danger ? AppColors.like : AppColors.textPrimary;
           return ListTile(
             key: ValueKey('comment-menu-$id'),
@@ -558,7 +563,8 @@ class _CommentsSheetState extends State<CommentsSheet> {
                   pinned ? 'Unpin comment' : 'Pin comment',
                 ),
               item('share', Icons.share_outlined, 'Share'),
-              if (!mine) item('report', Icons.flag_outlined, 'Report', danger: true),
+              if (!mine)
+                item('report', Icons.flag_outlined, 'Report', danger: true),
               if (mine || canModerate)
                 item('delete', Icons.delete_outline, 'Delete', danger: true),
               const SizedBox(height: 6),
@@ -605,6 +611,20 @@ class _CommentsSheetState extends State<CommentsSheet> {
       comment: c,
       reporterUsername: who,
       reporterUid: uid,
+    );
+    unawaited(
+      ReportRepository.instance.save(
+        ReportRepository.reportData(
+          kind: 'comment',
+          reporterUid: uid,
+          reporterUsername: who,
+          targetId: c.id,
+          postId: widget.post.id,
+          targetUid: c.authorId,
+          reason: 'Comment',
+          message: c.text,
+        ),
+      ),
     );
     if (!mounted) return;
     final ok = await openEmail(
@@ -793,11 +813,8 @@ class _CommentsSheetState extends State<CommentsSheet> {
                     pinned: c.id == _pinned && !c.isReply,
                     onReply: () => _reply(c),
                     onDelete: () => _delete(c),
-                    onLongPress: () => _commentMenu(
-                      c,
-                      me: me,
-                      canModerate: canModerate,
-                    ),
+                    onLongPress: () =>
+                        _commentMenu(c, me: me, canModerate: canModerate),
                   );
                 },
               );

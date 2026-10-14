@@ -1,3 +1,5 @@
+import '../../shared/models/post.dart';
+
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -13,6 +15,7 @@ class ChatPrefsData {
     this.mutedCalls = const {},
     this.cleared = const {},
     this.pushOff = const {},
+    this.vanish = const {},
   });
 
   static const empty = ChatPrefsData();
@@ -34,10 +37,35 @@ class ChatPrefsData {
 
   bool pushOn(String kind) => !pushOff.contains(kind);
 
+  /// v0.13: disappearing messages, only on MY phone:
+  /// chat id -> (mode, since when).
+  final Map<String, (String, DateTime)> vanish;
+
+  String vanishMode(String chatId) => vanish[chatId]?.$1 ?? Disappear.off;
+  DateTime? vanishSince(String chatId) => vanish[chatId]?.$2;
+
   bool isPinned(String chatId) => pinned.contains(chatId);
   bool isMuted(String chatId) => mutedChats.contains(chatId);
   bool callsMuted(String uid) => mutedCalls.contains(uid);
   DateTime? clearedAt(String chatId) => cleared[chatId];
+
+  static Map<String, (String, DateTime)> _vanish(Object? v) {
+    if (v is! Map) return const {};
+    final out = <String, (String, DateTime)>{};
+    for (final e in v.entries) {
+      final x = e.value;
+      if (e.key is! String || x is! Map) continue;
+      final mode = Disappear.normalize(x['m']);
+      if (mode == Disappear.off) continue;
+      final at = x['at'];
+      // just switched on (server time not back yet) -> now
+      out[e.key as String] = (
+        mode,
+        at is Timestamp ? at.toDate() : DateTime.now(),
+      );
+    }
+    return out;
+  }
 
   factory ChatPrefsData.fromMap(Map<String, dynamic>? m) {
     if (m == null) return empty;
@@ -49,6 +77,7 @@ class ChatPrefsData {
       mutedChats: list(m['mutedChats']).toSet(),
       mutedCalls: list(m['mutedCalls']).toSet(),
       pushOff: list(m['pushOff']).toSet(),
+      vanish: _vanish(m['vanishChats']),
       cleared: {
         if (c is Map)
           for (final e in c.entries)
@@ -138,6 +167,34 @@ class ChatPrefs {
         ? FieldValue.arrayRemove([kind])
         : FieldValue.arrayUnion([kind]),
   });
+
+  /// v0.13: disappearing messages for this chat, only on my phone.
+  Future<void> setVanish(String chatId, String mode) {
+    final m = Disappear.normalize(mode);
+    final v = value.value;
+    // show it at once
+    final next = {...v.vanish};
+    if (m == Disappear.off) {
+      next.remove(chatId);
+    } else {
+      next[chatId] = (m, v.vanish[chatId]?.$2 ?? DateTime.now());
+    }
+    value.value = ChatPrefsData(
+      pinned: v.pinned,
+      mutedChats: v.mutedChats,
+      mutedCalls: v.mutedCalls,
+      cleared: v.cleared,
+      pushOff: v.pushOff,
+      vanish: next,
+    );
+    return _save({
+      'vanishChats': {
+        chatId: m == Disappear.off
+            ? FieldValue.delete()
+            : {'m': m, 'at': FieldValue.serverTimestamp()},
+      },
+    });
+  }
 
   /// "Delete chat" for you: hides the chat and its messages until a new
   /// message comes. Also unpins it.

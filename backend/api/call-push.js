@@ -38,6 +38,8 @@ export function buildMessages(call, callId, action, tokens, now = Date.now(), { 
       // the same tag = the "missed" one replaces the "calling" one
       android.notification = {
         channel_id: 'calls_muted',
+        icon: 'ic_stat_instantgram', // v0.13: InstantGram logo
+        color: '#C6FF3D',
         tag: `call_${callId}`,
         title: action === 'ring' ? `${what} from ${name}` : `Missed ${what.toLowerCase()}`,
         body: action === 'ring' ? 'Muted call · tap to answer' : `From ${name}`,

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-
 import '../../../insights/owner_sheet.dart';
 
 import '../../../../core/services/content_filter.dart';
@@ -17,6 +16,7 @@ import '../../../post/presentation/comments_sheet.dart';
 import '../../../post/presentation/my_post_picker.dart' show ReplyStickerChip;
 import '../../../post/presentation/post_menu.dart';
 import '../../../../shared/widgets/bounce.dart';
+import '../../../../shared/widgets/verified_badge.dart';
 
 class PostCard extends StatefulWidget {
   const PostCard({
@@ -131,12 +131,20 @@ class _PostCardState extends State<PostCard>
                   Expanded(
                     child: GestureDetector(
                       onTap: () => openProfile(context, p.authorId),
-                      child: Text(
-                        p.authorUsername,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              p.authorUsername,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          VerifiedBadge(uid: p.authorId),
+                        ],
                       ),
                     ),
                   ),

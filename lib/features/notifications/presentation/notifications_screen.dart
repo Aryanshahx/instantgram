@@ -111,7 +111,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     : AppColors.lime.withValues(alpha: 0.06),
                 child: ListTile(
                   onTap: () {
-                    if (n.postId.isNotEmpty) {
+                    if (n.type == AppNotification.notice) {
+                      _showNotice(context, n);
+                    } else if (n.postId.isNotEmpty) {
                       Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (_) => PostDetailScreen(postId: n.postId),
@@ -121,7 +123,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       openProfile(context, n.fromUid);
                     }
                   },
-                  leading: n.type == AppNotification.views
+                  leading: n.type == AppNotification.notice
+                      ? const _NoticeBadge()
+                      : n.type == AppNotification.views
                       ? const _ViewsBadge()
                       : GestureDetector(
                           onTap: () => openProfile(context, n.fromUid),
@@ -168,6 +172,46 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+/// v0.13: a message from the InstantGram team (admin website).
+void _showNotice(BuildContext context, AppNotification n) {
+  showDialog<void>(
+    context: context,
+    builder: (d) => AlertDialog(
+      icon: const _NoticeBadge(),
+      title: const Text('InstantGram'),
+      content: SingleChildScrollView(child: SelectableText(n.text)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(d),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _NoticeBadge extends StatelessWidget {
+  const _NoticeBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const ValueKey('notice-badge'),
+      width: 46,
+      height: 46,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          colors: [AppColors.lime, Color(0xFF7CFFB2)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: const Icon(Icons.campaign_rounded, color: Colors.black, size: 24),
     );
   }
 }

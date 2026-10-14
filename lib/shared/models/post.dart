@@ -152,7 +152,7 @@ class VideoOverlay {
       kind: v['k'] == stickerKind ? stickerKind : textKind,
       text: t.length > 300 ? t.substring(0, 300) : t,
       color: v['c'] is num ? (v['c'] as num).toInt() : 0xFFFFFFFF,
-      size: d(v['z'], 0.08, 0.02, 0.6),
+      size: d(v['z'], 0.08, 0.02, 0.95),
       x: d(v['x'], 0.5, 0, 1),
       y: d(v['y'], 0.5, 0, 1),
       background: v['bg'] == true,
@@ -247,10 +247,7 @@ class VideoEdits {
     if (muted) 'muteAudio': true,
     if (cuts.isNotEmpty) 'cuts': [for (final c in cuts) c.toMap()],
     if (overlays.isNotEmpty) 'overlays': [for (final o in overlays) o.toMap()],
-    if (voiceUrl.isNotEmpty) ...{
-      'voiceUrl': voiceUrl,
-      'voiceKey': voiceKey,
-    },
+    if (voiceUrl.isNotEmpty) ...{'voiceUrl': voiceUrl, 'voiceKey': voiceKey},
     if (voicePath.isNotEmpty) 'voicePath': voicePath,
     if (hasVoice) ...{'voiceStartMs': voiceStartMs, 'voiceDurMs': voiceDurMs},
   };
@@ -669,9 +666,8 @@ class ReplyRef {
   bool get isComment => commentId.isNotEmpty;
 
   /// Sticker text on the new post / clip.
-  String get label => isComment
-      ? "Reply to @$username's comment"
-      : 'Reply to @$username';
+  String get label =>
+      isComment ? "Reply to @$username's comment" : 'Reply to @$username';
 
   /// Answers the post / clip itself (not one comment).
   static ReplyRef toPost(Post post) => ReplyRef(
@@ -950,6 +946,7 @@ class Chat {
     this.seen = const {},
     this.delivered = const {},
     this.disappear = Disappear.off,
+    this.typing = const {},
   });
 
   final String id;
@@ -968,7 +965,23 @@ class Chat {
   final Map<String, DateTime> delivered;
 
   /// v0.11: disappearing messages (see [Disappear]).
+  /// v0.13: no longer used (each person sets it for themselves).
   final String disappear;
+
+  /// v0.13: uid -> when that person last typed.
+  final Map<String, DateTime> typing;
+
+  /// How long "typing…" shows after the last keystroke signal.
+  static const Duration typingFor = Duration(seconds: 8);
+
+  /// [uid] is typing right now ([now] = server time).
+  bool isTyping(String uid, DateTime now) {
+    final t = typing[uid];
+    if (t == null) return false;
+    final age = now.difference(t);
+    // a phone clock a bit ahead can make it look like the future
+    return age < typingFor && age > const Duration(seconds: -30);
+  }
 
   DateTime? seenAt(String uid) => seen[uid];
 
@@ -1026,6 +1039,7 @@ class Chat {
       seen: _times(m['seen']),
       delivered: _times(m['delivered']),
       disappear: Disappear.normalize(m['disappear']),
+      typing: _times(m['typing']),
     );
   }
 }
@@ -1041,7 +1055,11 @@ class MessageQuote {
   final String senderId;
   final String text;
 
-  Map<String, dynamic> toMap() => {'id': id, 'senderId': senderId, 'text': text};
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'senderId': senderId,
+    'text': text,
+  };
 
   static MessageQuote? fromMap(Object? v) {
     if (v is! Map) return null;
@@ -1205,9 +1223,8 @@ class Message {
   }
 
   /// Google Maps link for a location message.
-  Uri get mapsUri => Uri.parse(
-    'https://www.google.com/maps/search/?api=1&query=$lat,$lng',
-  );
+  Uri get mapsUri =>
+      Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
 
   bool hiddenForUid(String uid) => hiddenFor.contains(uid);
 
@@ -1307,6 +1324,9 @@ class AppNotification {
   /// Written by our server: text = the number of views reached.
   static const views = 'views';
 
+  /// v0.13: message from the InstantGram team (admin website).
+  static const notice = 'notice';
+
   final String id;
   final String type;
   final String fromUid;
@@ -1339,7 +1359,16 @@ class AppNotification {
 class ViewMilestones {
   ViewMilestones._();
   static const steps = [
-    100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000,
+    100,
+    500,
+    1000,
+    5000,
+    10000,
+    50000,
+    100000,
+    500000,
+    1000000,
+    5000000,
     10000000,
   ];
 

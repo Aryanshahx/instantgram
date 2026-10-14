@@ -1,3 +1,5 @@
+import 'net_priority.dart';
+
 import 'dart:async';
 import 'dart:collection';
 
@@ -27,6 +29,7 @@ class MediaPrefetch {
   /// Puts an image in the same disk cache NetImage uses.
   void image(String url) {
     if (disabled || url.isEmpty || !url.startsWith('http')) return;
+    if (NetPriority.quiet) return; // v0.13: a refresh runs
     if (!_done.add(url)) return;
     if (_done.length > _remember) _done.remove(_done.first);
     unawaited(
@@ -48,6 +51,7 @@ class MediaPrefetch {
   /// Downloads the start of a video to the disk cache (v0.8).
   void video(String url, {int? bytes}) {
     if (disabled || url.isEmpty || !url.startsWith('http')) return;
+    if (NetPriority.quiet) return;
     unawaited(VideoCache.instance.prefetch(url, bytes: bytes));
   }
 
@@ -121,6 +125,7 @@ class VideoPool {
   /// Opens [url] in the background (does nothing if already there).
   void prefetch(String url, {bool mixWithOthers = false}) {
     if (disabled || url.isEmpty || !url.startsWith('http')) return;
+    if (NetPriority.quiet) return;
     final key = _key(url, mixWithOthers);
     if (_pool.containsKey(key)) {
       // move to the end = most recent
