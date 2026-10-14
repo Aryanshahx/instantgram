@@ -27,3 +27,21 @@ plugins {
 }
 
 include(":app")
+
+// v0.9.2: some Flutter plugins (ZEGO zego_zim) still use jcenter(), which
+// Gradle 9 removed. Before Gradle reads them, jcenter() becomes mavenCentral().
+run {
+    val pluginList = file("../.flutter-plugins-dependencies")
+    if (pluginList.exists()) {
+        Regex("\"path\":\"([^\"]+)\"").findAll(pluginList.readText()).forEach { m ->
+            val gradleFile = File(m.groupValues[1].replace("\\\\", "\\"), "android/build.gradle")
+            if (gradleFile.exists()) {
+                val text = gradleFile.readText()
+                if (text.contains("jcenter()")) {
+                    gradleFile.writeText(text.replace("jcenter()", "mavenCentral()"))
+                    println("InstantGram: jcenter() fixed in ${gradleFile.parentFile.parentFile.name}")
+                }
+            }
+        }
+    }
+}
