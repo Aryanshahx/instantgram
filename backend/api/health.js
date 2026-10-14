@@ -1,5 +1,7 @@
 // GET /api/health  -> shows whether the server is configured.
 import { env } from '../lib/http.js';
+import { serviceAccount } from '../lib/google.js';
+import { turnProviders } from './turn.js';
 
 const NEED = ['TIGRIS_ACCESS_KEY_ID', 'TIGRIS_SECRET_ACCESS_KEY', 'TIGRIS_BUCKET', 'FIREBASE_PROJECT_ID'];
 
@@ -19,16 +21,19 @@ export default function handler(req, res) {
     JSON.stringify({
       ok: missing.length === 0,
       app: 'instantgram',
-      version: '0.9.0',
+      version: '0.10.1',
       bucket: bucket || null,
       firebaseProject: env('FIREBASE_PROJECT_ID') || null,
       missing,
       warnings,
-      // optional features (v0.9)
+      // optional features
       features: {
         gifSearch: !!env('GIPHY_API_KEY'),
-        calls: !!(env('ZEGO_APP_ID') && env('ZEGO_APP_SIGN')),
-        callRingWhenClosed: !!env('ZEGO_RESOURCE_ID'),
+        // v0.10 calls: TURN = calls also work on mobile data
+        callsTurn: turnProviders().length > 0,
+        turnServices: turnProviders(),
+        // push = phone rings when the app is closed
+        callRingWhenClosed: !!serviceAccount(),
       },
     }),
   );

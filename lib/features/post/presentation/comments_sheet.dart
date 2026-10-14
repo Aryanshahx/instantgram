@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -12,6 +13,7 @@ import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/async_views.dart';
+import '../../../shared/widgets/attach_menu.dart';
 import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/bounce.dart';
 import '../../../shared/widgets/empty_state.dart';
@@ -47,7 +49,11 @@ Future<void> showComments(
     elevation: 0,
     barrierColor: onSheetTop != null ? Colors.transparent : null,
     builder: (_) => CommentsPanel(post: post, onSheetTop: onSheetTop),
-  ).whenComplete(() => onSheetTop?.call(null));
+  );
+  // v0.10: no null here. The future ends when the close STARTS; the panel
+  // itself says null when the close animation is really finished (before,
+  // its last slide reports came after the null and the clip stayed small
+  // with no buttons).
 }
 
 /// Draggable comments panel: 60 % -> full screen, or down to close.
@@ -82,6 +88,10 @@ class _CommentsPanelState extends State<CommentsPanel> {
   bool _full = false;
   Animation<double>? _routeAnim;
 
+  /// v0.10: the panel is gone (close animation done). Nothing is reported
+  /// after this, so the clip can't get stuck in small mode.
+  bool _closed = false;
+
   @override
   void initState() {
     super.initState();
@@ -95,21 +105,45 @@ class _CommentsPanelState extends State<CommentsPanel> {
     final a = ModalRoute.of(context)?.animation;
     if (a != _routeAnim) {
       _routeAnim?.removeListener(_report);
+      _routeAnim?.removeStatusListener(_onRouteStatus);
       _routeAnim = a;
       a?.addListener(_report);
+      a?.addStatusListener(_onRouteStatus);
     }
   }
 
   @override
   void dispose() {
     _routeAnim?.removeListener(_report);
+    _routeAnim?.removeStatusListener(_onRouteStatus);
+    if (!_closed) {
+      // safety: closed without the animation (route removed at once)
+      _closed = true;
+      final cb = widget.onSheetTop;
+      if (cb != null) scheduleMicrotask(() => cb(null));
+    }
     _dsc.dispose();
     _topInset.dispose();
     super.dispose();
   }
 
+  void _onRouteStatus(AnimationStatus s) {
+    if (s == AnimationStatus.dismissed) _sayClosed();
+  }
+
+  void _sayClosed() {
+    if (_closed) return;
+    _closed = true;
+    widget.onSheetTop?.call(null);
+  }
+
   void _report() {
-    if (!mounted || _avail <= 0) return;
+    if (_closed || !mounted) return;
+    if (_routeAnim?.status == AnimationStatus.dismissed) {
+      _sayClosed();
+      return;
+    }
+    if (_avail <= 0) return;
     final top = _avail * (1 - _extent);
     final a = Easing.legacyDecelerate.transform(
       (_routeAnim?.value ?? 1).clamp(0.0, 1.0),
@@ -330,29 +364,62 @@ class _CommentsSheetState extends State<CommentsSheet> {
     }
   }
 
-  /// v0.9: answer with one of your clips / posts, or make a new one.
-  Future<void> _replyWith() async {
+  /// v0.10: ONE "+" button (like chats): photo, GIF, one of your posts /
+  /// clips, or make a new clip / post as the answer.
+  Future<void> _plus() async {
     final reply = _replyTo;
-    final how = await showReplyWithSheet(context, to: reply?.authorUsername);
-    if (how == null || !mounted) return;
-    if (how == ReplyWith.mine) {
-      final p = await showMyPostPicker(context);
-      if (p != null && mounted) {
-        setState(() {
-          _linked = p;
-          _draft = null;
-        });
-      }
-      return;
-    }
-    final ref = reply != null
-        ? ReplyRef.fromComment(widget.post, reply)
-        : ReplyRef.toPost(widget.post);
-    await startCompose(
+    final what = await showAttachMenu(
       context,
-      how == ReplyWith.newClip ? ComposeMode.clip : ComposeMode.photo,
-      reply: ref,
+      const [
+        AttachOption('photo', Icons.photo_outlined, 'Photo', AppColors.lime),
+        AttachOption('gif', Icons.gif_box_outlined, 'GIF', AppColors.mint),
+        AttachOption(
+          'mine',
+          Icons.grid_view_rounded,
+          'My post / clip',
+          Color(0xFFFFB86B),
+        ),
+        AttachOption(
+          'new-clip',
+          Icons.videocam_outlined,
+          'New clip',
+          Color(0xFFB794F6),
+        ),
+        AttachOption(
+          'new-post',
+          Icons.add_photo_alternate_outlined,
+          'New post',
+          Color(0xFF7FD4FF),
+        ),
+      ],
+      keyPrefix: 'comment-attach',
+      title: reply != null ? 'Reply to @${reply.authorUsername}' : null,
     );
+    if (what == null || !mounted) return;
+    switch (what) {
+      case 'photo':
+        await _pickPhoto();
+      case 'gif':
+        await _pickGif();
+      case 'mine':
+        final p = await showMyPostPicker(context);
+        if (p != null && mounted) {
+          setState(() {
+            _linked = p;
+            _draft = null;
+          });
+        }
+      case 'new-clip':
+      case 'new-post':
+        final ref = reply != null
+            ? ReplyRef.fromComment(widget.post, reply)
+            : ReplyRef.toPost(widget.post);
+        await startCompose(
+          context,
+          what == 'new-clip' ? ComposeMode.clip : ComposeMode.photo,
+          reply: ref,
+        );
+    }
   }
 
   static Future<(int, int)> _size(File f) async {
@@ -721,38 +788,10 @@ class _CommentsSheetState extends State<CommentsSheet> {
             child: Row(
               children: [
                 IconButton(
-                  key: const ValueKey('comment-photo'),
-                  tooltip: 'Photo',
-                  onPressed: _sending ? null : _pickPhoto,
-                  icon: const Icon(Icons.image_outlined, size: 24),
-                ),
-                InkWell(
-                  key: const ValueKey('comment-gif'),
-                  borderRadius: BorderRadius.circular(8),
-                  onTap: _sending ? null : _pickGif,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 7,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceHigh,
-                      borderRadius: BorderRadius.circular(7),
-                    ),
-                    child: const Text(
-                      'GIF',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  key: const ValueKey('comment-reply-with'),
-                  tooltip: 'Reply with a clip or post',
-                  onPressed: _sending ? null : _replyWith,
-                  icon: const Icon(Icons.video_library_outlined, size: 23),
+                  key: const ValueKey('comment-plus'),
+                  tooltip: 'Photo, GIF, clip or post',
+                  onPressed: _sending ? null : _plus,
+                  icon: const Icon(Icons.add_circle_outline, size: 26),
                 ),
                 Expanded(
                   child: TextField(

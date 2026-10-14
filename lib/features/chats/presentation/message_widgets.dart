@@ -290,6 +290,8 @@ class MessageBubble extends StatelessWidget {
     required this.otherName,
     this.onLongPress,
     this.onReactionsTap,
+    this.onQuoteTap,
+    this.tick = MessageTick.none,
   });
 
   final Message message;
@@ -298,6 +300,12 @@ class MessageBubble extends StatelessWidget {
   final String otherName;
   final VoidCallback? onLongPress;
   final VoidCallback? onReactionsTap;
+
+  /// v0.10: tap the reply quote = jump to that message.
+  final VoidCallback? onQuoteTap;
+
+  /// v0.10: ✓ / ✓✓ / green ✓✓ / clock on your own messages.
+  final MessageTick tick;
 
   bool get _bare => message.isImage || message.isGif;
 
@@ -329,20 +337,34 @@ class MessageBubble extends StatelessWidget {
           ),
         ),
       if (q != null)
-        QuoteBox(
-          key: ValueKey('quote-${m.id}'),
-          title: q.senderId == myUid ? 'You' : otherName,
-          text: q.text,
-          onDark: !mine || _bare,
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onQuoteTap,
+          child: QuoteBox(
+            key: ValueKey('quote-${m.id}'),
+            title: q.senderId == myUid ? 'You' : otherName,
+            text: q.text,
+            onDark: !mine || _bare,
+          ),
         ),
     ];
-    final time = Text(
+    final timeText = Text(
       timeAgo(m.createdAt),
       style: TextStyle(
         fontSize: 11,
         color: _bare ? AppColors.textSecondary : sub,
       ),
     );
+    final time = tick == MessageTick.none
+        ? timeText
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              timeText,
+              const SizedBox(width: 3),
+              TickIcon(tick: tick, onDark: _bare),
+            ],
+          );
 
     Widget content;
     if (m.isSharedPost) {
@@ -1049,6 +1071,38 @@ class _ForwardSheetState extends State<ForwardSheet> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// v0.10 message ticks (your own messages).
+enum MessageTick { none, pending, sent, delivered, seen }
+
+/// Clock / ✓ / ✓✓ / green ✓✓.
+class TickIcon extends StatelessWidget {
+  const TickIcon({super.key, required this.tick, this.onDark = false});
+  final MessageTick tick;
+
+  /// true = on the dark background (photos, GIFs), false = lime bubble.
+  final bool onDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final grey = onDark ? AppColors.textSecondary : Colors.black54;
+    // green that shows on the lime bubble and on dark
+    final green = onDark ? const Color(0xFF3DDC84) : const Color(0xFF0A7A36);
+    final (IconData icon, Color color, String key) = switch (tick) {
+      MessageTick.pending => (Icons.schedule_rounded, grey, 'tick-pending'),
+      MessageTick.sent => (Icons.done_rounded, grey, 'tick-sent'),
+      MessageTick.delivered => (Icons.done_all_rounded, grey, 'tick-delivered'),
+      MessageTick.seen => (Icons.done_all_rounded, green, 'tick-seen'),
+      MessageTick.none => (Icons.done_rounded, grey, 'tick-none'),
+    };
+    return Icon(
+      icon,
+      key: ValueKey(key),
+      size: tick == MessageTick.pending ? 12 : 15,
+      color: color,
     );
   }
 }

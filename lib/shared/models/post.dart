@@ -622,6 +622,8 @@ class Chat {
     required this.updatedAt,
     this.pinnedId = '',
     this.pinnedText = '',
+    this.seen = const {},
+    this.delivered = const {},
   });
 
   final String id;
@@ -634,6 +636,37 @@ class Chat {
   /// v0.9: pinned message (id + short text), '' = none.
   final String pinnedId;
   final String pinnedText;
+
+  /// v0.10 ticks: uid -> when that person last saw / got the messages.
+  final Map<String, DateTime> seen;
+  final Map<String, DateTime> delivered;
+
+  DateTime? seenAt(String uid) => seen[uid];
+
+  /// Seen also counts as delivered.
+  DateTime? deliveredAt(String uid) {
+    final d = delivered[uid];
+    final s = seen[uid];
+    if (d == null) return s;
+    if (s == null) return d;
+    return s.isAfter(d) ? s : d;
+  }
+
+  /// The last message is from the other person and you haven't seen it.
+  bool unreadFor(String me) {
+    if (lastSenderId.isEmpty || lastSenderId == me) return false;
+    final s = seen[me];
+    return s == null || s.isBefore(updatedAt);
+  }
+
+  static Map<String, DateTime> _times(Object? v) {
+    if (v is! Map) return const {};
+    return {
+      for (final e in v.entries)
+        if (e.key is String && e.value is Timestamp)
+          e.key as String: (e.value as Timestamp).toDate(),
+    };
+  }
 
   String otherUid(String me) =>
       members.firstWhere((m) => m != me, orElse: () => me);
@@ -661,6 +694,8 @@ class Chat {
       updatedAt: _date(m['updatedAt']),
       pinnedId: pin is Map ? _str(pin['id']) : '',
       pinnedText: pin is Map ? _str(pin['text']) : '',
+      seen: _times(m['seen']),
+      delivered: _times(m['delivered']),
     );
   }
 }
@@ -714,6 +749,7 @@ class Message {
     this.reactions = const {},
     this.hiddenFor = const [],
     this.forwarded = false,
+    this.pending = false,
   });
 
   // kinds (v0.9)
@@ -761,6 +797,9 @@ class Message {
   final List<String> hiddenFor;
   final bool forwarded;
 
+  /// v0.10: still on this phone only (not on the server yet) = clock icon.
+  final bool pending;
+
   bool get isSharedPost => postId.isNotEmpty;
   bool get isImage => kind == image;
   bool get isGif => kind == gif;
@@ -806,9 +845,17 @@ class Message {
   }
 
   factory Message.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
-      Message.fromMap(doc.id, doc.data() ?? const <String, dynamic>{});
+      Message.fromMap(
+        doc.id,
+        doc.data() ?? const <String, dynamic>{},
+        pending: doc.metadata.hasPendingWrites,
+      );
 
-  factory Message.fromMap(String id, Map<String, dynamic> m) {
+  factory Message.fromMap(
+    String id,
+    Map<String, dynamic> m, {
+    bool pending = false,
+  }) {
     final postId = _str(m['postId']);
     var kind = _str(m['kind']);
     if (kind.isEmpty) kind = postId.isNotEmpty ? post : plain;
@@ -845,6 +892,7 @@ class Message {
           ? List<String>.from((m['hiddenFor'] as List).whereType<String>())
           : const [],
       forwarded: _bool(m['forwarded']),
+      pending: pending,
     );
   }
 }

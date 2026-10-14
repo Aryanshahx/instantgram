@@ -771,7 +771,9 @@ class _ClipPlayerState extends State<ClipPlayer>
     if (!_ready || c == null) return;
     final music = widget.clip.hasMusic;
     setState(() {
-      if (c.value.isPlaying) {
+      // v0.10: follow what the USER did last, not isPlaying (a tap used to
+      // pause in the long-press-cancel code first and then play here).
+      if (!_userPaused) {
         _userPaused = true;
         c.pause();
         if (music) MusicPlayer.instance.pause(_musicOwner);
@@ -791,7 +793,8 @@ class _ClipPlayerState extends State<ClipPlayer>
     try {
       await showComments(context, c, onSheetTop: _onSheetTop);
     } finally {
-      _onSheetTop(null);
+      // v0.10: the panel says null itself when its close animation ends
+      // (buttons come back). Here only the back button / title.
       widget.onPanel?.call(false);
     }
   }
@@ -849,6 +852,7 @@ class _ClipPlayerState extends State<ClipPlayer>
 
   void _holdEnd() {
     final c = _ctrl;
+    // only called by ClipTapArea after a real hold started
     if (c != null && _ready) {
       c.setPlaybackSpeed(1);
       if (!_wasPlaying || _mustStayPaused) c.pause();
@@ -964,14 +968,12 @@ class _ClipPlayerState extends State<ClipPlayer>
           fit: StackFit.expand,
           children: [
             // 1) the video + its gestures (bottom layer)
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
+            ClipTapArea(
               onTap: _togglePlay,
               onDoubleTap: () => _doubleTapLike(c, liked),
-              onLongPressStart: _holdStart,
-              onLongPressMoveUpdate: _holdMove,
-              onLongPressEnd: (_) => _holdEnd(),
-              onLongPressCancel: _holdEnd,
+              onHoldStart: _holdStart,
+              onHoldMove: _holdMove,
+              onHoldEnd: _holdEnd,
               child: _items.length == 1
                   ? _media(c, 0, small: small)
                   : PageView.builder(
@@ -1645,6 +1647,64 @@ class _ActionState extends State<_Action> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Tap / double tap / hold area of a clip (v0.10).
+///
+/// Flutter calls onLongPressCancel on EVERY normal tap. Before, that ran
+/// the "end of 2x hold" code, which paused the video, and then the tap
+/// (300 ms later) saw a paused video and played it again: "the clip plays
+/// by itself after I pause it". Here [onHoldEnd] only comes after a real
+/// [onHoldStart].
+class ClipTapArea extends StatefulWidget {
+  const ClipTapArea({
+    super.key,
+    required this.child,
+    this.onTap,
+    this.onDoubleTap,
+    this.onHoldStart,
+    this.onHoldMove,
+    this.onHoldEnd,
+  });
+
+  final Widget child;
+  final VoidCallback? onTap;
+  final VoidCallback? onDoubleTap;
+  final GestureLongPressStartCallback? onHoldStart;
+  final GestureLongPressMoveUpdateCallback? onHoldMove;
+  final VoidCallback? onHoldEnd;
+
+  @override
+  State<ClipTapArea> createState() => _ClipTapAreaState();
+}
+
+class _ClipTapAreaState extends State<ClipTapArea> {
+  bool _holding = false;
+
+  void _end() {
+    if (!_holding) return; // a tap, not a hold
+    _holding = false;
+    widget.onHoldEnd?.call();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onTap,
+      onDoubleTap: widget.onDoubleTap,
+      onLongPressStart: (d) {
+        _holding = true;
+        widget.onHoldStart?.call(d);
+      },
+      onLongPressMoveUpdate: (d) {
+        if (_holding) widget.onHoldMove?.call(d);
+      },
+      onLongPressEnd: (_) => _end(),
+      onLongPressCancel: _end,
+      child: widget.child,
     );
   }
 }

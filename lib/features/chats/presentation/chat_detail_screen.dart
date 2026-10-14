@@ -15,7 +15,9 @@ import '../../../core/utils/errors.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/models/user_profile.dart';
 import '../../../shared/navigation.dart';
+import '../../../shared/widgets/active_status.dart';
 import '../../../shared/widgets/async_views.dart';
+import '../../../shared/widgets/attach_menu.dart';
 import '../../../shared/widgets/avatar.dart';
 import '../../post/presentation/gif_picker.dart';
 import '../data/chat_repository.dart';
@@ -32,9 +34,13 @@ class ChatDetailScreen extends StatefulWidget {
     this.messages,
     this.chat,
     this.myUid,
+    this.presence,
   });
 
   final UserProfile other;
+
+  /// Tests: "Active" status of [other].
+  final Stream<DateTime?>? presence;
 
   /// Tests: replace Firestore.
   final Stream<List<Message>>? messages;
@@ -59,6 +65,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   late final Stream<Chat?> _chat = widget.chat ?? _repo.chat(_chatId);
   late final ChatPerson _other = ChatPerson.of(widget.other);
   final Map<String, GlobalKey> _keys = {};
+  final _scroll = ScrollController();
+
+  /// Tests pass streams: then nothing is written to Firestore.
+  bool get _live => widget.messages == null;
+  StreamSubscription<Chat?>? _chatSub;
+  AppLifecycleListener? _life;
+  List<Message> _shown = const [];
+  String? _seenAskedFor; // newest message we sent "seen" for
+  String? _flashId; // message highlighted after a jump
+  Timer? _flashTimer;
 
   bool _sending = false;
   String? _busyText; // "Sending photo…"
@@ -81,6 +97,51 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   void initState() {
     super.initState();
     _ctrl.addListener(_onText);
+    _chatSub = _chat.listen((c) {
+      if (!mounted) return;
+      setState(() => _chatNow = c);
+      _checkSeen();
+    }, onError: (Object e) => debugPrint('chat: $e'));
+    _life = AppLifecycleListener(onResume: _checkSeen);
+  }
+
+  // ------------------------------------------------------- v0.10 ticks
+
+  /// While you look at the chat: tell the other person "seen".
+  void _checkSeen() {
+    if (!_live || !mounted) return;
+    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+    Message? newest;
+    for (final m in _shown) {
+      if (m.senderId != _me) {
+        newest = m;
+        break;
+      }
+    }
+    if (newest == null || newest.id == _seenAskedFor) return;
+    final seen = _chatNow?.seenAt(_me);
+    if (seen != null && !seen.isBefore(newest.createdAt)) return;
+    _seenAskedFor = newest.id;
+    _repo.markSeen(_chatId).catchError((Object e) {
+      _seenAskedFor = null;
+      debugPrint('seen: $e');
+    });
+  }
+
+  /// ✓ sent, ✓✓ delivered, green ✓✓ seen, clock = still sending.
+  MessageTick _tickFor(Message m) {
+    if (m.senderId != _me) return MessageTick.none;
+    if (m.pending) return MessageTick.pending;
+    final other = widget.other.uid;
+    final seen = _chatNow?.seenAt(other);
+    if (seen != null && !seen.isBefore(m.createdAt)) return MessageTick.seen;
+    final got = _chatNow?.deliveredAt(other);
+    if (got != null && !got.isBefore(m.createdAt)) {
+      return MessageTick.delivered;
+    }
+    return MessageTick.sent;
   }
 
   bool _hadText = false;
@@ -91,6 +152,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   void dispose() {
+    _chatSub?.cancel();
+    _life?.dispose();
+    _flashTimer?.cancel();
+    _scroll.dispose();
     _recTimer?.cancel();
     if (_recording) _rec?.cancel();
     _rec?.dispose();
@@ -163,56 +228,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   // ------------------------------------------------------------- attach
 
   Future<void> _attach() async {
-    final what = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: AppColors.surface,
-      builder: (ctx) {
-        Widget option(String id, IconData icon, String label, Color color) {
-          return InkWell(
-            key: ValueKey('attach-$id'),
-            borderRadius: BorderRadius.circular(16),
-            onTap: () => Navigator.pop(ctx, id),
-            child: Padding(
-              padding: const EdgeInsets.all(10),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircleAvatar(
-                    radius: 27,
-                    backgroundColor: color,
-                    child: Icon(icon, color: Colors.black, size: 26),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    label,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                option('photo', Icons.photo_outlined, 'Photo', AppColors.lime),
-                option('gif', Icons.gif_box_outlined, 'GIF', AppColors.mint),
-                option(
-                  'location',
-                  Icons.location_on_outlined,
-                  'Location',
-                  const Color(0xFFFFB86B),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+    final what = await showAttachMenu(context, const [
+      AttachOption('photo', Icons.photo_outlined, 'Photo', AppColors.lime),
+      AttachOption('gif', Icons.gif_box_outlined, 'GIF', AppColors.mint),
+      AttachOption(
+        'location',
+        Icons.location_on_outlined,
+        'Location',
+        Color(0xFFFFB86B),
+      ),
+    ]);
     if (!mounted || what == null) return;
     switch (what) {
       case 'photo':
@@ -461,7 +486,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   Future<void> _call({required bool video}) async {
     final o = widget.other;
     try {
-      await Calls.instance.call(uid: o.uid, username: o.username, video: video);
+      await Calls.instance.call(
+        uid: o.uid,
+        username: o.username,
+        photoUrl: o.photoUrl,
+        video: video,
+      );
     } on CallsOff catch (e) {
       _snack(e.toString());
     } catch (e) {
@@ -469,17 +499,59 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
   }
 
-  void _showPinned(String id) {
-    final ctx = _keys[id]?.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.5,
-        duration: const Duration(milliseconds: 300),
-      );
-    } else {
-      _snack('Scroll up to find this message.');
+  void _showPinned(String id) => jumpTo(id);
+
+  /// v0.10: scroll to a message (reply quote / pinned bar) and flash it.
+  /// The list only builds what is near the screen, so it moves one screen
+  /// at a time until the message is built, then centres it.
+  Future<void> jumpTo(String id) async {
+    final idx = _shown.indexWhere((m) => m.id == id);
+    if (idx < 0) {
+      _snack('This message was deleted or is too old.');
+      return;
     }
+    for (var tries = 0; tries < 60 && mounted; tries++) {
+      final ctx = _keys[id]?.currentContext;
+      if (ctx != null && ctx.mounted) {
+        await Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.5,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOutCubic,
+        );
+        _flash(id);
+        return;
+      }
+      if (!_scroll.hasClients) return;
+      // which messages are built now?
+      var lo = -1, hi = -1;
+      for (var i = 0; i < _shown.length; i++) {
+        if (_keys[_shown[i].id]?.currentContext != null) {
+          if (lo < 0) lo = i;
+          hi = i;
+        }
+      }
+      final pos = _scroll.position;
+      final step = pos.viewportDimension * 0.8;
+      // reversed list: bigger index = older = bigger offset
+      final down = lo >= 0 && idx < lo;
+      final target = (pos.pixels + (down ? -step : step)).clamp(
+        pos.minScrollExtent,
+        pos.maxScrollExtent,
+      );
+      if (target == pos.pixels && hi >= 0) return; // can't go further
+      _scroll.jumpTo(target);
+      await WidgetsBinding.instance.endOfFrame;
+    }
+  }
+
+  void _flash(String id) {
+    if (!mounted) return;
+    setState(() => _flashId = id);
+    _flashTimer?.cancel();
+    _flashTimer = Timer(const Duration(milliseconds: 1300), () {
+      if (mounted) setState(() => _flashId = null);
+    });
   }
 
   // ----------------------------------------------------------------- UI
@@ -497,13 +569,25 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               Avatar(url: o.photoUrl, name: o.username, size: 32, uid: o.uid),
               const SizedBox(width: 12),
               Flexible(
-                child: Text(
-                  o.username,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      o.username,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    ActiveLabel(
+                      uid: o.uid,
+                      stream:
+                          widget.presence ??
+                          (_live ? null : Stream<DateTime?>.value(null)),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -527,10 +611,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       ),
       body: Column(
         children: [
-          StreamBuilder<Chat?>(
-            stream: _chat,
-            builder: (context, snap) {
-              final chat = _chatNow = snap.data;
+          Builder(
+            builder: (context) {
+              final chat = _chatNow;
               if (chat == null || chat.pinnedId.isEmpty) {
                 return const SizedBox.shrink();
               }
@@ -596,8 +679,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 final msgs = snap.data!
                     .where((m) => !m.hiddenForUid(_me))
                     .toList();
+                _shown = msgs;
+                WidgetsBinding.instance.addPostFrameCallback(
+                  (_) => _checkSeen(),
+                );
                 if (msgs.isEmpty) return _hello(o);
                 return ListView.builder(
+                  controller: _scroll,
                   reverse: true,
                   padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                   itemCount: msgs.length,
@@ -606,13 +694,26 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     return SwipeToReply(
                       key: _keys.putIfAbsent(m.id, GlobalKey.new),
                       onReply: () => _reply(m),
-                      child: MessageBubble(
-                        message: m,
-                        mine: m.senderId == _me,
-                        myUid: _me,
-                        otherName: o.username,
-                        onLongPress: () => _menu(m),
-                        onReactionsTap: () => _reactionsTap(m),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 350),
+                        decoration: BoxDecoration(
+                          color: _flashId == m.id
+                              ? AppColors.lime.withValues(alpha: 0.16)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: MessageBubble(
+                          message: m,
+                          mine: m.senderId == _me,
+                          myUid: _me,
+                          otherName: o.username,
+                          tick: _tickFor(m),
+                          onLongPress: () => _menu(m),
+                          onReactionsTap: () => _reactionsTap(m),
+                          onQuoteTap: m.replyTo == null
+                              ? null
+                              : () => jumpTo(m.replyTo!.id),
+                        ),
                       ),
                     );
                   },

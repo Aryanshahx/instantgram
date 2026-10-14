@@ -44,8 +44,22 @@ class ChatRepository {
       .collection('messages')
       .orderBy('createdAt', descending: true)
       .limit(200)
-      .snapshots()
+      // v0.10: also hear "saved on the server" (clock -> tick)
+      .snapshots(includeMetadataChanges: true)
       .map((s) => s.docs.map(Message.fromDoc).toList());
+
+  // ------------------------------------------------------------ v0.10 ticks
+
+  /// You saw the chat (green ticks for the other person).
+  Future<void> markSeen(String chatId) => _chats.doc(chatId).update({
+    'seen.$myUid': FieldValue.serverTimestamp(),
+    'delivered.$myUid': FieldValue.serverTimestamp(),
+  });
+
+  /// New messages reached your phone (double grey ticks).
+  Future<void> markDelivered(String chatId) => _chats.doc(chatId).update({
+    'delivered.$myUid': FieldValue.serverTimestamp(),
+  });
 
   Future<void> send(
     UserProfile other,

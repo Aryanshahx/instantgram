@@ -27,7 +27,7 @@ An Instagram-like app built with **Flutter**.
 ## New in v0.9
 - Chats: photos, GIFs, voice messages, location (opens Google Maps), reactions,
   reply (long-press or swipe right), forward, pin, delete for everyone / for you
-- Voice + video calls: coming soon (ZEGOCLOUD removed in v0.9.3, new call service next)
+- Voice + video calls (own WebRTC, rings when the app is closed), message ticks ✓ ✓✓, "Active now"
 - Clips: comments open as a panel, the clip plays small on top; drag the panel to
   full screen and the clip pauses. Paused clips stay paused (music too)
 - Reply to a comment with one of your clips / posts, or make a new one
@@ -91,8 +91,11 @@ Then set the GitHub repo variable **`API_BASE_URL`** = your Vercel URL
 (Settings → Secrets and variables → Actions → Variables), or put it in `lib/core/config/api_url.dart`.
 
 ### Calls
-Off for now (v0.9.3). ZEGOCLOUD was removed because its Android plugins do not
-build with AGP 9 / Gradle 9. A new call service comes in the next update.
+Own WebRTC calls (v0.10): Firestore carries the call setup, a free TURN server
+(ExpressTURN, Metered Open Relay or Cloudflare) relays when needed, FCM makes the
+phone ring when the app is closed.
+Vercel settings: `TURN_SERVER`, `TURN_USERNAME`, `TURN_PASSWORD` (ExpressTURN),
+`FIREBASE_SERVICE_ACCOUNT` (see [`backend/README.md`](backend/README.md)).
 
 ## Project structure
 ```

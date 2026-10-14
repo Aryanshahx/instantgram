@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// InstantGram Firestore security rules (v0.4.0)
+// InstantGram Firestore security rules (v0.10.0)
 // Deploy:  firebase deploy --only firestore --project YOUR_PROJECT_ID
 // or paste into: Firebase Console -> Firestore Database -> Rules -> Publish
 service cloud.firestore {
@@ -400,8 +400,17 @@ service cloud.firestore {
         && cid == request.resource.data.members[0] + '_' + request.resource.data.members[1];
       allow update: if signedIn()
         && me() in resource.data.members
-        && request.resource.data.members == resource.data.members;
+        && request.resource.data.members == resource.data.members
+        // v0.10 ticks: you only set YOUR seen / delivered time
+        && onlyMyKey('seen') && onlyMyKey('delivered');
       allow delete: if false;
+
+      function onlyMyKey(f) {
+        return !changed().hasAny([f])
+          || (request.resource.data[f] is map
+              && request.resource.data[f].diff(resource.data.get(f, {}))
+                   .affectedKeys().hasOnly([me()]));
+      }
 
       match /messages/{mid} {
         allow read: if signedIn() && me() in cid.split('_');
@@ -452,6 +461,82 @@ service cloud.firestore {
             && now is list && now.size() == old.size() + 1
             && now.hasAll(old) && now.hasAll([me()]) && !old.hasAll([me()]);
         }
+      }
+    }
+
+    // ---------------- v0.10: Active status ----------------
+    // presence/{uid} = {lastActive, hidden}
+    match /presence/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && me() == uid
+        && request.resource.data.keys().hasOnly(['lastActive', 'hidden'])
+        && request.resource.data.hidden is bool
+        && (request.resource.data.lastActive == null
+            || request.resource.data.lastActive == request.time);
+      allow delete: if false;
+    }
+
+    // ---------------- v0.10: push tokens (ring when the app is closed) ----
+    // Only you. Our server reads them with its own key (no rules there).
+    match /pushTokens/{uid} {
+      allow read, delete: if signedIn() && me() == uid;
+      allow create, update: if signedIn() && me() == uid
+        && request.resource.data.keys().hasOnly(['tokens', 'updatedAt'])
+        && request.resource.data.tokens is list
+        && request.resource.data.tokens.size() <= 10;
+    }
+
+    // ---------------- v0.10: voice / video calls ----------------
+    match /calls/{callId} {
+      function inCall(d) { return me() == d.callerId || me() == d.calleeId; }
+      allow get: if signedIn() && inCall(resource.data);
+      // "who is calling me" (ringing list)
+      allow list: if signedIn() && resource.data.calleeId == me();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['callerId', 'callerName',
+             'callerPhoto', 'calleeId', 'calleeName', 'calleePhoto', 'video',
+             'status', 'offer', 'createdAt'])
+        && request.resource.data.callerId == me()
+        && request.resource.data.calleeId is string
+        && request.resource.data.calleeId != me()
+        && request.resource.data.status == 'ringing'
+        && request.resource.data.video is bool
+        && request.resource.data.callerName is string
+        && request.resource.data.callerName.size() <= 60
+        && request.resource.data.get('callerPhoto', '') is string
+        && request.resource.data.get('callerPhoto', '').size() <= 600
+        && request.resource.data.offer is map
+        && request.resource.data.offer.sdp is string
+        && request.resource.data.offer.sdp.size() <= 20000
+        && request.resource.data.createdAt == request.time
+        // the person did not block you
+        && !blockedBy(request.resource.data.calleeId, me());
+      allow update: if signedIn() && inCall(resource.data)
+        && changed().hasOnly(['status', 'answer', 'acceptedAt', 'endedAt'])
+        && request.resource.data.status in ['ringing', 'accepted', 'declined',
+             'ended', 'missed', 'busy']
+        // only the person called can answer / accept / say busy
+        && (!changed().hasAny(['answer', 'acceptedAt'])
+            || me() == resource.data.calleeId)
+        && (!(request.resource.data.status in ['accepted', 'busy'])
+            || me() == resource.data.calleeId)
+        // a finished call stays finished
+        && resource.data.status in ['ringing', 'accepted'];
+      allow delete: if false;
+
+      // network candidates (each side writes its own)
+      match /candidates/{cid} {
+        function theCall() {
+          return get(/databases/$(database)/documents/calls/$(callId)).data;
+        }
+        allow read: if signedIn() && inCall(theCall());
+        allow create: if signedIn() && inCall(theCall())
+          && request.resource.data.keys().hasOnly(['from', 'candidate',
+               'sdpMid', 'sdpMLineIndex', 'createdAt'])
+          && request.resource.data.from == me()
+          && request.resource.data.candidate is string
+          && request.resource.data.candidate.size() <= 1000;
+        allow update, delete: if false;
       }
     }
   }

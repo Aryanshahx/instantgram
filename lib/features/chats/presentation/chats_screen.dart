@@ -8,6 +8,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/models/user_profile.dart';
+import '../../../shared/widgets/active_status.dart';
 import '../../../shared/widgets/async_views.dart';
 import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/empty_state.dart';
@@ -170,10 +171,22 @@ class _ChatTile extends StatelessWidget {
     final other = chat.otherUid(me);
     final name = chat.usernameOf(other);
     final fromMe = chat.lastSenderId == me;
+    final unread = chat.unreadFor(me);
+    // v0.10: Seen / Delivered / Sent for your last message
+    var state = 'Sent';
+    if (fromMe) {
+      final s = chat.seenAt(other);
+      final d = chat.deliveredAt(other);
+      if (s != null && !s.isBefore(chat.updatedAt)) {
+        state = 'Seen';
+      } else if (d != null && !d.isBefore(chat.updatedAt)) {
+        state = 'Delivered';
+      }
+    }
     final preview = chat.lastMessage.isEmpty
         ? 'Say hi 👋'
         : fromMe
-        ? 'Sent · You: ${chat.lastMessage}'
+        ? '$state · You: ${chat.lastMessage}'
         : chat.lastMessage;
 
     return Material(
@@ -189,11 +202,17 @@ class _ChatTile extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(10, 10, 14, 10),
           child: Row(
             children: [
-              Avatar(
-                url: chat.photoOf(other),
-                name: name,
-                size: 44,
-                uid: other,
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Avatar(
+                    url: chat.photoOf(other),
+                    name: name,
+                    size: 44,
+                    uid: other,
+                  ),
+                  Positioned(right: -1, bottom: -1, child: ActiveDot(uid: other)),
+                ],
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -214,6 +233,7 @@ class _ChatTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 13,
+                        fontWeight: unread ? FontWeight.w700 : FontWeight.w400,
                         color: fromMe
                             ? AppColors.textSecondary
                             : AppColors.textPrimary,
@@ -222,12 +242,28 @@ class _ChatTile extends StatelessWidget {
                   ],
                 ),
               ),
-              Text(
-                timeAgo(chat.updatedAt, approx: true),
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    timeAgo(chat.updatedAt, approx: true),
+                    style: TextStyle(
+                      color: unread ? AppColors.lime : AppColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                  if (unread)
+                    Container(
+                      key: const ValueKey('unread-dot'),
+                      margin: const EdgeInsets.only(top: 6),
+                      width: 9,
+                      height: 9,
+                      decoration: const BoxDecoration(
+                        color: AppColors.lime,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                ],
               ),
             ],
           ),

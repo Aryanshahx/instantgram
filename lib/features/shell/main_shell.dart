@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../../core/services/calls.dart';
 import '../../core/services/deep_links.dart';
 import '../../core/services/media_prefetch.dart';
+import '../../core/services/presence.dart';
+import '../chats/data/chat_receipts.dart';
 import '../profile/data/user_repository.dart';
 import '../profile/presentation/open_username.dart';
 import '../profile/data/famous_index.dart';
@@ -71,12 +73,19 @@ class _MainShellState extends State<MainShell> {
     unawaited(_startCalls());
   }
 
-  /// v0.9: voice + video calls (receive calls, open an accepted one).
+  /// Voice + video calls (receive calls, open an accepted one), plus
+  /// v0.10 "Active now" and message ticks (delivered).
   Future<void> _startCalls() async {
+    unawaited(Presence.instance.start(widget.uid));
+    ChatReceipts.instance.start(widget.uid);
     try {
       final me = await UserRepository.instance.meCached();
-      await Calls.instance.signIn(uid: widget.uid, username: me.username);
-      if (mounted) Calls.instance.openAcceptedCall();
+      await Calls.instance.signIn(
+        uid: widget.uid,
+        username: me.username,
+        photoUrl: me.photoUrl,
+      );
+      if (mounted) await Calls.instance.openAcceptedCall();
     } catch (e) {
       debugPrint('calls: $e');
     }

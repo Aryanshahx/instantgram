@@ -9,6 +9,7 @@ import '../../../core/constants/countries.dart';
 import '../../../core/constants/languages.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/media_service.dart';
+import '../../../core/services/presence.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/email.dart';
 import '../../../core/utils/errors.dart';
@@ -199,6 +200,46 @@ class _AccountScreenState extends State<AccountScreen> {
           ],
         ),
       ],
+    );
+  }
+}
+
+// ============================================================ Activity status
+
+/// v0.10: "Active now" on / off (like Instagram).
+class ActivityStatusScreen extends StatelessWidget {
+  const ActivityStatusScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Presence.instance;
+    return ValueListenableBuilder<bool>(
+      valueListenable: p.show,
+      builder: (context, on, _) => SettingsPage(
+        title: 'Activity status',
+        children: [
+          SettingsCard(
+            children: [
+              SettingsSwitch(
+                key: const ValueKey('show-activity'),
+                icon: Icons.circle,
+                title: 'Show activity status',
+                subtitle: 'People you chat with see when you were last active',
+                value: on,
+                onChanged: p.setShow,
+              ),
+            ],
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(8, 10, 8, 0),
+            child: Text(
+              'When this is off, nobody sees when you are active, and you '
+              "can't see other people's activity status either.",
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

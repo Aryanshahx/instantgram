@@ -4,10 +4,12 @@ import '../../../core/config/app_info.dart';
 import '../../../core/constants/languages.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/calls.dart';
+import '../../../core/services/presence.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/email.dart';
 import '../../../shared/models/user_profile.dart';
 import '../../auth/data/auth_service.dart';
+import '../../chats/data/chat_receipts.dart';
 import '../../profile/presentation/saved_screen.dart';
 import 'history_screen.dart';
 import 'privacy_screens.dart';
@@ -60,8 +62,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
-  void _push(BuildContext context, Widget page) =>
-      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+  void _push(BuildContext context, Widget page) => Navigator.of(context)
+      .push(MaterialPageRoute<void>(builder: (_) => page))
+      .then((_) {
+        if (mounted) setState(() {}); // e.g. Activity status On / Off
+      });
 
   List<_Item> _items() {
     final p = widget.profile;
@@ -107,6 +112,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         subtitle: p.isPrivate ? 'Private' : 'Public',
         keywords: 'private public follow requests followers',
         onTap: (c) => _push(c, const PrivacyScreen()),
+      ),
+      _Item(
+        section: 'Who can see your content',
+        icon: Icons.circle_outlined,
+        title: 'Activity status',
+        subtitle: Presence.instance.show.value ? 'On' : 'Off',
+        keywords: 'active now online last seen status hide',
+        onTap: (c) => _push(c, const ActivityStatusScreen()),
       ),
       _Item(
         section: 'Who can see your content',
@@ -306,7 +319,9 @@ Future<void> confirmLogout(BuildContext context) async {
   );
   if (ok != true || !context.mounted) return;
   Navigator.of(context).popUntil((r) => r.isFirst);
-  await Calls.instance.signOut(); // v0.9: no calls for this phone any more
+  await Calls.instance.signOut(); // no calls for this phone any more
+  await Presence.instance.stop();
+  ChatReceipts.instance.stop();
   await AuthService.instance.signOut();
 }
 

@@ -143,7 +143,9 @@ void main() {
       // v0.9: no white lines
       expect(find.byType(Divider), findsNothing);
       expect(find.text('——'), findsNothing);
-      expect(find.byKey(const ValueKey('comment-reply-with')), findsOneWidget);
+      // v0.10: one "+" button instead of photo / GIF / reply-with
+      expect(find.byKey(const ValueKey('comment-plus')), findsOneWidget);
+      expect(find.byKey(const ValueKey('comment-photo')), findsNothing);
       await ctrl.close();
     });
 
@@ -475,7 +477,7 @@ void main() {
       await t.tap(find.byKey(const ValueKey('call-video')));
       await t.pump();
       await t.pump(const Duration(milliseconds: 100));
-      expect(find.textContaining('calls are coming soon'), findsOneWidget);
+      expect(find.text('Calls are off.'), findsOneWidget);
       await msgs.close();
       await _finish(t);
     });
