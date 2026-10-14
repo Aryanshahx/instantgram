@@ -10,7 +10,8 @@ Tiny API that gives the app **signed upload links** for Tigris storage.
 | `POST /api/multipart` | big videos: `create` → part links, `complete`, `abort`, `sign` (new links for missing parts = resume after a break) |
 | `POST /api/gifs` | `{q, offset}` → GIF search for comments (GIPHY). Empty `q` = trending |
 | `POST /api/turn` | `{}` → STUN/TURN servers for calls (ExpressTURN / Metered / Cloudflare when set) |
-| `POST /api/call-push` | `{callId, action: ring\|cancel}` → makes the called phone ring (FCM), also when the app is closed |
+| `POST /api/call-push` | `{callId, action: ring\|cancel}` → makes the called phone ring (FCM), also when the app is closed (muted calls = quiet notification); `{action: test}` rings your own phone after 6 s |
+| `POST /api/message-push` | `{chatId, messageId}` → "username: message" notification for the other person (not when they muted the chat) |
 | `GET /u/<username>` | profile link page with **Open in InstantGram** (used by QR codes) |
 
 All POST calls need `Authorization: Bearer <Firebase ID token>`.

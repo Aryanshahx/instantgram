@@ -101,6 +101,26 @@ class VideoCache {
     videoPlayerOptions: VideoPlayerOptions(mixWithOthers: mixWithOthers),
   );
 
+  /// v0.11: player straight from the internet (no cache) - used when the
+  /// cached way failed.
+  VideoPlayerController direct(String remote, {bool mixWithOthers = false}) =>
+      VideoPlayerController.networkUrl(
+        Uri.parse(remote),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: mixWithOthers),
+      );
+
+  /// v0.11: deletes the saved copy of [remote] (it may be broken).
+  Future<void> forget(String remote) async {
+    if (_dir == null || remote.isEmpty) return;
+    final n = nameFor(remote);
+    _totals.remove(n);
+    for (final f in [_data(n), _meta(n)]) {
+      try {
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    }
+  }
+
   /// File name for [remote] (64 bit FNV-1a hash, hex).
   @visibleForTesting
   static String nameFor(String remote) {
@@ -288,8 +308,13 @@ class VideoCache {
       }
       if (knownTotal == null) await _saveTotal(name, total);
       final end = (b == null || b >= total) ? total - 1 : b;
-      _head(res, req.headers.value(HttpHeaders.rangeHeader) != null, a, end,
-          total);
+      _head(
+        res,
+        req.headers.value(HttpHeaders.rangeHeader) != null,
+        a,
+        end,
+        total,
+      );
       // a) the part that is already on the disk
       if (a < have) {
         await res.addStream(_data(name).openRead(a, have));
@@ -334,7 +359,10 @@ class VideoCache {
     String remote,
     bool Function() aborted,
   ) async {
-    final up = await _origin(remote, req.headers.value(HttpHeaders.rangeHeader));
+    final up = await _origin(
+      remote,
+      req.headers.value(HttpHeaders.rangeHeader),
+    );
     res.statusCode = up.statusCode;
     res.headers.contentType = ContentType('video', 'mp4');
     res.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');

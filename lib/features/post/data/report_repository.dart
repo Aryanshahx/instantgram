@@ -109,6 +109,37 @@ class ReportRepository {
     );
   }
 
+  /// v0.11: email for reporting a comment.
+  static ReportEmail commentEmail({
+    required Post post,
+    required Comment comment,
+    String reporterUsername = '',
+    String reporterUid = '',
+  }) {
+    final what = post.isClip ? 'Clip' : 'Post';
+    final text = comment.text.length > 500
+        ? '${comment.text.substring(0, 500)}…'
+        : comment.text;
+    return ReportEmail(
+      'Report: comment by @${comment.authorUsername}',
+      [
+        'Message:',
+        'This comment breaks the rules.',
+        '',
+        '---- Details (please keep) ----',
+        'Comment ID: ${comment.id}',
+        'Comment by: @${comment.authorUsername} (${comment.authorId})',
+        if (text.isNotEmpty) 'Comment: $text',
+        if (comment.imageUrl.isNotEmpty) 'Photo: ${comment.imageUrl}',
+        if (comment.gifUrl.isNotEmpty) 'GIF: ${comment.gifUrl}',
+        '$what ID: ${post.id} (by @${post.authorUsername})',
+        if (reporterUsername.isNotEmpty)
+          'Reported by: @$reporterUsername ($reporterUid)',
+        'App version: ${AppInfo.version}',
+      ].join('\n'),
+    );
+  }
+
   /// Email for reporting an account.
   static ReportEmail userEmail({
     required UserProfile user,

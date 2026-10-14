@@ -190,10 +190,13 @@ service cloud.firestore {
       allow update: if signedIn() && (
         (resource.data.authorId == me()
           && changed().hasOnly(['caption', 'tags', 'pinned', 'authorPhotoUrl',
-                                'authorUsername',
+                                'authorUsername', 'pinnedComment',
                                 'audience', 'hideLikes', 'hideComments',
                                 'hideReposts', 'hideShares'])
-          && tagsOk() && optionsOk())
+          && tagsOk() && optionsOk()
+          // v0.11: one pinned comment (its id, '' = none)
+          && request.resource.data.get('pinnedComment', '') is string
+          && request.resource.data.get('pinnedComment', '').size() <= 64)
         ||
         // (the old 'viewsCount' is frozen: views are 'uniqueViews' now)
         (changed().hasOnly(['likesCount', 'commentsCount', 'repostsCount',
@@ -402,7 +405,9 @@ service cloud.firestore {
         && me() in resource.data.members
         && request.resource.data.members == resource.data.members
         // v0.10 ticks: you only set YOUR seen / delivered time
-        && onlyMyKey('seen') && onlyMyKey('delivered');
+        && onlyMyKey('seen') && onlyMyKey('delivered')
+        // v0.11: disappearing messages (off / once seen / 24 h / 7 days)
+        && request.resource.data.get('disappear', 'off') in ['off', 'seen', '24h', '7d'];
       allow delete: if false;
 
       function onlyMyKey(f) {
@@ -424,7 +429,13 @@ service cloud.firestore {
         allow update: if signedIn() && me() in cid.split('_')
           && (reactOk() || hideOk());
         // v0.9: "delete for everyone" = the sender removes it
-        allow delete: if signedIn() && resource.data.senderId == me();
+        // v0.11: disappearing messages: either person removes them
+        // ("once seen" ones, or ones whose time is over)
+        allow delete: if signedIn() && (resource.data.senderId == me()
+          || (me() in cid.split('_')
+              && (resource.data.get('vanish', false) == true
+                  || (resource.data.get('expireAt', null) is timestamp
+                      && resource.data.expireAt < request.time))));
 
         function messageOk(d) {
           let kind = d.get('kind', 'text');
@@ -432,8 +443,21 @@ service cloud.firestore {
           return d.keys().hasOnly(['senderId', 'createdAt', 'text', 'kind',
                   'postId', 'postType', 'postThumb', 'postAuthor', 'postCaption',
                   'mediaUrl', 'mediaKey', 'width', 'height', 'durationMs',
-                  'lat', 'lng', 'address', 'replyTo', 'forwarded'])
-            && kind in ['text', 'post', 'image', 'gif', 'voice', 'location']
+                  'lat', 'lng', 'address', 'replyTo', 'forwarded',
+                  'expireAt', 'vanish', 'callStatus', 'video', 'durationSec'])
+            && kind in ['text', 'post', 'image', 'gif', 'voice', 'location',
+                        'call', 'system']
+            // v0.11: disappearing messages (max 7 days + a little)
+            && (!('expireAt' in d) || (d.expireAt is timestamp
+                  && d.expireAt > request.time
+                  && d.expireAt < request.time + duration.value(8, 'd')))
+            && d.get('vanish', false) is bool
+            // v0.11: call log in the chat ("Missed voice call", "Video call 2:31")
+            && (kind != 'call' || (d.callStatus in ['ended', 'missed', 'declined', 'busy', 'failed']
+                  && d.video is bool
+                  && d.durationSec is int && d.durationSec >= 0 && d.durationSec <= 86400))
+            // v0.11: "alice turned on disappearing messages"
+            && (kind != 'system' || (d.text.size() > 0 && d.text.size() <= 200))
             && d.text is string && d.text.size() <= 2000
             && (kind != 'text' || d.text.size() > 0)
             && (!media || (d.mediaUrl is string && d.mediaUrl.matches('https://.*')
@@ -469,8 +493,10 @@ service cloud.firestore {
     match /presence/{uid} {
       allow read: if signedIn();
       allow create, update: if signedIn() && me() == uid
-        && request.resource.data.keys().hasOnly(['lastActive', 'hidden'])
+        && request.resource.data.keys().hasOnly(['lastActive', 'hidden', 'online'])
         && request.resource.data.hidden is bool
+        // v0.11: true while the app is open
+        && request.resource.data.get('online', false) is bool
         && (request.resource.data.lastActive == null
             || request.resource.data.lastActive == request.time);
       allow delete: if false;
@@ -484,6 +510,24 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['tokens', 'updatedAt'])
         && request.resource.data.tokens is list
         && request.resource.data.tokens.size() <= 10;
+    }
+
+    // ---------------- v0.11: your chat settings ----------------
+    // prefs/{uid} = {pinnedChats, mutedChats, mutedCalls, cleared, updatedAt}
+    // Only you. Our server reads mutedChats / mutedCalls with its own key.
+    match /prefs/{uid} {
+      allow read, delete: if signedIn() && me() == uid;
+      allow create, update: if signedIn() && me() == uid
+        && request.resource.data.keys().hasOnly(['pinnedChats', 'mutedChats',
+             'mutedCalls', 'cleared', 'updatedAt'])
+        && request.resource.data.get('pinnedChats', []) is list
+        && request.resource.data.get('pinnedChats', []).size() <= 20
+        && request.resource.data.get('mutedChats', []) is list
+        && request.resource.data.get('mutedChats', []).size() <= 1000
+        && request.resource.data.get('mutedCalls', []) is list
+        && request.resource.data.get('mutedCalls', []).size() <= 1000
+        && request.resource.data.get('cleared', {}) is map
+        && request.resource.data.get('cleared', {}).size() <= 1000;
     }
 
     // ---------------- v0.10: voice / video calls ----------------

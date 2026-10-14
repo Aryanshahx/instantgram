@@ -5,21 +5,21 @@ import 'package:flutter/material.dart';
 import '../../core/services/presence.dart';
 import '../../core/theme/app_colors.dart';
 
-/// "Active now" / "Active 5m ago" under a name (v0.10). Shows nothing
+/// "Active now" / "Active 5m ago" under a name (v0.10; v0.11 online flag). Shows nothing
 /// when the person hides it, or when YOU hide yours.
 class ActiveLabel extends StatefulWidget {
   const ActiveLabel({super.key, required this.uid, this.stream});
   final String uid;
 
   /// Tests.
-  final Stream<DateTime?>? stream;
+  final Stream<PresenceState?>? stream;
 
   @override
   State<ActiveLabel> createState() => _ActiveLabelState();
 }
 
 class _ActiveLabelState extends State<ActiveLabel> {
-  late final Stream<DateTime?> _stream =
+  late final Stream<PresenceState?> _stream =
       widget.stream ?? Presence.instance.watch(widget.uid);
   Timer? _tick;
 
@@ -40,12 +40,12 @@ class _ActiveLabelState extends State<ActiveLabel> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<DateTime?>(
+    return StreamBuilder<PresenceState?>(
       stream: _stream,
       builder: (context, snap) {
-        final text = Presence.label(snap.data);
+        final text = Presence.labelOf(snap.data);
         if (text == null) return const SizedBox.shrink();
-        final now = Presence.isNow(snap.data);
+        final now = Presence.isNowOf(snap.data);
         return Text(
           text,
           key: const ValueKey('active-label'),
@@ -72,14 +72,14 @@ class ActiveDot extends StatefulWidget {
 }
 
 class _ActiveDotState extends State<ActiveDot> {
-  late final Stream<DateTime?> _stream = Presence.instance.watch(widget.uid);
+  late final Stream<PresenceState?> _stream = Presence.instance.watch(widget.uid);
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<DateTime?>(
+    return StreamBuilder<PresenceState?>(
       stream: _stream,
       builder: (context, snap) {
-        if (!Presence.isNow(snap.data)) return const SizedBox.shrink();
+        if (!Presence.isNowOf(snap.data)) return const SizedBox.shrink();
         return Container(
           width: widget.size,
           height: widget.size,

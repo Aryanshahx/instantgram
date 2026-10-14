@@ -8,6 +8,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../core/services/api_client.dart';
+import '../chats/data/chat_repository.dart';
 
 /// The other person in a call.
 class CallPeer {
@@ -82,6 +83,13 @@ class CallSession extends ChangeNotifier {
   Timer? _ringTimer;
   Timer? _lostTimer;
   bool _closed = false;
+
+  /// v0.11 call log: last status we know, and whether it was answered.
+  String _status = CallStatus.ringing;
+  bool _accepted = false;
+  bool _logged = false;
+  bool _switching = false;
+  final List<MediaStream> _extraStreams = [];
 
   static FirebaseFirestore get _db => FirebaseFirestore.instance;
   DocumentReference<Map<String, dynamic>> get _doc =>
@@ -285,6 +293,8 @@ class CallSession extends ChangeNotifier {
       final d = snap.data();
       if (d == null || _closed) return;
       final status = '${d['status']}';
+      _status = status;
+      if (status == CallStatus.accepted) _accepted = true;
       if (outgoing && status == CallStatus.accepted && !_remoteSet) {
         final a = d['answer'];
         if (a is Map) {
@@ -389,22 +399,122 @@ class CallSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Front <-> back camera. v0.11: when the phone's quick switch fails
+  /// (some Oppo / Realme / Vivo phones), the camera is restarted on the
+  /// other side and the new picture is sent instead.
   Future<void> switchCamera() async {
     final t = _local?.getVideoTracks();
-    if (t == null || t.isEmpty) return;
+    if (t == null || t.isEmpty || _switching || _closed) return;
+    _switching = true;
     try {
-      await Helper.switchCamera(t.first);
-      frontCamera = !frontCamera;
+      var ok = false;
+      try {
+        ok = await Helper.switchCamera(
+          t.first,
+        ).timeout(const Duration(seconds: 4), onTimeout: () => false);
+      } catch (e) {
+        debugPrint('switch camera: $e');
+      }
+      if (ok) {
+        frontCamera = !frontCamera;
+      } else {
+        await _replaceCamera(!frontCamera);
+      }
       notifyListeners();
-    } catch (e) {
-      debugPrint('switch camera: $e');
+    } finally {
+      _switching = false;
     }
   }
+
+  Future<void> _replaceCamera(bool front) async {
+    final local = _local;
+    final pc = _pc;
+    if (local == null || pc == null) return;
+    final old = local.getVideoTracks();
+    Future<MediaStream> open(bool f) => navigator.mediaDevices.getUserMedia({
+      'audio': false,
+      'video': {
+        'facingMode': f ? 'user' : 'environment',
+        'width': {'ideal': 1280},
+        'height': {'ideal': 720},
+        'frameRate': {'ideal': 30},
+      },
+    });
+    // most phones can't open 2 cameras at once: stop the old one first
+    for (final o in old) {
+      try {
+        await o.stop();
+      } catch (_) {}
+    }
+    MediaStream fresh;
+    var side = front;
+    try {
+      fresh = await open(front);
+    } catch (e) {
+      debugPrint('camera $front: $e');
+      side = !front;
+      fresh = await open(side); // back to the camera we had
+    }
+    _extraStreams.add(fresh);
+    final track = fresh.getVideoTracks().first;
+    track.enabled = cameraOn;
+    for (final sender in await pc.getSenders()) {
+      if (sender.track?.kind == 'video') await sender.replaceTrack(track);
+    }
+    for (final o in old) {
+      try {
+        await local.removeTrack(o);
+      } catch (_) {}
+    }
+    try {
+      await local.addTrack(track);
+    } catch (_) {}
+    localView.srcObject = fresh;
+    frontCamera = side;
+  }
+
+  /// v0.11: "Voice call · 2:31" / "Missed video call" in the chat.
+  /// The caller writes it (once).
+  void _logCall() {
+    if (!outgoing || _logged || debugNoCallLog) return;
+    _logged = true;
+    final at = connectedAt;
+    final String status;
+    var secs = 0;
+    if (at != null) {
+      status = 'ended';
+      secs = DateTime.now().difference(at).inSeconds;
+    } else if (_status == CallStatus.declined) {
+      status = 'declined';
+    } else if (_status == CallStatus.busy) {
+      status = 'busy';
+    } else if (_accepted) {
+      status = 'failed';
+    } else {
+      status = 'missed';
+    }
+    unawaited(
+      ChatRepository.instance
+          .addCallLog(
+            ChatPerson(uid: peer.uid, username: peer.name, photoUrl: peer.photoUrl),
+            video: video,
+            status: status,
+            durationSec: secs,
+          )
+          .catchError((Object e) => debugPrint('call log: $e')),
+    );
+  }
+
+  @visibleForTesting
+  static bool debugNoCallLog = false;
 
   /// End button (or timeout / error).
   Future<void> hangUp({String status = CallStatus.ended, String? reason}) async {
     if (_closed) return;
     final wasRinging = phase == CallPhase.ringing;
+    if (_status == CallStatus.ringing || _status == CallStatus.accepted) {
+      _status = status;
+    }
     _finish(reason ?? endText(status, outgoing: outgoing));
     try {
       await _doc.update({
@@ -423,6 +533,7 @@ class CallSession extends ChangeNotifier {
     endReason = reason;
     phase = CallPhase.ended;
     notifyListeners();
+    _logCall();
     _close();
   }
 
@@ -438,6 +549,12 @@ class CallSession extends ChangeNotifier {
         await t.stop();
       }
       await _local?.dispose();
+      for (final x in _extraStreams) {
+        for (final t in x.getTracks()) {
+          await t.stop();
+        }
+        await x.dispose();
+      }
       await _pc?.close();
     } catch (e) {
       debugPrint('close: $e');

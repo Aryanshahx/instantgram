@@ -6,12 +6,42 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../features/calls/call_ringer.dart';
 import '../../features/calls/call_screen.dart';
 import '../../features/calls/call_session.dart';
+import '../../features/calls/incoming_call_screen.dart';
 import '../../firebase_options.dart';
+import 'api_client.dart';
+import 'chat_prefs.dart';
+import 'server_clock.dart';
+import 'system_settings.dart';
+
+/// v0.11 Settings -> Calls check: what this phone allows.
+class CallCheck {
+  const CallCheck({
+    required this.notifications,
+    required this.fullScreen,
+    required this.battery,
+    required this.registered,
+  });
+
+  /// Notifications allowed (needed for ringing + messages).
+  final bool notifications;
+
+  /// Android 14+: the call can show over the lock screen.
+  final bool fullScreen;
+
+  /// No battery limits (the phone does not kill the app's push).
+  final bool battery;
+
+  /// This phone is saved for push (our server can reach it).
+  final bool registered;
+
+  bool get allGood => notifications && fullScreen && battery && registered;
+}
 
 /// Calls can't start (tests, or already in a call).
 class CallsOff implements Exception {
@@ -114,6 +144,9 @@ class Calls {
     try {
       final fm = FirebaseMessaging.instance;
       await fm.requestPermission();
+      // v0.11: asked at login too (before: only when YOU called someone,
+      // so calls to you could not show over the lock screen)
+      await _askFullScreenOnce();
       _token = await fm.getToken();
       if (_token != null) await _saveToken(uid, _token!);
       _tokenSub ??= fm.onTokenRefresh.listen((t) {
@@ -122,12 +155,20 @@ class Calls {
       });
       // app open: the push rings here too (no second ring: same call id)
       _msgSub ??= FirebaseMessaging.onMessage.listen((m) {
-        final id = '${m.data['callId'] ?? ''}';
-        if (m.data['type'] == 'call' && (_rang.contains(id) || inCall)) {
-          return;
+        final d = m.data;
+        final type = d['type'];
+        final id = '${d['callId'] ?? ''}';
+        if (type == 'call' || type == 'call_test') {
+          if (_rang.contains(id) || inCall) return;
+          _rang.add(id);
+          if (CallRinger.isMuted(d)) {
+            _showMuted(id, _peerOf(d), video: '${d['video']}' == '1');
+            return;
+          }
+          CallRinger.onPush(d);
+        } else if (type == 'call_cancel') {
+          CallRinger.onPush(d);
         }
-        if (m.data['type'] == 'call') _rang.add(id);
-        CallRinger.onPush(m.data);
       });
     } catch (e) {
       debugPrint('push: $e');
@@ -177,8 +218,9 @@ class Calls {
               continue;
             }
             final t = d['createdAt'];
+            // v0.11: server time (a wrong phone clock skipped real calls)
             if (t is Timestamp &&
-                DateTime.now().difference(t.toDate()).inMilliseconds >
+                ServerClock.now().difference(t.toDate()).inMilliseconds >
                     CallRinger.maxAgeMs) {
               continue; // old, never answered
             }
@@ -190,6 +232,20 @@ class Calls {
             // in the background the push rings (avoids ringing twice)
             final state = WidgetsBinding.instance.lifecycleState;
             if (state != null && state != AppLifecycleState.resumed) continue;
+            final callerId = '${d['callerId'] ?? ''}';
+            if (ChatPrefs.instance.value.value.callsMuted(callerId)) {
+              // v0.11: muted = silent call screen, no ringing
+              _showMuted(
+                id,
+                CallPeer(
+                  uid: callerId,
+                  name: '${d['callerName'] ?? ''}',
+                  photoUrl: '${d['callerPhoto'] ?? ''}',
+                ),
+                video: d['video'] == true,
+              );
+              continue;
+            }
             CallRinger.show(
               CallRinger.params(
                 id: id,
@@ -219,8 +275,64 @@ class Calls {
     }
   }
 
+  static CallPeer _peerOf(Map<String, dynamic> d) => CallPeer(
+    uid: '${d['callerId'] ?? ''}',
+    name: '${d['callerName'] ?? ''}',
+    photoUrl: '${d['callerPhoto'] ?? ''}',
+  );
+
+  String? _mutedFor; // call id of the open silent call screen
+
+  /// v0.11: silent call screen for a muted caller.
+  void _showMuted(String id, CallPeer peer, {required bool video}) {
+    final nav = navigatorKey.currentState;
+    final me = _me;
+    if (nav == null || me == null || _mutedFor == id || _screenFor != null) {
+      return;
+    }
+    _mutedFor = id;
+    nav
+        .push(
+          MaterialPageRoute<void>(
+            builder: (ctx) => IncomingCallScreen(
+              callId: id,
+              peer: peer,
+              video: video,
+              onDecline: () => decline(id),
+              onAccept: () {
+                Navigator.of(ctx).pop();
+                _open(
+                  id,
+                  peer,
+                  video: video,
+                  outgoing: false,
+                  start: () => CallSession.answer(id: id, me: me),
+                );
+              },
+            ),
+          ),
+        )
+        .whenComplete(() {
+          if (_mutedFor == id) _mutedFor = null;
+        });
+  }
+
+  /// v0.11: the quiet "Voice call from X" notification was tapped.
+  Future<void> openMutedFromNotification(Map<String, dynamic> d) async {
+    final id = '${d['callId'] ?? ''}';
+    if (disabled || _me == null || id.isEmpty || inCall) return;
+    try {
+      final snap = await _call(id).get();
+      if (snap.data()?['status'] != CallStatus.ringing) return; // over
+      _showMuted(id, _peerOf(d), video: '${d['video']}' == '1');
+    } catch (e) {
+      debugPrint('muted call: $e');
+    }
+  }
+
   /// Decline (also from the closed app).
   static Future<void> decline(String id) async {
+    if (CallRinger.isTest(id)) return;
     try {
       await FirebaseFirestore.instance.runTransaction((tx) async {
         final ref = _call(id);
@@ -254,6 +366,10 @@ class Calls {
 
   /// Accept pressed (app open, or the app was opened by Accept).
   void _openAnswer(CallKitParams p) {
+    if (CallRinger.isTest(p.id)) {
+      _testAnswered(p.id);
+      return;
+    }
     final me = _me;
     if (me == null || _screenFor == p.id) return;
     final x = CallRinger.extra(p);
@@ -348,6 +464,120 @@ class Calls {
           _screenFor = null;
           _session = null;
         });
+  }
+
+  // ------------------------------------------------------------ v0.11 check
+
+  /// The test call was answered: everything works.
+  void _testAnswered(String id) {
+    FlutterCallkitIncoming.endCall(id).catchError((_) {});
+    final ctx = navigatorKey.currentContext;
+    if (ctx == null) return;
+    showDialog<void>(
+      context: ctx,
+      builder: (d) => AlertDialog(
+        icon: const Icon(Icons.check_circle, color: Color(0xFF3DDC84), size: 44),
+        title: const Text('Ringing works'),
+        content: const Text('Calls to you will ring on this phone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(d),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// What this phone allows (Settings -> Calls check).
+  Future<CallCheck> check() async {
+    if (disabled) {
+      return const CallCheck(
+        notifications: false,
+        fullScreen: false,
+        battery: false,
+        registered: false,
+      );
+    }
+    var notifications = false;
+    var fullScreen = true;
+    var battery = true;
+    try {
+      final s = await FirebaseMessaging.instance.getNotificationSettings();
+      notifications = s.authorizationStatus == AuthorizationStatus.authorized ||
+          s.authorizationStatus == AuthorizationStatus.provisional;
+    } catch (_) {}
+    try {
+      fullScreen = await FlutterCallkitIncoming.canUseFullScreenIntent();
+    } catch (_) {}
+    try {
+      battery = await FlutterForegroundTask.isIgnoringBatteryOptimizations;
+    } catch (_) {}
+    if (_token == null && _me != null) {
+      try {
+        _token = await FirebaseMessaging.instance.getToken();
+        if (_token != null) await _saveToken(_me!, _token!);
+      } catch (_) {}
+    }
+    return CallCheck(
+      notifications: notifications,
+      fullScreen: fullScreen,
+      battery: battery,
+      registered: _token != null,
+    );
+  }
+
+  Future<void> fixNotifications() async {
+    try {
+      final s = await FirebaseMessaging.instance.requestPermission();
+      if (s.authorizationStatus != AuthorizationStatus.authorized) {
+        await SystemSettings.notifications();
+      }
+    } catch (_) {
+      await SystemSettings.notifications();
+    }
+  }
+
+  Future<void> fixFullScreen() async {
+    try {
+      await FlutterCallkitIncoming.requestFullIntentPermission();
+    } catch (_) {}
+  }
+
+  Future<void> fixBattery() async {
+    try {
+      final ok = await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+      if (!ok) await FlutterForegroundTask.openIgnoreBatteryOptimizationSettings();
+    } catch (_) {
+      await SystemSettings.app();
+    }
+  }
+
+  /// Asks our server to ring THIS phone in 4 seconds. Returns a message
+  /// for the user.
+  Future<String> testRing() async {
+    if (disabled || _me == null) return 'Please wait a moment and try again.';
+    try {
+      final r = await ApiClient.instance.post('/api/call-push', {
+        'action': 'test',
+      });
+      if (r['tokens'] == 0) {
+        return 'This phone is not saved for calls yet. Allow notifications, '
+            'then open the app again.';
+      }
+      if ((r['sent'] as num? ?? 0) == 0) {
+        return 'Google did not accept the push. Open the app again and retry.';
+      }
+      return 'Sent! It should ring now.';
+    } on ApiException catch (e) {
+      if (e.statusCode == 503) {
+        return 'The server is not set up for ringing yet '
+            '(FIREBASE_SERVICE_ACCOUNT on Vercel).';
+      }
+      return e.message;
+    } catch (e) {
+      return 'Could not reach the server. Check internet.';
+    }
   }
 
   /// Android 14+: the incoming call can only show full screen with this

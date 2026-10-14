@@ -105,7 +105,8 @@ Future<MessageMenuResult?> showMessageMenu(
                 ),
               ),
               item(MessageAction.reply, Icons.reply_rounded, 'Reply'),
-              item(MessageAction.forward, Icons.shortcut_rounded, 'Forward'),
+              if (!message.isCall)
+                item(MessageAction.forward, Icons.shortcut_rounded, 'Forward'),
               if (message.text.isNotEmpty || message.isLocation)
                 item(MessageAction.copy, Icons.copy_rounded, 'Copy'),
               if (pinned)
@@ -292,10 +293,14 @@ class MessageBubble extends StatelessWidget {
     this.onReactionsTap,
     this.onQuoteTap,
     this.tick = MessageTick.none,
+    this.onCallTap,
   });
 
   final Message message;
   final bool mine;
+
+  /// v0.11: tap a call log = call back.
+  final VoidCallback? onCallTap;
   final String myUid;
   final String otherName;
   final VoidCallback? onLongPress;
@@ -355,14 +360,27 @@ class MessageBubble extends StatelessWidget {
         color: _bare ? AppColors.textSecondary : sub,
       ),
     );
-    final time = tick == MessageTick.none
+    final time = tick == MessageTick.none && !m.disappears
         ? timeText
         : Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // v0.11: this message disappears
+              if (m.disappears)
+                Padding(
+                  padding: const EdgeInsets.only(right: 3),
+                  child: Icon(
+                    m.vanish ? Icons.visibility_off_outlined : Icons.timer_outlined,
+                    key: ValueKey('vanish-${m.id}'),
+                    size: 11,
+                    color: _bare ? AppColors.textSecondary : sub,
+                  ),
+                ),
               timeText,
-              const SizedBox(width: 3),
-              TickIcon(tick: tick, onDark: _bare),
+              if (tick != MessageTick.none) ...[
+                const SizedBox(width: 3),
+                TickIcon(tick: tick, onDark: _bare),
+              ],
             ],
           );
 
@@ -380,6 +398,8 @@ class MessageBubble extends StatelessWidget {
       );
     } else if (m.isLocation) {
       content = LocationCard(message: m, mine: mine);
+    } else if (m.isCall) {
+      content = CallLogContent(message: m, mine: mine, onTap: onCallTap);
     } else {
       content = Text(m.text, style: TextStyle(fontSize: 14.5, color: fg));
     }
@@ -476,6 +496,109 @@ class MessageBubble extends StatelessWidget {
                     ),
                   ),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// v0.11: "Voice call · 2:31" / "Missed video call". Tap = call back.
+class CallLogContent extends StatelessWidget {
+  const CallLogContent({
+    super.key,
+    required this.message,
+    required this.mine,
+    this.onTap,
+  });
+  final Message message;
+  final bool mine;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = message;
+    final missed = m.callStatus == 'missed' || m.callStatus == 'busy';
+    final fg = mine ? Colors.black : AppColors.textPrimary;
+    final sub = mine ? Colors.black54 : AppColors.textSecondary;
+    final what = m.video ? 'Video call' : 'Voice call';
+    final title = mine && missed ? '$what · No answer' : m.callLabel;
+    final IconData icon;
+    if (missed && !mine) {
+      icon = Icons.call_missed_rounded;
+    } else if (m.video) {
+      icon = Icons.videocam_rounded;
+    } else {
+      icon = mine ? Icons.call_made_rounded : Icons.call_received_rounded;
+    }
+    return GestureDetector(
+      key: ValueKey('call-log-${m.id}'),
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: mine ? Colors.black12 : AppColors.surfaceHigh,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              size: 19,
+              color: missed && !mine ? AppColors.like : fg,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                    color: missed && !mine ? AppColors.like : fg,
+                  ),
+                ),
+                Text(
+                  'Tap to call back',
+                  style: TextStyle(fontSize: 12, color: sub),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// v0.11: "alice turned on disappearing messages" (middle of the chat).
+class SystemNote extends StatelessWidget {
+  const SystemNote({super.key, required this.text, this.onTap});
+  final String text;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 24),
+      child: Center(
+        child: GestureDetector(
+          onTap: onTap,
+          child: Text(
+            text,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 12.5,
+              color: AppColors.textSecondary,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ),

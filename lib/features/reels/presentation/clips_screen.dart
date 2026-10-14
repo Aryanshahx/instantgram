@@ -391,6 +391,10 @@ class _ClipPlayerState extends State<ClipPlayer>
 
   bool _ready = false;
   bool _failed = false;
+
+  /// v0.11: tries after an error (direct from the internet, small copy).
+  int _tries = 0;
+  bool _recovering = false;
   bool _finishedSent = false;
   bool _detailsOpen = false;
   Timer? _photoTimer;
@@ -471,6 +475,7 @@ class _ClipPlayerState extends State<ClipPlayer>
   void _openItem() {
     _ready = false;
     _failed = false;
+    _tries = 0;
     _finishedSent = false;
     _photoTimer?.cancel();
     if (!_isVideo) {
@@ -507,14 +512,91 @@ class _ClipPlayerState extends State<ClipPlayer>
           c.setVolume(_effectiveVolume);
           if (widget.active && !_mustStayPaused) _play();
         })
-        .catchError((Object _) {
+        .catchError((Object e) {
           if (!mounted || _ctrl != c) return;
-          if (!_usingLow && _cur.lowUrl.isNotEmpty) {
-            _switchToLow();
-          } else {
-            setState(() => _failed = true);
-          }
+          debugPrint('clip open: $e');
+          _recover(c);
         });
+  }
+
+  /// v0.11: the video could not open ("Couldn't load this clip" before).
+  /// Usual reasons: too many video players at once (the phone has only a
+  /// few video decoders) or a broken saved copy. So: free the waiting
+  /// players, delete the saved copy, try straight from the internet, then
+  /// the small copy, and only then show "Tap to retry".
+  Future<void> _recover(VideoPlayerController failed) async {
+    if (_recovering) return;
+    _recovering = true;
+    final item = _item;
+    final url = _openUrl;
+    try {
+      failed.removeListener(_onTick);
+      _stall?.dispose();
+      _stall = null;
+      _startTimer?.cancel();
+      if (_ctrl == failed) _ctrl = null;
+      failed.dispose();
+      _tries++;
+      VideoPool.instance.clear(); // frees the phone's video decoders
+      await VideoCache.instance.forget(url);
+      if (!mounted || _item != item || _ctrl != null) return;
+      final low = _cur.lowUrl;
+      String? next;
+      if (_tries == 1) {
+        next = url; // same video, straight from the internet
+      } else if (_tries == 2 && low.isNotEmpty && url != low) {
+        next = low;
+        _usingLow = true;
+      }
+      if (next == null) {
+        setState(() {
+          _ready = false;
+          _failed = true;
+        });
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      if (!mounted || _item != item || _ctrl != null) return;
+      final c = VideoCache.instance.direct(
+        next,
+        mixWithOthers: widget.clip.hasMusic,
+      );
+      _ctrl = c;
+      _openUrl = next;
+      c.setLooping(!_manualLoop);
+      c.addListener(_onTick);
+      try {
+        await c.initialize().timeout(const Duration(seconds: 20));
+      } catch (e) {
+        debugPrint('clip retry $_tries: $e');
+        if (mounted && _ctrl == c) {
+          _recovering = false;
+          await _recover(c);
+        }
+        return;
+      }
+      if (!mounted || _ctrl != c) return;
+      _applyTrim(c);
+      if (_startMs > 0) await c.seekTo(Duration(milliseconds: _startMs));
+      if (!mounted || _ctrl != c) return;
+      setState(() {
+        _ready = true;
+        _failed = false;
+      });
+      c.setVolume(_effectiveVolume);
+      if (widget.active && !_mustStayPaused) _play();
+    } finally {
+      _recovering = false;
+    }
+  }
+
+  /// "Tap to retry".
+  void _retry() {
+    final old = _ctrl;
+    _ctrl = null;
+    old?.removeListener(_onTick);
+    old?.dispose();
+    setState(_openItem);
   }
 
   // v0.8: through the disk cache (watching again = no new download)
@@ -691,6 +773,13 @@ class _ClipPlayerState extends State<ClipPlayer>
     final c = _ctrl;
     if (c == null) return;
     final v = c.value;
+    if (v.hasError && v.isInitialized && !_recovering && !_failed) {
+      // v0.11: broke while playing (e.g. decoder taken by another app)
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _ctrl == c) _recover(c);
+      });
+      return;
+    }
     if (!v.isInitialized || v.duration <= Duration.zero) return;
     final pos = v.position.inMilliseconds;
     final watched = pos - _startMs;
@@ -898,38 +987,57 @@ class _ClipPlayerState extends State<ClipPlayer>
       initialData: widget.clip,
       builder: (context, snap) {
         final c = snap.data ?? widget.clip;
-        return ValueListenableBuilder<double?>(
-          valueListenable: _panelTop,
-          builder: (context, top, _) => top == null ? _full(c) : _small(c, top),
+        return LayoutBuilder(
+          builder: (context, box) => ValueListenableBuilder<double?>(
+            valueListenable: _panelTop,
+            builder: (context, top, _) => _layout(c, top, box.maxHeight),
+          ),
         );
       },
     );
   }
 
-  /// Comments open: the video plays small above the panel, no buttons.
-  Widget _small(Post c, double top) {
+  /// 0 = comments open (video small above the panel, no buttons),
+  /// 1 = normal. Follows the panel while it slides.
+  double _big = 1;
+
+  Widget _layout(Post c, double? top, double h) {
     final pad = MediaQuery.paddingOf(context).top;
+    final p = ClipLayout.bigness(top, h);
+    _big = p;
+    final t = top ?? h;
+    final below = (1 - p) * math.max(0.0, h - math.max(t, pad));
+    // v0.11: same widget tree small or full (a changing key here rebuilt
+    // everything and made the video jump when the comments closed).
     return ColoredBox(
-      key: const ValueKey('clip-small'),
       color: Colors.black,
-      child: Stack(
+      child: Column(
         children: [
-          Positioned(
-            left: 0,
-            right: 0,
-            top: pad,
-            height: math.max(0.0, top - pad),
-            child: _videoArea(c, small: true),
+          SizedBox(
+            key: ValueKey(p < 1 ? 'clip-small' : 'clip-full'),
+            height: pad * (1 - p),
           ),
+          Expanded(child: _videoArea(c, small: p < 1)),
+          ClipRect(
+            child: Align(
+              alignment: Alignment.topCenter,
+              heightFactor: p,
+              child: IgnorePointer(
+                ignoring: p < 1,
+                child: Opacity(opacity: p, child: _bottomBars(c)),
+              ),
+            ),
+          ),
+          SizedBox(height: below),
         ],
       ),
     );
   }
 
-  Widget _full(Post c) {
+  Widget _bottomBars(Post c) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Expanded(child: _videoArea(c)),
         _CaptionBar(
           post: c,
           open: _detailsOpen,
@@ -986,26 +1094,42 @@ class _ClipPlayerState extends State<ClipPlayer>
             ),
             if (small)
               IgnorePointer(
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (!_ready && !_failed && !kDisableVideoPlayback)
-                      const Center(child: CircularProgressIndicator()),
-                    if (_ready &&
-                        _ctrl != null &&
-                        !_ctrl!.value.isPlaying &&
-                        !_coverPaused)
-                      Center(
-                        child: Icon(
-                          Icons.play_arrow_rounded,
-                          size: 56,
-                          color: Colors.white.withValues(alpha: 0.8),
+                child: Opacity(
+                  opacity: 1 - _big,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (!_ready && !_failed && !kDisableVideoPlayback)
+                        const Center(child: CircularProgressIndicator()),
+                      if (_ready &&
+                          _ctrl != null &&
+                          !_ctrl!.value.isPlaying &&
+                          !_coverPaused)
+                        Center(
+                          child: Icon(
+                            Icons.play_arrow_rounded,
+                            size: 56,
+                            color: Colors.white.withValues(alpha: 0.8),
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            if (!small) ..._overlays(c, liked, likedServer),
+            // buttons fade out / in with the panel (v0.11)
+            if (_big > 0)
+              Positioned.fill(
+                child: IgnorePointer(
+                  ignoring: small,
+                  child: Opacity(
+                    opacity: _big,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: _overlays(c, liked, likedServer),
+                    ),
+                  ),
+                ),
+              ),
           ],
         );
       },
@@ -1065,13 +1189,7 @@ class _ClipPlayerState extends State<ClipPlayer>
                 child: PageDots(count: _items.length, index: _item),
               ),
             ],
-            if (_failed)
-              const Center(
-                child: Text(
-                  "Couldn't load this clip",
-                  style: TextStyle(color: AppColors.textSecondary),
-                ),
-              ),
+
             if (_ready && _ctrl != null && !_ctrl!.value.isPlaying && !_fast)
               Center(
                 child: Icon(
@@ -1098,6 +1216,30 @@ class _ClipPlayerState extends State<ClipPlayer>
           ],
         ),
       ),
+      // v0.11: failed after all tries: tap to try again
+      if (_failed)
+        Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Couldn't load this clip",
+                style: TextStyle(color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                key: const ValueKey('clip-retry'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.white24,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: _retry,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Tap to retry'),
+              ),
+            ],
+          ),
+        ),
       // 3) buttons (top layer — no double-tap delay)
       // buttons sit ABOVE the username row
       Positioned(right: 6, bottom: 60, child: _actions(c, liked, likedServer)),
@@ -1177,19 +1319,39 @@ class _ClipPlayerState extends State<ClipPlayer>
         screen.width / (screen.height <= 0 ? 1 : screen.height);
     // fill the screen when the shape is close, else show it whole
     final close = (m.aspectRatio - screenAspect).abs() / screenAspect < 0.2;
-    final fit = close && !small ? BoxFit.cover : BoxFit.contain;
     final ctrl = _ctrl;
-    if (i != _item || !_ready || ctrl == null) {
+    final live = i == _item && _ready ? ctrl : null;
+    if (live == null && m.thumbUrl.isEmpty) {
       return ColoredBox(
         color: Colors.black,
-        child: m.thumbUrl.isEmpty
-            ? (i == 0 ? ClipCoverBackground(post: c) : const SizedBox.expand())
-            : SizedBox.expand(child: NetImage(m.thumbUrl, fit: fit)),
+        child: i == 0 ? ClipCoverBackground(post: c) : const SizedBox.expand(),
       );
     }
+    // v0.11: "fill the screen" grows smoothly (contain -> cover) while
+    // the comments panel closes, instead of jumping at the end
+    final grow = close ? _big : 0.0;
+    final aspect = live != null
+        ? safeAspect(live.value.aspectRatio)
+        : m.aspectRatio;
     return ColoredBox(
       color: Colors.black,
-      child: videoSurface(ctrl, m.edits.filter, fit: fit),
+      child: LayoutBuilder(
+        builder: (context, box) {
+          Widget child = live != null
+              ? videoSurface(live, m.edits.filter)
+              : SizedBox.expand(
+                  child: NetImage(m.thumbUrl, fit: BoxFit.contain),
+                );
+          final k = ClipLayout.coverScale(box.maxWidth, box.maxHeight, aspect);
+          final scale = 1 + (k - 1) * grow;
+          if (scale > 1.001) {
+            child = ClipRect(
+              child: Transform.scale(scale: scale, child: child),
+            );
+          }
+          return child;
+        },
+      ),
     );
   }
 
@@ -1706,5 +1868,25 @@ class _ClipTapAreaState extends State<ClipTapArea> {
       onLongPressCancel: _end,
       child: widget.child,
     );
+  }
+}
+
+/// v0.11: maths for the clip while the comments are open.
+abstract final class ClipLayout {
+  /// v0.11: ONE layout for both sizes. Before, open / closed were two
+  /// different layouts and closing the comments jumped ("shock"); now the
+  /// video grows back smoothly with the panel and the buttons fade in.
+  static double bigness(double? top, double h) {
+    if (top == null || h <= 0) return 1;
+    return ((top - 0.4 * h) / (0.6 * h)).clamp(0.0, 1.0);
+  }
+
+  /// How much a "contain" picture must grow to "cover" a w x h box.
+  static double coverScale(double w, double h, double aspect) {
+    if (w <= 0 || h <= 0 || aspect <= 0 || !w.isFinite || !h.isFinite) {
+      return 1;
+    }
+    final box = w / h;
+    return box > aspect ? box / aspect : aspect / box;
   }
 }

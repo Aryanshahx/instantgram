@@ -505,6 +505,10 @@ class PostRepository {
     await addComment(post, '', replyTo: replyTo, linked: mine);
   }
 
+  /// v0.11: the post owner pins one comment ('' = unpin).
+  Future<void> pinComment(String postId, String commentId) =>
+      _posts.doc(postId).update({'pinnedComment': commentId});
+
   Future<void> deleteComment(String postId, Comment c) async {
     final ref = _posts.doc(postId);
     final batch = _db.batch();

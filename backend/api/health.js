@@ -21,7 +21,7 @@ export default function handler(req, res) {
     JSON.stringify({
       ok: missing.length === 0,
       app: 'instantgram',
-      version: '0.10.1',
+      version: '0.11.0',
       bucket: bucket || null,
       firebaseProject: env('FIREBASE_PROJECT_ID') || null,
       missing,
@@ -34,6 +34,8 @@ export default function handler(req, res) {
         turnServices: turnProviders(),
         // push = phone rings when the app is closed
         callRingWhenClosed: !!serviceAccount(),
+        // v0.11: "username: message" notifications (also when closed)
+        messageNotifications: !!serviceAccount(),
       },
     }),
   );

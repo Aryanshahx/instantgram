@@ -1,10 +1,14 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:flutter/painting.dart' show decodeImageFromList;
 
+import '../../../core/services/api_client.dart';
 import '../../../core/services/gif_search.dart';
+import '../../../core/services/server_clock.dart';
 import '../../../core/services/media_service.dart';
 
 import '../../../shared/models/post.dart';
@@ -251,14 +255,146 @@ class ChatRepository {
     }, text);
   }
 
-  Future<void> _write(
+  // ------------------------------------------------- v0.11 disappearing
+
+  /// Disappearing mode of each chat (kept fresh by the open chat screen).
+  final Map<String, String> _modes = {};
+
+  void rememberMode(String chatId, String mode) => _modes[chatId] = mode;
+
+  Future<String> _modeOf(String chatId) async {
+    final known = _modes[chatId];
+    if (known != null) return known;
+    try {
+      final d = await _chats.doc(chatId).get();
+      return _modes[chatId] = Disappear.normalize(d.data()?['disappear']);
+    } catch (_) {
+      return Disappear.off;
+    }
+  }
+
+  /// Extra fields for a new message in a chat with [mode].
+  static Map<String, dynamic> disappearFields(String mode, DateTime now) {
+    if (mode == Disappear.seen) return {'vanish': true};
+    final life = Disappear.lifetime(mode);
+    if (life == null) return const {};
+    return {'expireAt': Timestamp.fromDate(now.add(life))};
+  }
+
+  /// Turns disappearing messages on / off (both people see the change).
+  Future<void> setDisappear(ChatPerson other, String mode) async {
+    final m = Disappear.normalize(mode);
+    final me = await UserRepository.instance.me();
+    final text = '${me.username} ${Disappear.sentence(m)}';
+    _modes[chatIdWith(other.uid)] = m;
+    await _write(
+      other,
+      {'kind': Message.system, 'text': text},
+      m == Disappear.off ? 'Disappearing messages off' : '⏳ Disappearing messages on',
+      chat: {'disappear': m},
+      push: false,
+    );
+  }
+
+  /// v0.11 call log: "Voice call · 2:31" / "Missed video call" in the chat.
+  /// Written by the caller when the call is over.
+  Future<void> addCallLog(
+    ChatPerson other, {
+    required bool video,
+    required String status,
+    required int durationSec,
+  }) {
+    final m = Message(
+      id: '',
+      senderId: '',
+      text: '',
+      createdAt: DateTime.now(),
+      kind: Message.call,
+      callStatus: status,
+      video: video,
+      durationSec: durationSec,
+    );
+    return _write(other, {
+      'kind': Message.call,
+      'text': '',
+      'callStatus': status,
+      'video': video,
+      'durationSec': durationSec.clamp(0, 86400),
+    }, m.preview, push: false);
+  }
+
+  /// Messages you should not see: hidden by you, before "Delete chat",
+  /// disappeared (time over, or "once seen" ones you saw before).
+  static List<Message> visible(
+    List<Message> all, {
+    required String me,
+    DateTime? clearedAt,
+    DateTime? seenBefore,
+    DateTime? now,
+  }) {
+    final t = now ?? ServerClock.now();
+    return all.where((m) {
+      if (m.hiddenForUid(me)) return false;
+      if (clearedAt != null && !m.pending && !m.createdAt.isAfter(clearedAt)) {
+        return false;
+      }
+      if (m.expiredAt(t)) return false;
+      if (m.vanish &&
+          m.senderId != me &&
+          seenBefore != null &&
+          !m.pending &&
+          !m.createdAt.isAfter(seenBefore)) {
+        return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  /// Removes disappeared messages from the server (either person may).
+  /// [seenVanish] = "once seen" messages the other person sent that you saw.
+  Future<void> sweep(
+    String chatId,
+    List<Message> all, {
+    Iterable<Message> seenVanish = const [],
+  }) async {
+    final now = ServerClock.now();
+    final gone = <String>{
+      for (final m in all)
+        if (m.expiredAt(now) && !m.pending) m.id,
+      for (final m in seenVanish)
+        if (!m.pending) m.id,
+    };
+    if (gone.isEmpty) return;
+    final batch = _db.batch();
+    for (final id in gone.take(100)) {
+      batch.delete(_msg(chatId, id));
+    }
+    try {
+      await batch.commit();
+    } catch (e) {
+      debugPrint('sweep: $e');
+    }
+  }
+
+  /// Saves the message; returns its id. [chat] = extra chat fields.
+  Future<String> _write(
     ChatPerson other,
     Map<String, dynamic> message,
-    String preview,
-  ) async {
+    String preview, {
+    Map<String, dynamic> chat = const {},
+    bool push = true,
+  }) async {
     final me = await UserRepository.instance.me();
-    final chatRef = _chats.doc(chatIdWith(other.uid));
+    final chatId = chatIdWith(other.uid);
+    final chatRef = _chats.doc(chatId);
     final members = [me.uid, other.uid]..sort();
+    final kind = message['kind'];
+    final special = kind == Message.system || kind == Message.call;
+    final extra = special
+        ? const <String, dynamic>{}
+        : disappearFields(await _modeOf(chatId), ServerClock.now());
+    // "once seen" messages don't show their text in the chat list
+    final shown = extra['vanish'] == true ? '💨 Sent a message' : preview;
     final batch = _db.batch();
     batch.set(chatRef, {
       'members': members,
@@ -266,17 +402,38 @@ class ChatRepository {
         me.uid: {'username': me.username, 'photoUrl': me.photoUrl},
         other.uid: {'username': other.username, 'photoUrl': other.photoUrl},
       },
-      'lastMessage': preview.length > 200 ? preview.substring(0, 200) : preview,
+      'lastMessage': shown.length > 200 ? shown.substring(0, 200) : shown,
       'lastSenderId': me.uid,
       'updatedAt': FieldValue.serverTimestamp(),
+      ...chat,
     }, SetOptions(merge: true));
-    batch.set(chatRef.collection('messages').doc(), {
+    final ref = chatRef.collection('messages').doc();
+    batch.set(ref, {
       ...message,
+      ...extra,
       'senderId': me.uid,
       'createdAt': FieldValue.serverTimestamp(),
     });
     await batch.commit();
+    if (push) unawaited(_notify(chatId, ref.id));
+    return ref.id;
   }
+
+  /// v0.11: "username: message" notification on the other phone.
+  Future<void> _notify(String chatId, String messageId) async {
+    if (debugNoPush) return;
+    try {
+      await ApiClient.instance.post('/api/message-push', {
+        'chatId': chatId,
+        'messageId': messageId,
+      });
+    } catch (e) {
+      debugPrint('message push: $e'); // the message is sent anyway
+    }
+  }
+
+  @visibleForTesting
+  static bool debugNoPush = false;
 
   /// People to share with: recent chats first, then people I follow.
   Future<List<ChatPerson>> shareTargets({int max = 150}) async {

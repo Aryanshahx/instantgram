@@ -200,6 +200,7 @@ class Post {
     this.audioName = '',
     this.savesCount = 0,
     this.replyTo,
+    this.pinnedComment = '',
   });
 
   static const String photo = 'photo';
@@ -225,6 +226,9 @@ class Post {
 
   /// All photos / videos (new posts). Use [items] to read them.
   final List<MediaItem> media;
+
+  /// v0.11: id of the comment the owner pinned ('' = none).
+  final String pinnedComment;
 
   /// Clip cover image ('' = none).
   final String thumbUrl;
@@ -348,6 +352,7 @@ class Post {
       audioName: _str(m['audioName']),
       savesCount: _int(m['savesCount']),
       replyTo: ReplyRef.fromMap(m['replyTo']),
+      pinnedComment: _str(m['pinnedComment']),
     );
   }
 }
@@ -612,6 +617,44 @@ class StoryGroup {
   String get photoUrl => stories.first.authorPhotoUrl;
 }
 
+/// v0.11: disappearing messages in a chat.
+class Disappear {
+  Disappear._();
+  static const String off = 'off';
+  static const String seen = 'seen';
+  static const String day = '24h';
+  static const String week = '7d';
+  static const List<String> all = [off, seen, day, week];
+
+  /// What "slide up and hold" turns on.
+  static const String standard = day;
+
+  static String normalize(Object? v) =>
+      v is String && all.contains(v) ? v : off;
+
+  static String label(String mode) => switch (mode) {
+    seen => 'Once seen',
+    day => '24 hours',
+    week => '7 days',
+    _ => 'Off',
+  };
+
+  /// For the "alice turned on ..." message.
+  static String sentence(String mode) => switch (mode) {
+    seen => 'turned on disappearing messages: they disappear once seen',
+    day => 'turned on disappearing messages: 24 hours',
+    week => 'turned on disappearing messages: 7 days',
+    _ => 'turned off disappearing messages',
+  };
+
+  /// How long a message lives (null = forever / once seen).
+  static Duration? lifetime(String mode) => switch (mode) {
+    day => const Duration(hours: 24),
+    week => const Duration(days: 7),
+    _ => null,
+  };
+}
+
 class Chat {
   const Chat({
     required this.id,
@@ -624,6 +667,7 @@ class Chat {
     this.pinnedText = '',
     this.seen = const {},
     this.delivered = const {},
+    this.disappear = Disappear.off,
   });
 
   final String id;
@@ -640,6 +684,9 @@ class Chat {
   /// v0.10 ticks: uid -> when that person last saw / got the messages.
   final Map<String, DateTime> seen;
   final Map<String, DateTime> delivered;
+
+  /// v0.11: disappearing messages (see [Disappear]).
+  final String disappear;
 
   DateTime? seenAt(String uid) => seen[uid];
 
@@ -696,6 +743,7 @@ class Chat {
       pinnedText: pin is Map ? _str(pin['text']) : '',
       seen: _times(m['seen']),
       delivered: _times(m['delivered']),
+      disappear: Disappear.normalize(m['disappear']),
     );
   }
 }
@@ -750,6 +798,11 @@ class Message {
     this.hiddenFor = const [],
     this.forwarded = false,
     this.pending = false,
+    this.expireAt,
+    this.vanish = false,
+    this.callStatus = '',
+    this.video = false,
+    this.durationSec = 0,
   });
 
   // kinds (v0.9)
@@ -759,6 +812,9 @@ class Message {
   static const String gif = 'gif';
   static const String voice = 'voice';
   static const String location = 'location';
+  // v0.11
+  static const String call = 'call';
+  static const String system = 'system';
 
   final String id;
   final String senderId;
@@ -800,6 +856,43 @@ class Message {
   /// v0.10: still on this phone only (not on the server yet) = clock icon.
   final bool pending;
 
+  /// v0.11 disappearing: gone after this time (24 h / 7 days) ...
+  final DateTime? expireAt;
+
+  /// ... or once the other person saw it.
+  final bool vanish;
+
+  /// v0.11 call log: ended / missed / declined / busy / failed.
+  final String callStatus;
+  final bool video;
+  final int durationSec;
+
+  bool get isCall => kind == call;
+  bool get isSystem => kind == system;
+  bool get disappears => vanish || expireAt != null;
+
+  /// Time is over (24 h / 7 days).
+  bool expiredAt(DateTime now) => expireAt != null && !now.isBefore(expireAt!);
+
+  /// "Voice call · 2:31", "Missed video call" ...
+  String get callLabel {
+    final what = video ? 'video call' : 'voice call';
+    switch (callStatus) {
+      case 'missed':
+      case 'busy':
+        return 'Missed $what';
+      case 'declined':
+        return '${what[0].toUpperCase()}${what.substring(1)} declined';
+      case 'failed':
+        return 'Call failed';
+      default:
+        final m = durationSec ~/ 60;
+        final sec = (durationSec % 60).toString().padLeft(2, '0');
+        final cap = '${what[0].toUpperCase()}${what.substring(1)}';
+        return durationSec > 0 ? '$cap · $m:$sec' : cap;
+    }
+  }
+
   bool get isSharedPost => postId.isNotEmpty;
   bool get isImage => kind == image;
   bool get isGif => kind == gif;
@@ -822,6 +915,8 @@ class Message {
         return '🎤 Voice message';
       case location:
         return '📍 ${address.isNotEmpty ? address : 'Location'}';
+      case call:
+        return '📞 $callLabel';
       default:
         return text;
     }
@@ -893,6 +988,13 @@ class Message {
           : const [],
       forwarded: _bool(m['forwarded']),
       pending: pending,
+      expireAt: m['expireAt'] is Timestamp
+          ? (m['expireAt'] as Timestamp).toDate()
+          : null,
+      vanish: _bool(m['vanish']),
+      callStatus: _str(m['callStatus']),
+      video: _bool(m['video']),
+      durationSec: _int(m['durationSec']),
     );
   }
 }

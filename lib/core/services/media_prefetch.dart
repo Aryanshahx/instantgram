@@ -100,7 +100,9 @@ class VideoPool {
   VideoPool._();
   static final VideoPool instance = VideoPool._();
 
-  static int maxSize = 3;
+  /// v0.11: 2 (was 3). Every waiting player holds one of the phone's few
+  /// video decoders; with too many, new clips failed to open.
+  static int maxSize = 2;
 
   /// Tests switch this off (no real players).
   static bool disabled = false;
@@ -135,13 +137,11 @@ class VideoPool {
 
   /// Gives back a player that was just watched, so swiping back to it
   /// starts at once (v0.8). The pool owns it now.
-  void keep(
-    String url,
-    VideoPlayerController c, {
-    bool mixWithOthers = false,
-  }) {
+  void keep(String url, VideoPlayerController c, {bool mixWithOthers = false}) {
     final key = _key(url, mixWithOthers);
-    if (disabled || !c.value.isInitialized || c.value.hasError ||
+    if (disabled ||
+        !c.value.isInitialized ||
+        c.value.hasError ||
         _pool.containsKey(key)) {
       c.dispose();
       return;
@@ -166,10 +166,13 @@ class VideoPool {
   }
 
   void _drop(PooledVideo v) {
-    v.ready.then<void>(
-      (_) => v.controller.dispose(),
-      onError: (Object _) => v.controller.dispose(),
-    );
+    // v0.11: don't wait forever for a player that never opens
+    v.ready
+        .timeout(const Duration(seconds: 10))
+        .then<void>(
+          (_) => v.controller.dispose(),
+          onError: (Object _) => v.controller.dispose(),
+        );
   }
 
   /// Frees everything (e.g. when the app goes to the background).

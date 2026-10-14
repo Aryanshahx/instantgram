@@ -4,10 +4,12 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../core/services/gif_search.dart';
 import '../../../core/services/media_service.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/email.dart';
 import '../../../core/utils/errors.dart';
 import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
@@ -20,9 +22,19 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/net_image.dart';
 import '../../profile/data/user_repository.dart';
 import '../data/post_repository.dart';
+import '../data/report_repository.dart';
 import 'create_sheet.dart';
 import 'gif_picker.dart';
 import 'my_post_picker.dart';
+
+/// v0.11: text for "Share" on a comment.
+String commentShareText(Post post, Comment c) {
+  final what = post.isClip ? 'clip' : 'post';
+  final text = c.text.isNotEmpty ? '"${c.text}"' : '(photo / GIF comment)';
+  final link = post.coverUrl.isNotEmpty ? post.coverUrl : post.mediaUrl;
+  return '$text\n— @${c.authorUsername}, on a $what by '
+      '@${post.authorUsername} on InstantGram\n$link';
+}
 
 /// Most used emojis, shown above the comment box (tap = add).
 const kCommentEmojis = ['❤️', '🙌', '🔥', '👏', '😢', '😍', '😮', '😂'];
@@ -286,6 +298,13 @@ class _CommentsSheetState extends State<CommentsSheet> {
   final _focus = FocusNode();
   late final Stream<List<Comment>> _stream =
       widget.stream ?? PostRepository.instance.comments(widget.post.id);
+
+  /// v0.11: the list has its OWN scroll controller, so scrolling comments
+  /// never makes the panel full screen (only dragging the header does).
+  final _list = ScrollController();
+
+  /// v0.11: pinned comment id ('' = none).
+  late String _pinned = widget.post.pinnedComment;
   bool _sending = false;
   Comment? _replyTo;
   _Draft? _draft;
@@ -301,6 +320,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
   void dispose() {
     _ctrl.dispose();
     _focus.dispose();
+    _list.dispose();
     super.dispose();
   }
 
@@ -494,6 +514,108 @@ class _CommentsSheetState extends State<CommentsSheet> {
     }
   }
 
+  // ------------------------------------------------------- v0.11 menu
+
+  /// Long-press a comment: Pin (post owner), Share, Report, Delete.
+  Future<void> _commentMenu(
+    Comment c, {
+    required String me,
+    required bool canModerate,
+  }) async {
+    final mine = c.authorId == me;
+    final canPin = canModerate && !c.isReply;
+    final pinned = c.id == _pinned;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      builder: (ctx) {
+        Widget item(String id, IconData icon, String label, {bool danger = false}) {
+          final color = danger ? AppColors.like : AppColors.textPrimary;
+          return ListTile(
+            key: ValueKey('comment-menu-$id'),
+            dense: true,
+            leading: Icon(icon, color: color, size: 22),
+            title: Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            onTap: () => Navigator.pop(ctx, id),
+          );
+        }
+
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (canPin)
+                item(
+                  'pin',
+                  pinned ? Icons.push_pin_outlined : Icons.push_pin,
+                  pinned ? 'Unpin comment' : 'Pin comment',
+                ),
+              item('share', Icons.share_outlined, 'Share'),
+              if (!mine) item('report', Icons.flag_outlined, 'Report', danger: true),
+              if (mine || canModerate)
+                item('delete', Icons.delete_outline, 'Delete', danger: true),
+              const SizedBox(height: 6),
+            ],
+          ),
+        );
+      },
+    );
+    if (choice == null || !mounted) return;
+    switch (choice) {
+      case 'pin':
+        final next = pinned ? '' : c.id;
+        final before = _pinned;
+        setState(() => _pinned = next);
+        try {
+          await PostRepository.instance.pinComment(widget.post.id, next);
+          _snack(next.isEmpty ? 'Comment unpinned' : 'Comment pinned');
+        } catch (e) {
+          if (mounted) {
+            setState(() => _pinned = before);
+            _snack(friendlyError(e));
+          }
+        }
+      case 'share':
+        await SharePlus.instance.share(
+          ShareParams(text: commentShareText(widget.post, c)),
+        );
+      case 'report':
+        await _report(c);
+      case 'delete':
+        await _delete(c);
+    }
+  }
+
+  Future<void> _report(Comment c) async {
+    var who = '', uid = '';
+    try {
+      final me = await UserRepository.instance.meCached();
+      who = me.username;
+      uid = me.uid;
+    } catch (_) {}
+    final mail = ReportRepository.commentEmail(
+      post: widget.post,
+      comment: c,
+      reporterUsername: who,
+      reporterUid: uid,
+    );
+    if (!mounted) return;
+    final ok = await openEmail(
+      context,
+      to: ReportRepository.to,
+      subject: mail.subject,
+      body: mail.body,
+    );
+    if (ok && mounted) _snack('Press Send in your email app to report it.');
+  }
+
   Future<void> _delete(Comment c) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -529,14 +651,21 @@ class _CommentsSheetState extends State<CommentsSheet> {
   List<Object> _rows(List<Comment> all) {
     final out = <Object>[];
     final threaded = threadComments(all);
+    final groups = <(Comment, List<Comment>)>[];
     var i = 0;
     while (i < threaded.length) {
       final c = threaded[i++];
-      out.add(c);
       final replies = <Comment>[];
       while (i < threaded.length && threaded[i].parentId == c.id) {
         replies.add(threaded[i++]);
       }
+      groups.add((c, replies));
+    }
+    // v0.11: the pinned comment comes first
+    final p = groups.indexWhere((g) => g.$1.id == _pinned);
+    if (p > 0) groups.insert(0, groups.removeAt(p));
+    for (final (c, replies) in groups) {
+      out.add(c);
       final open = _expanded.contains(c.id);
       final shown = open ? replies.length : _repliesShown;
       out.addAll(replies.take(shown));
@@ -548,6 +677,19 @@ class _CommentsSheetState extends State<CommentsSheet> {
   }
 
   Widget _header() {
+    final sheet = widget.scrollController;
+    final h = _headerBody();
+    if (sheet == null) return h;
+    // The panel's own controller must stay attached to something (it moves
+    // the panel); it is attached here, to the header, which can't scroll.
+    return SingleChildScrollView(
+      controller: sheet,
+      physics: const NeverScrollableScrollPhysics(),
+      child: h,
+    );
+  }
+
+  Widget _headerBody() {
     final inset = widget.topInset;
     final drag = widget.onHeaderDrag != null;
     return GestureDetector(
@@ -587,7 +729,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
   /// Loading / empty / error inside the panel's scroll view (so dragging
   /// there still moves the panel).
   Widget _filler(Widget child) => ListView(
-    controller: widget.scrollController,
+    controller: _list,
     children: [SizedBox(height: 260, child: Center(child: child))],
   );
 
@@ -615,7 +757,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
                 );
               }
               return ListView.builder(
-                controller: widget.scrollController,
+                controller: _list,
                 padding: const EdgeInsets.only(bottom: 8),
                 itemCount: rows.length,
                 itemBuilder: (context, i) {
@@ -648,8 +790,14 @@ class _CommentsSheetState extends State<CommentsSheet> {
                     postId: widget.post.id,
                     comment: c,
                     canDelete: c.authorId == me || canModerate,
+                    pinned: c.id == _pinned && !c.isReply,
                     onReply: () => _reply(c),
                     onDelete: () => _delete(c),
+                    onLongPress: () => _commentMenu(
+                      c,
+                      me: me,
+                      canModerate: canModerate,
+                    ),
                   );
                 },
               );
@@ -901,6 +1049,8 @@ class CommentTile extends StatefulWidget {
     required this.onReply,
     required this.onDelete,
     this.likedStream,
+    this.onLongPress,
+    this.pinned = false,
   });
 
   final String postId;
@@ -908,6 +1058,12 @@ class CommentTile extends StatefulWidget {
   final bool canDelete;
   final VoidCallback onReply;
   final VoidCallback onDelete;
+
+  /// v0.11: long-press menu (pin / share / report / delete).
+  final VoidCallback? onLongPress;
+
+  /// v0.11: "Pinned by author" above the comment.
+  final bool pinned;
 
   /// Tests pass their own "liked" stream.
   final Stream<bool>? likedStream;
@@ -962,7 +1118,8 @@ class _CommentTileState extends State<CommentTile> {
         }
         if (count < 0) count = 0;
         return InkWell(
-          onLongPress: widget.canDelete ? widget.onDelete : null,
+          onLongPress:
+              widget.onLongPress ?? (widget.canDelete ? widget.onDelete : null),
           child: Padding(
             padding: EdgeInsets.fromLTRB(reply ? 62 : 14, 8, 4, 4),
             child: Row(
@@ -982,6 +1139,29 @@ class _CommentTileState extends State<CommentTile> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (widget.pinned)
+                        const Padding(
+                          key: ValueKey('comment-pinned'),
+                          padding: EdgeInsets.only(bottom: 2),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.push_pin,
+                                size: 12,
+                                color: AppColors.lime,
+                              ),
+                              SizedBox(width: 4),
+                              Text(
+                                'Pinned by author',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: AppColors.lime,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       Text.rich(
                         TextSpan(
                           children: [

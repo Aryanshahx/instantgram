@@ -7,9 +7,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import '../../../core/services/calls.dart';
+import '../../../core/services/chat_prefs.dart';
 import '../../../core/services/content_filter.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/media_service.dart';
+import '../../../core/services/presence.dart';
+import '../../../core/services/system_settings.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/errors.dart';
 import '../../../shared/models/post.dart';
@@ -40,7 +43,7 @@ class ChatDetailScreen extends StatefulWidget {
   final UserProfile other;
 
   /// Tests: "Active" status of [other].
-  final Stream<DateTime?>? presence;
+  final Stream<PresenceState?>? presence;
 
   /// Tests: replace Firestore.
   final Stream<List<Message>>? messages;
@@ -49,6 +52,12 @@ class ChatDetailScreen extends StatefulWidget {
 
   /// Longest voice message.
   static const Duration maxVoice = Duration(minutes: 5);
+
+  /// v0.11: the chat on screen now (no notification banner for it).
+  static String? openChatId;
+
+  /// v0.11: how far to slide up (and hold) to switch disappearing messages.
+  static const double pullToVanish = 110;
 
   @override
   State<ChatDetailScreen> createState() => _ChatDetailScreenState();
@@ -81,6 +90,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   Message? _replyTo;
   Chat? _chatNow;
 
+  // v0.11 disappearing messages
+  bool _gotChat = false;
+  DateTime? _seenBefore; // when you last saw this chat (before opening it)
+  final Map<String, Message> _vanishShown = {}; // "once seen" ones you saw
+  List<Message> _all = const [];
+  DateTime _lastSweep = DateTime(2000);
+  Timer? _expiryTick;
+  String? _modeNow; // set right away when you change it
+  double _pull = 0; // slide up & hold distance
+  bool _armed = false;
+
   // voice recording
   AudioRecorder? _rec;
   bool _recording = false;
@@ -97,12 +117,166 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   void initState() {
     super.initState();
     _ctrl.addListener(_onText);
+    ChatDetailScreen.openChatId = _chatId;
+    if (_live) SystemSettings.clearChatNotification(_chatId);
     _chatSub = _chat.listen((c) {
       if (!mounted) return;
-      setState(() => _chatNow = c);
+      if (!_gotChat) {
+        _gotChat = true;
+        _seenBefore = c?.seenAt(_me);
+      }
+      if (c != null) _repo.rememberMode(_chatId, c.disappear);
+      setState(() {
+        _chatNow = c;
+        _modeNow = null;
+      });
       _checkSeen();
     }, onError: (Object e) => debugPrint('chat: $e'));
     _life = AppLifecycleListener(onResume: _checkSeen);
+    // 24 h / 7 day messages go away while you look
+    _expiryTick = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted && _all.any((m) => m.expireAt != null)) setState(() {});
+    });
+  }
+
+  // ------------------------------------------------ v0.11 disappearing
+
+  String get _mode => _modeNow ?? _chatNow?.disappear ?? Disappear.off;
+
+  Future<void> _setMode(String mode) async {
+    if (mode == _mode) return;
+    setState(() => _modeNow = mode);
+    if (!_live) return;
+    try {
+      await _repo.setDisappear(_other, mode);
+    } catch (e) {
+      if (mounted) setState(() => _modeNow = null);
+      _snack(friendlyError(e));
+    }
+  }
+
+  /// Slide up and hold, then let go: on (24 h) <-> off.
+  void _toggleMode() {
+    final next = _mode == Disappear.off ? Disappear.standard : Disappear.off;
+    HapticFeedback.mediumImpact();
+    _setMode(next);
+    _snack(
+      next == Disappear.off
+          ? 'Disappearing messages off'
+          : 'Disappearing messages on: ${Disappear.label(next)}',
+    );
+  }
+
+  bool _onScroll(ScrollNotification n) {
+    if (n.metrics.axis != Axis.vertical) return false;
+    final atBottom = n.metrics.pixels <= n.metrics.minScrollExtent + 0.5;
+    if (n is OverscrollNotification && n.dragDetails != null && atBottom) {
+      // reversed list: sliding up past the newest message = negative
+      if (n.overscroll < 0) _addPull(-n.overscroll);
+    } else if (n is ScrollUpdateNotification &&
+        n.dragDetails != null &&
+        n.metrics.pixels < n.metrics.minScrollExtent) {
+      _addPull(-(n.scrollDelta ?? 0)); // bouncy phones
+    } else if (n is ScrollUpdateNotification &&
+        n.dragDetails != null &&
+        (n.scrollDelta ?? 0) > 0 &&
+        _pull > 0) {
+      _setPull(0); // moved back down
+    } else if (n is ScrollEndNotification) {
+      if (_armed) _toggleMode();
+      _setPull(0);
+    }
+    return false;
+  }
+
+  void _addPull(double d) => _setPull((_pull + d).clamp(0, 400));
+
+  void _setPull(double v) {
+    final armed = v >= ChatDetailScreen.pullToVanish;
+    if (armed && !_armed) HapticFeedback.selectionClick();
+    if (v == _pull && armed == _armed) return;
+    setState(() {
+      _pull = v;
+      _armed = armed;
+    });
+  }
+
+  /// Hides / deletes messages that are gone.
+  List<Message> _visible(List<Message> all) {
+    _all = all;
+    final msgs = ChatRepository.visible(
+      all,
+      me: _me,
+      clearedAt: ChatPrefs.instance.value.value.clearedAt(_chatId),
+      seenBefore: _seenBefore,
+    );
+    for (final m in msgs) {
+      if (m.vanish && m.senderId != _me && !m.pending) _vanishShown[m.id] = m;
+    }
+    if (_live && DateTime.now().difference(_lastSweep).inSeconds > 20) {
+      final seen = _seenBefore;
+      final stale = all.where(
+        (m) =>
+            m.vanish &&
+            m.senderId != _me &&
+            seen != null &&
+            !m.pending &&
+            !m.createdAt.isAfter(seen),
+      );
+      if (stale.isNotEmpty || all.length != msgs.length) {
+        _lastSweep = DateTime.now();
+        _repo.sweep(_chatId, all, seenVanish: stale.toList());
+      }
+    }
+    return msgs;
+  }
+
+  Future<void> _chooseMode() async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 2),
+              child: Text(
+                'Disappearing messages',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 6),
+              child: Text(
+                'New messages disappear for both of you. Tip: slide up and '
+                'hold in the chat to switch it on or off.',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5),
+              ),
+            ),
+            for (final mode in Disappear.all)
+              ListTile(
+                key: ValueKey('disappear-$mode'),
+                dense: true,
+                leading: Icon(
+                  mode == _mode
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                  color: mode == _mode ? AppColors.lime : AppColors.textSecondary,
+                ),
+                title: Text(
+                  Disappear.label(mode),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                ),
+                onTap: () => Navigator.pop(ctx, mode),
+              ),
+            const SizedBox(height: 6),
+          ],
+        ),
+      ),
+    );
+    if (picked != null && mounted) await _setMode(picked);
   }
 
   // ------------------------------------------------------- v0.10 ticks
@@ -152,6 +326,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   void dispose() {
+    if (ChatDetailScreen.openChatId == _chatId) {
+      ChatDetailScreen.openChatId = null;
+    }
+    // "once seen": you saw them, now they disappear
+    if (_live && _vanishShown.isNotEmpty) {
+      _repo.sweep(_chatId, const [], seenVanish: _vanishShown.values.toList());
+    }
+    _expiryTick?.cancel();
     _chatSub?.cancel();
     _life?.dispose();
     _flashTimer?.cancel();
@@ -585,7 +767,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       uid: o.uid,
                       stream:
                           widget.presence ??
-                          (_live ? null : Stream<DateTime?>.value(null)),
+                          (_live ? null : Stream<PresenceState?>.value(null)),
                     ),
                   ],
                 ),
@@ -594,6 +776,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ),
         ),
         actions: [
+          IconButton(
+            key: const ValueKey('disappear-btn'),
+            tooltip: 'Disappearing messages',
+            onPressed: _chooseMode,
+            icon: Icon(
+              Icons.timer_outlined,
+              color: _mode == Disappear.off ? null : AppColors.lime,
+            ),
+          ),
           IconButton(
             key: const ValueKey('call-voice'),
             tooltip: 'Voice call',
@@ -676,21 +867,28 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               builder: (context, snap) {
                 if (snap.hasError) return ErrorView(error: snap.error);
                 if (!snap.hasData) return const LoadingView();
-                final msgs = snap.data!
-                    .where((m) => !m.hiddenForUid(_me))
-                    .toList();
+                final msgs = _visible(snap.data!);
                 _shown = msgs;
                 WidgetsBinding.instance.addPostFrameCallback(
                   (_) => _checkSeen(),
                 );
                 if (msgs.isEmpty) return _hello(o);
-                return ListView.builder(
+                final list = ListView.builder(
                   controller: _scroll,
                   reverse: true,
+                  // v0.11: also short chats can be slid up
+                  physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                   itemCount: msgs.length,
                   itemBuilder: (context, i) {
                     final m = msgs[i];
+                    if (m.isSystem) {
+                      return SystemNote(
+                        key: _keys.putIfAbsent(m.id, GlobalKey.new),
+                        text: m.text,
+                        onTap: _chooseMode,
+                      );
+                    }
                     return SwipeToReply(
                       key: _keys.putIfAbsent(m.id, GlobalKey.new),
                       onReply: () => _reply(m),
@@ -707,20 +905,33 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           mine: m.senderId == _me,
                           myUid: _me,
                           otherName: o.username,
-                          tick: _tickFor(m),
+                          tick: m.isCall ? MessageTick.none : _tickFor(m),
                           onLongPress: () => _menu(m),
                           onReactionsTap: () => _reactionsTap(m),
                           onQuoteTap: m.replyTo == null
                               ? null
                               : () => jumpTo(m.replyTo!.id),
+                          onCallTap: m.isCall
+                              ? () => _call(video: m.video)
+                              : null,
                         ),
                       ),
                     );
                   },
                 );
+                return NotificationListener<ScrollNotification>(
+                  onNotification: _onScroll,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(child: list),
+                      if (_pull > 0) _pullHint(),
+                    ],
+                  ),
+                );
               },
             ),
           ),
+          if (_mode != Disappear.off) _modeBar(),
           if (ContentFilter.instance.isBlocked(widget.other.uid))
             const SafeArea(
               top: false,
@@ -740,6 +951,89 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       ),
     );
   }
+
+  /// "Slide up to turn on disappearing messages" while you pull.
+  Widget _pullHint() {
+    final p = (_pull / ChatDetailScreen.pullToVanish).clamp(0.0, 1.0);
+    final on = _mode != Disappear.off;
+    final text = _armed
+        ? (on ? 'Release to turn off disappearing messages'
+              : 'Release to turn on disappearing messages')
+        : (on ? 'Slide up to turn off disappearing messages'
+              : 'Slide up to turn on disappearing messages');
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 8 + 30 * p,
+      child: IgnorePointer(
+        child: Opacity(
+          opacity: (0.3 + p * 0.7).clamp(0.0, 1.0),
+          child: Column(
+            key: const ValueKey('vanish-hint'),
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 38,
+                height: 38,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    CircularProgressIndicator(
+                      value: p,
+                      strokeWidth: 2.5,
+                      color: AppColors.lime,
+                      backgroundColor: AppColors.border,
+                    ),
+                    Icon(
+                      Icons.timer_outlined,
+                      size: 20,
+                      color: _armed ? AppColors.lime : AppColors.textPrimary,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                text,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: _armed ? AppColors.lime : AppColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Thin bar above the message box while disappearing messages are on.
+  Widget _modeBar() => Material(
+    key: const ValueKey('disappear-bar'),
+    color: AppColors.surface,
+    child: InkWell(
+      onTap: _chooseMode,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.timer_outlined, size: 15, color: AppColors.lime),
+            const SizedBox(width: 6),
+            Text(
+              'Disappearing messages · ${Disappear.label(_mode)}',
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.lime,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 
   Widget _hello(UserProfile o) => Center(
     child: Column(

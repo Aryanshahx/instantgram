@@ -250,7 +250,7 @@ void main() {
               _chat(seen: {'other': 4}, delivered: {'other': 6}),
             ),
             myUid: 'me',
-            presence: Stream.value(DateTime.now()),
+            presence: Stream.value(PresenceState(DateTime.now(), online: true)),
           ),
         ),
       );
@@ -311,7 +311,7 @@ void main() {
 
     testWidgets('hidden person = no label', (t) async {
       await t.pumpWidget(
-        _app(ActiveLabel(uid: 'x', stream: Stream<DateTime?>.value(null))),
+        _app(ActiveLabel(uid: 'x', stream: Stream<PresenceState?>.value(null))),
       );
       await t.pump();
       expect(find.byKey(const ValueKey('active-label')), findsNothing);

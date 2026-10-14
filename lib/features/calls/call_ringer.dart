@@ -52,10 +52,19 @@ abstract final class CallRinger {
     );
   }
 
-  /// FCM data message from our server: {type: call | call_cancel, ...}.
+  /// The push is a muted call (no ringing: the server sent a quiet
+  /// notification instead; the open app shows a silent call screen).
+  static bool isMuted(Map<String, dynamic> data) => '${data['muted']}' == '1';
+
+  /// Test ring from Settings -> Calls check.
+  static bool isTest(String id) => id.startsWith('test');
+
+  /// FCM data message from our server: {type: call | call_cancel |
+  /// call_test, ...}.
   static Future<void> onPush(Map<String, dynamic> data) async {
     final id = '${data['callId'] ?? ''}';
     if (id.isEmpty) return;
+    if (isMuted(data)) return; // v0.11: quiet notification only
     final p = params(
       id: id,
       name: '${data['callerName'] ?? ''}',
@@ -66,9 +75,9 @@ abstract final class CallRinger {
     try {
       switch (data['type']) {
         case 'call':
-          final sent = int.tryParse('${data['sentAt'] ?? ''}') ?? 0;
-          final age = DateTime.now().millisecondsSinceEpoch - sent;
-          if (sent > 0 && age > maxAgeMs) return; // arrived too late
+        case 'call_test':
+          // v0.11: no phone-clock check any more (a wrong clock blocked
+          // ringing); Google drops pushes older than 45 s itself.
           await show(p);
         case 'call_cancel':
           // caller hung up before you answered

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../core/services/chat_prefs.dart';
 import '../../../core/services/content_filter.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
@@ -24,14 +25,19 @@ void openChat(BuildContext context, UserProfile other) {
 }
 
 class ChatsScreen extends StatefulWidget {
-  const ChatsScreen({super.key});
+  const ChatsScreen({super.key, this.chats, this.myUid});
+
+  /// Tests.
+  final Stream<List<Chat>>? chats;
+  final String? myUid;
 
   @override
   State<ChatsScreen> createState() => _ChatsScreenState();
 }
 
 class _ChatsScreenState extends State<ChatsScreen> {
-  final Stream<List<Chat>> _chats = ChatRepository.instance.myChats();
+  late final Stream<List<Chat>> _chats =
+      widget.chats ?? ChatRepository.instance.myChats();
   Timer? _debounce;
   String _query = '';
   List<UserProfile> _people = const [];
@@ -61,23 +67,134 @@ class _ChatsScreenState extends State<ChatsScreen> {
     });
   }
 
+  /// v0.11: long-press a chat = pin, mute messages, mute calls, delete.
+  Future<void> _menu(Chat c, String me) async {
+    final prefs = ChatPrefs.instance;
+    final p = prefs.value.value;
+    final other = c.otherUid(me);
+    final name = c.usernameOf(other);
+    final pinned = p.isPinned(c.id);
+    final muted = p.isMuted(c.id);
+    final calls = p.callsMuted(other);
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text(
+                name,
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+              ),
+            ),
+            _MenuItem(
+              id: 'pin',
+              icon: pinned ? Icons.push_pin_outlined : Icons.push_pin,
+              label: pinned ? 'Unpin chat' : 'Pin chat',
+            ),
+            _MenuItem(
+              id: 'mute',
+              icon: muted
+                  ? Icons.notifications_active_outlined
+                  : Icons.notifications_off_outlined,
+              label: muted ? 'Unmute messages' : 'Mute messages',
+            ),
+            _MenuItem(
+              id: 'calls',
+              icon: calls
+                  ? Icons.phone_in_talk_outlined
+                  : Icons.phone_disabled_outlined,
+              label: calls ? 'Unmute calls' : 'Mute calls',
+            ),
+            const _MenuItem(
+              id: 'delete',
+              icon: Icons.delete_outline,
+              label: 'Delete chat',
+              danger: true,
+            ),
+            const SizedBox(height: 6),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    void say(String t) => messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(t)));
+    try {
+      switch (choice) {
+        case 'pin':
+          final ok = await prefs.togglePin(c.id);
+          if (!ok) say('You can pin up to ${ChatPrefs.maxPinned} chats');
+        case 'mute':
+          await prefs.toggleMuteChat(c.id);
+          say(muted ? 'Messages unmuted' : 'Messages from $name muted');
+        case 'calls':
+          await prefs.toggleMuteCalls(other);
+          say(calls ? 'Calls unmuted' : 'Calls from $name will not ring');
+        case 'delete':
+          final yes = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Delete chat?'),
+              content: Text(
+                'The chat with $name is removed for you only. New messages '
+                'will show up again.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  key: const ValueKey('chat-delete-yes'),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text(
+                    'Delete',
+                    style: TextStyle(color: AppColors.like),
+                  ),
+                ),
+              ],
+            ),
+          );
+          if (yes == true) {
+            await prefs.deleteChat(c.id);
+            say('Chat deleted');
+          }
+      }
+    } catch (e) {
+      say('Could not save. Check your internet.');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final me = UserRepository.instance.myUid;
+    final me = widget.myUid ?? UserRepository.instance.myUid;
     return SafeArea(
       bottom: false,
-      child: StreamBuilder<List<Chat>>(
+      child: ValueListenableBuilder<ChatPrefsData>(
+        valueListenable: ChatPrefs.instance.value,
+        builder: (context, prefs, _) => StreamBuilder<List<Chat>>(
         stream: _chats,
         builder: (context, snap) {
           final q = _query.toLowerCase();
-          final chats = (snap.data ?? const <Chat>[])
-              .where(
-                (c) =>
-                    !ContentFilter.instance.isBlocked(c.otherUid(me)) &&
-                    (q.isEmpty ||
-                        c.usernameOf(c.otherUid(me)).toLowerCase().contains(q)),
-              )
-              .toList();
+          final chats = ChatPrefs.sortChats<Chat>(
+            (snap.data ?? const <Chat>[])
+                .where(
+                  (c) =>
+                      !ContentFilter.instance.isBlocked(c.otherUid(me)) &&
+                      (q.isEmpty ||
+                          c.usernameOf(c.otherUid(me)).toLowerCase().contains(q)),
+                )
+                .toList(),
+            prefs,
+            id: (c) => c.id,
+            updatedAt: (c) => c.updatedAt,
+          );
 
           return ListView(
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -104,8 +221,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: _ChatTile(
+                      key: ValueKey('chat-${c.id}'),
                       chat: c,
                       me: me,
+                      pinned: prefs.isPinned(c.id),
+                      muted: prefs.isMuted(c.id),
+                      callsMuted: prefs.callsMuted(c.otherUid(me)),
+                      onLongPress: () => _menu(c, me),
                       onTap: () {
                         final other = c.otherUid(me);
                         openChat(
@@ -155,16 +277,63 @@ class _ChatsScreenState extends State<ChatsScreen> {
           );
         },
       ),
+      ),
+    );
+  }
+}
+
+class _MenuItem extends StatelessWidget {
+  const _MenuItem({
+    required this.id,
+    required this.icon,
+    required this.label,
+    this.danger = false,
+  });
+  final String id;
+  final IconData icon;
+  final String label;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = danger ? AppColors.like : AppColors.textPrimary;
+    return ListTile(
+      key: ValueKey('chat-menu-$id'),
+      dense: true,
+      leading: Icon(icon, color: color, size: 22),
+      title: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          fontFamily: AppTheme.fontFamily,
+        ),
+      ),
+      onTap: () => Navigator.pop(context, id),
     );
   }
 }
 
 class _ChatTile extends StatelessWidget {
-  const _ChatTile({required this.chat, required this.me, required this.onTap});
+  const _ChatTile({
+    super.key,
+    required this.chat,
+    required this.me,
+    required this.onTap,
+    this.onLongPress,
+    this.pinned = false,
+    this.muted = false,
+    this.callsMuted = false,
+  });
 
   final Chat chat;
   final String me;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final bool pinned;
+  final bool muted;
+  final bool callsMuted;
 
   @override
   Widget build(BuildContext context) {
@@ -198,6 +367,7 @@ class _ChatTile extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(10, 10, 14, 10),
           child: Row(
@@ -219,12 +389,40 @@ class _ChatTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      name,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (muted)
+                          const Padding(
+                            padding: EdgeInsets.only(left: 5),
+                            child: Icon(
+                              Icons.notifications_off_outlined,
+                              key: ValueKey('chat-muted-icon'),
+                              size: 14,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        if (callsMuted)
+                          const Padding(
+                            padding: EdgeInsets.only(left: 4),
+                            child: Icon(
+                              Icons.phone_disabled_outlined,
+                              key: ValueKey('chat-calls-muted-icon'),
+                              size: 14,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -245,6 +443,16 @@ class _ChatTile extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
+                  if (pinned)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 3),
+                      child: Icon(
+                        Icons.push_pin,
+                        key: ValueKey('chat-pinned-icon'),
+                        size: 13,
+                        color: AppColors.lime,
+                      ),
+                    ),
                   Text(
                     timeAgo(chat.updatedAt, approx: true),
                     style: TextStyle(

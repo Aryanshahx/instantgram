@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/services/calls.dart';
+import '../../core/services/chat_prefs.dart';
 import '../../core/services/deep_links.dart';
 import '../../core/services/media_prefetch.dart';
 import '../../core/services/presence.dart';
@@ -24,6 +25,7 @@ import '../post/presentation/create_sheet.dart';
 import '../profile/presentation/profile_screen.dart';
 import '../reels/presentation/clips_screen.dart';
 import '../search/presentation/explore_screen.dart';
+import 'push_router.dart';
 import 'widgets/floating_nav_bar.dart';
 
 class MainShell extends StatefulWidget {
@@ -78,6 +80,8 @@ class _MainShellState extends State<MainShell> {
   Future<void> _startCalls() async {
     unawaited(Presence.instance.start(widget.uid));
     ChatReceipts.instance.start(widget.uid);
+    // v0.11: pinned / muted chats
+    ChatPrefs.instance.start(widget.uid);
     try {
       final me = await UserRepository.instance.meCached();
       await Calls.instance.signIn(
@@ -86,6 +90,8 @@ class _MainShellState extends State<MainShell> {
         photoUrl: me.photoUrl,
       );
       if (mounted) await Calls.instance.openAcceptedCall();
+      // v0.11: tapped notifications open the chat / muted call
+      if (mounted) await PushRouter.instance.start();
     } catch (e) {
       debugPrint('calls: $e');
     }

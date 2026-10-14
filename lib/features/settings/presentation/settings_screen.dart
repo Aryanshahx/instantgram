@@ -4,13 +4,16 @@ import '../../../core/config/app_info.dart';
 import '../../../core/constants/languages.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/calls.dart';
+import '../../../core/services/chat_prefs.dart';
 import '../../../core/services/presence.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/email.dart';
 import '../../../shared/models/user_profile.dart';
 import '../../auth/data/auth_service.dart';
 import '../../chats/data/chat_receipts.dart';
+import '../../shell/push_router.dart';
 import '../../profile/presentation/saved_screen.dart';
+import 'call_check_screen.dart';
 import 'history_screen.dart';
 import 'privacy_screens.dart';
 import 'settings_pages.dart';
@@ -128,6 +131,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         subtitle: 'People you blocked',
         keywords: 'block unblock blocked accounts',
         onTap: (c) => _push(c, const BlockedScreen()),
+      ),
+      _Item(
+        section: 'Your app',
+        icon: Icons.ring_volume_outlined,
+        title: 'Calls & notifications',
+        subtitle: 'Check that calls ring when the app is closed',
+        keywords: 'call ring ringing notification push battery test closed',
+        onTap: (c) => _push(c, const CallCheckScreen()),
       ),
       _Item(
         section: 'Your app',
@@ -322,6 +333,8 @@ Future<void> confirmLogout(BuildContext context) async {
   await Calls.instance.signOut(); // no calls for this phone any more
   await Presence.instance.stop();
   ChatReceipts.instance.stop();
+  ChatPrefs.instance.stop();
+  PushRouter.instance.stop();
   await AuthService.instance.signOut();
 }
 
