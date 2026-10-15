@@ -2,7 +2,7 @@
 class AppInfo {
   AppInfo._();
 
-  static const String version = '0.15.0';
+  static const String version = '0.16.0';
   static const String supportEmail = 'techlabs.hyper@gmail.com';
   static const String company = 'HyperTech Labs';
 

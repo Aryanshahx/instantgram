@@ -13,6 +13,7 @@ import '../../../core/services/uploader.dart';
 import '../../../core/services/video_prep.dart';
 import '../../../core/utils/errors.dart';
 import '../../../shared/models/post.dart';
+import '../../stories/data/highlight_repository.dart';
 import '../../stories/data/story_repository.dart';
 import 'post_repository.dart';
 
@@ -164,7 +165,9 @@ class UploadTask {
 
   /// Short text for the banner / notification.
   String get label {
-    final what = isMoment
+    final what = isMoment && options.highlightOnly
+        ? 'highlight'
+        : isMoment
         ? (items.length > 1 ? 'moments' : 'moment')
         : kind == clip
         ? 'clip'
@@ -200,6 +203,9 @@ class UploadTask {
       'hideComments': options.hideComments,
       'hideReposts': options.hideReposts,
       'hideShares': options.hideShares,
+      'profileOnly': options.profileOnly,
+      'highlightId': options.highlightId,
+      'highlightTitle': options.highlightTitle,
     },
     'coverPath': coverPath,
     'audioPath': audioPath,
@@ -234,6 +240,9 @@ class UploadTask {
             hideComments: o['hideComments'] == true,
             hideReposts: o['hideReposts'] == true,
             hideShares: o['hideShares'] == true,
+            profileOnly: o['profileOnly'] == true,
+            highlightId: (o['highlightId'] as String?) ?? '',
+            highlightTitle: (o['highlightTitle'] as String?) ?? '',
           ),
           coverPath: m['coverPath'] as String?,
           audioPath: m['audioPath'] as String?,
@@ -625,9 +634,11 @@ class UploadQueue extends ChangeNotifier {
       // 3 files at the same time (each big video also uses parallel parts)
       await Uploader.pool<void>(3, [
         for (final s in slots)
-          () => s.run((v) {
-            s.progress = v;
-          }).then((_) => s.progress = 1),
+          () => s
+              .run((v) {
+                s.progress = v;
+              })
+              .then((_) => s.progress = 1),
       ]);
     } finally {
       ticker.cancel();
@@ -638,7 +649,36 @@ class UploadQueue extends ChangeNotifier {
     for (final m in t.items) {
       if (m.main == null) throw StateError('Upload did not finish');
     }
-    if (t.isMoment) {
+    if (t.isMoment && t.options.highlightOnly) {
+      // v0.16: straight into a highlight (no moment for 24 hours)
+      final now = DateTime.now();
+      await HighlightRepository.instance.addUploaded(
+        t.options.highlightId,
+        t.options.highlightTitle,
+        [
+          for (final (i, m) in t.items.indexed)
+            Story(
+              id: m.momentId,
+              authorId: '',
+              authorUsername: '',
+              authorPhotoUrl: '',
+              mediaUrl: m.main!.url,
+              mediaKey: m.main!.key,
+              createdAt: now.add(Duration(milliseconds: i)),
+              type: m.isVideo ? Story.video : Story.photo,
+              durationMs: m.isVideo ? m.durationMs : 0,
+              edits: m.isVideo ? m.edits.withoutVoice() : const VideoEdits(),
+              audioUrl: t.audio?.url ?? '',
+              audioKey: t.audio?.key ?? '',
+              audioName: t.audio == null ? '' : t.audioName,
+            ),
+        ],
+      );
+      for (final m in t.items) {
+        m.published = true;
+      }
+      _save(now: true);
+    } else if (t.isMoment) {
       for (final m in t.items) {
         if (m.published) continue;
         await StoryRepository.instance.createUploaded(
@@ -648,6 +688,8 @@ class UploadQueue extends ChangeNotifier {
           edits: m.edits.withoutVoice(),
           durationMs: m.durationMs,
           audience: t.options.audience,
+          audio: t.audio,
+          audioName: t.audioName,
         );
         m.published = true;
         _save(now: true);

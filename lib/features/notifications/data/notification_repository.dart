@@ -29,6 +29,7 @@ class NotificationRepository {
     Post? post,
     String text = '',
     String? postId,
+    String thumb = '',
   }) {
     if (toUid == from.uid || toUid.isEmpty) return const Pending.none();
     final ref = _col(toUid).doc();
@@ -38,7 +39,7 @@ class NotificationRepository {
       'fromUsername': from.username,
       'fromPhotoUrl': from.photoUrl,
       'postId': post?.id ?? postId ?? '',
-      'postThumb': post?.coverUrl ?? '',
+      'postThumb': post?.coverUrl ?? thumb,
       'text': text.length > 120 ? '${text.substring(0, 120)}…' : text,
       'read': false,
       'createdAt': FieldValue.serverTimestamp(),
@@ -67,6 +68,7 @@ class NotificationRepository {
     Post? post,
     String text = '',
     String? postId,
+    String thumb = '',
   }) async {
     final batch = _db.batch();
     final p = addToBatch(
@@ -77,6 +79,7 @@ class NotificationRepository {
       post: post,
       text: text,
       postId: postId,
+      thumb: thumb,
     );
     if (p.isNone) return;
     await batch.commit();

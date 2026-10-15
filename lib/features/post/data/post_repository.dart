@@ -47,8 +47,9 @@ class PostRepository {
     if (t.isEmpty) return [];
     // Single-field query -> no extra Firestore index needed.
     final s = await _posts.where('tags', arrayContains: t).limit(150).get();
-    final list = _map(s).where((p) => p.isClip && _filter.canSee(p)).toList()
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final list =
+        _map(s).where((p) => p.isClip && _filter.canSeeInFeeds(p)).toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return list;
   }
 
@@ -73,6 +74,7 @@ class PostRepository {
     'hideComments': o.hideComments,
     'hideReposts': o.hideReposts,
     'hideShares': o.hideShares,
+    if (o.profileOnly) 'profileOnly': true,
     'createdAt': FieldValue.serverTimestamp(),
   };
 
@@ -186,7 +188,7 @@ class PostRepository {
   ContentFilter get _filter => ContentFilter.instance;
 
   /// Posts from a list of authors (max 30).
-  Stream<List<Post>> feed(List<String> authorIds) => _filter.visiblePosts(
+  Stream<List<Post>> feed(List<String> authorIds) => _filter.feedPosts(
     _posts
         .where('authorId', whereIn: authorIds.take(30).toList())
         .orderBy('createdAt', descending: true)
@@ -218,7 +220,7 @@ class PostRepository {
             .map(_map),
       );
     }
-    return _filter.visiblePosts(
+    return _filter.feedPosts(
       combineLatestList<List<Post>, List<Post>>(
         parts,
         (all) => mergeNewest(all, max: max),
@@ -279,7 +281,7 @@ class PostRepository {
   Stream<List<Post>> recent({String? type, int limit = 60}) {
     Query<Map<String, dynamic>> q = _posts;
     if (type != null) q = q.where('type', isEqualTo: type);
-    return _filter.visiblePosts(
+    return _filter.feedPosts(
       q
           .orderBy('createdAt', descending: true)
           .limit(limit)
@@ -793,9 +795,21 @@ class PostOptions {
     this.hideComments = false,
     this.hideReposts = false,
     this.hideShares = false,
+    this.profileOnly = false,
+    this.highlightId = '',
+    this.highlightTitle = '',
   });
 
   final String audience;
+
+  /// v0.16: post / clip only on your profile grid (not in feeds).
+  final bool profileOnly;
+
+  /// v0.16: moments straight into a highlight (no moment for 24 hours).
+  /// [highlightId] is new or yours; [highlightTitle] names a new one.
+  final String highlightId;
+  final String highlightTitle;
+  bool get highlightOnly => highlightId.isNotEmpty;
   final bool alsoMoment;
   final bool hideLikes;
   final bool hideComments;

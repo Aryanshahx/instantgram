@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../shared/models/post.dart';
@@ -177,6 +179,52 @@ class HighlightRepository {
         title: title,
         items: items,
         cover: cover,
+        username: me.username,
+        photoUrl: me.photoUrl,
+      ),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// v0.16: a new id for a highlight made while sharing (works without
+  /// Firebase too: tests).
+  String newIdSafe() {
+    try {
+      return _col(UserRepository.instance.myUid).doc().id;
+    } catch (_) {
+      const abc =
+          'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      final r = math.Random.secure();
+      return List.generate(20, (_) => abc[r.nextInt(abc.length)]).join();
+    }
+  }
+
+  /// v0.16: adds just-uploaded moments to highlight [id] (made with
+  /// [title] when it does not exist yet). Safe to call again.
+  Future<void> addUploaded(String id, String title, List<Story> items) async {
+    final me = await UserRepository.instance.me();
+    final ref = _col(me.uid).doc(id);
+    final snap = await ref.get();
+    if (!snap.exists) {
+      await ref.set({
+        ...Highlight.toMap(
+          title: title,
+          items: items,
+          cover: '',
+          username: me.username,
+          photoUrl: me.photoUrl,
+        ),
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return;
+    }
+    final h = Highlight.fromMap(id, me.uid, snap.data() ?? const {});
+    await ref.update({
+      ...Highlight.toMap(
+        title: h.title,
+        items: [...h.items, ...items],
+        cover: h.coverUrl,
         username: me.username,
         photoUrl: me.photoUrl,
       ),

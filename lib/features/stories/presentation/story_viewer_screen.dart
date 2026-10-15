@@ -3,13 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../core/services/app_settings.dart';
+import '../../../core/services/music_player.dart';
 import '../../../core/services/media_prefetch.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/avatar.dart';
-import '../../../shared/widgets/media_view.dart' show CutSkipper;
+import '../../../shared/widgets/media_view.dart' show CutSkipper, MusicChip;
 import '../../../shared/widgets/net_image.dart';
 import '../../../shared/widgets/video_extras.dart';
 import '../../editor/filters.dart';
@@ -40,6 +41,18 @@ class StoryViewerScreen extends StatefulWidget {
   /// v0.15: highlight name shown next to the username.
   final String? title;
 
+  // v0.16 tests (no Firebase)
+  @visibleForTesting
+  static String? debugMe;
+  @visibleForTesting
+  static Future<void> Function(Story st)? debugRecordView;
+  @visibleForTesting
+  static Future<void> Function(Story st, bool liked)? debugLike;
+  @visibleForTesting
+  static Future<bool> Function(String storyId)? debugMyLike;
+  @visibleForTesting
+  static Stream<List<StoryView>> Function(String storyId)? debugViews;
+
   @override
   State<StoryViewerScreen> createState() => _StoryViewerScreenState();
 }
@@ -65,6 +78,13 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
   StoryGroup get _group => widget.groups[_g];
   Story get _story => _group.stories[_s];
 
+  String get _me => StoryViewerScreen.debugMe ?? UserRepository.instance.myUid;
+
+  // v0.16: hearts on other people's moments
+  final Map<String, bool> _liked = {};
+  final Map<String, Future<void>> _viewSaved = {};
+  static const String _kMusic = 'moment-music';
+
   int _firstUnseen(StoryGroup g) {
     final i = g.stories.indexWhere((s) => !AppSettings.instance.isSeen(s.id));
     return i < 0 ? 0 : i;
@@ -80,7 +100,57 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
   void dispose() {
     _timer.dispose();
     _video?.dispose();
+    _hub?.dispose();
+    MusicPlayer.instance.stop(_kMusic);
     super.dispose();
+  }
+
+  /// v0.16: saves the watch, then reads if I liked it before.
+  void _recordView(Story st) {
+    final save =
+        (StoryViewerScreen.debugRecordView ??
+        StoryRepository.instance.recordView)(st);
+    _viewSaved[st.id] = save.catchError((Object _) {});
+    if (_liked.containsKey(st.id)) return;
+    save
+        .then(
+          (_) =>
+              (StoryViewerScreen.debugMyLike ??
+              StoryRepository.instance.myLike)(st.id),
+        )
+        .then((v) {
+          if (mounted && !_liked.containsKey(st.id)) {
+            setState(() => _liked[st.id] = v);
+          }
+        })
+        .catchError((Object _) {});
+  }
+
+  Future<void> _toggleLike() async {
+    final st = _story;
+    final on = !(_liked[st.id] ?? false);
+    setState(() => _liked[st.id] = on);
+    try {
+      await (_viewSaved[st.id] ?? Future<void>.value());
+      await (StoryViewerScreen.debugLike ?? StoryRepository.instance.setLike)(
+        st,
+        on,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _liked[st.id] = !on);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text("Couldn't save your like")),
+        );
+    }
+  }
+
+  /// v0.16: music of the moment (loops while it is on screen).
+  void _startMusic(Story st) {
+    if (!st.hasMusic || _paused) return;
+    MusicPlayer.instance.play(_kMusic, st.audioUrl);
   }
 
   /// Start the current moment (photo timer or video).
@@ -90,10 +160,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     if (widget.recordViews) {
       AppSettings.instance.markSeen(st.id);
       // v0.15: every watch counts (rewatches too) — not for my own
-      if (st.authorId != UserRepository.instance.myUid) {
-        StoryRepository.instance.recordView(st).catchError((Object _) {});
-      }
+      if (st.authorId != _me) _recordView(st);
     }
+    MusicPlayer.instance.stop(_kMusic);
     _timer.stop();
     _timer.value = 0;
     final old = _video;
@@ -105,13 +174,19 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     _photoReady = false;
     _prefetchNext();
     if (!st.isVideo) {
-      _timer.duration = _photoTime;
+      // v0.16: with music a photo stays 15 s
+      _timer.duration = st.hasMusic
+          ? const Duration(milliseconds: Story.musicPhotoMs)
+          : _photoTime;
       if (mounted) setState(() {});
       // the 5 s only start when the photo is on screen
       await _loadPhoto(st.mediaUrl);
       if (!mounted || id != _loadId) return;
       _photoReady = true;
-      if (!_paused) _timer.forward(from: 0);
+      if (!_paused) {
+        _timer.forward(from: 0);
+        _startMusic(st);
+      }
       return;
     }
 
@@ -145,7 +220,8 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
         end,
         e.cuts,
       ).clamp(1000, kMomentMaxMs);
-      await c.setVolume(e.muted ? 0 : 1);
+      // v0.16: music replaces the video sound
+      await c.setVolume(e.muted || st.hasMusic ? 0 : 1);
       if (start > 0) await c.seekTo(Duration(milliseconds: start));
       if (e.cuts.isNotEmpty) {
         final skipper = CutSkipper();
@@ -156,6 +232,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
       if (!_paused) {
         c.play();
         _timer.forward(from: 0);
+        _startMusic(st);
       }
     } catch (_) {
       if (!mounted || id != _loadId) return;
@@ -201,6 +278,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     _paused = true;
     _timer.stop();
     _video?.pause();
+    if (_story.hasMusic) MusicPlayer.instance.pause(_kMusic);
   }
 
   void _resume() {
@@ -209,6 +287,11 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     if (!_story.isVideo && !_photoReady) return;
     _timer.forward();
     _video?.play();
+    if (_story.hasMusic) {
+      MusicPlayer.instance.isOwner(_kMusic)
+          ? MusicPlayer.instance.resume(_kMusic)
+          : _startMusic(_story);
+    }
   }
 
   void _next() {
@@ -239,15 +322,20 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
   }
 
   // v0.15: who watched my moment
-  Stream<List<StoryView>>? _views;
+  // v0.16: ONE live list shared by the bar and the viewer list; a new
+  // listener gets the newest list at once (before: stuck loading)
+  LatestValue<List<StoryView>>? _hub;
   String _viewsFor = '';
 
   Stream<List<StoryView>> _viewsOf(Story st) {
-    if (_views == null || _viewsFor != st.id) {
+    if (_hub == null || _viewsFor != st.id) {
+      _hub?.dispose();
       _viewsFor = st.id;
-      _views = StoryRepository.instance.views(st.id);
+      _hub = LatestValue(
+        (StoryViewerScreen.debugViews ?? StoryRepository.instance.views)(st.id),
+      );
     }
-    return _views!;
+    return _hub!.stream;
   }
 
   Future<void> _openViewers() async {
@@ -323,7 +411,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
 
   @override
   Widget build(BuildContext context) {
-    final mine = _group.authorId == UserRepository.instance.myUid;
+    final mine = _group.authorId == _me;
     final live = widget.recordViews;
     return Scaffold(
       backgroundColor: Colors.black,
@@ -457,6 +545,54 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                 ),
               ),
             ),
+            // v0.16: music name
+            if (_story.hasMusic)
+              Positioned(
+                left: 14,
+                bottom: mine && live ? 64 : 22,
+                right: 80,
+                child: SafeArea(
+                  top: false,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: MusicChip(
+                      key: const ValueKey('story-music'),
+                      name: _story.audioName,
+                    ),
+                  ),
+                ),
+              ),
+            // v0.16: heart on someone else's moment
+            if (!mine && live)
+              Positioned(
+                right: 10,
+                bottom: 8,
+                child: SafeArea(
+                  top: false,
+                  child: IconButton(
+                    key: const ValueKey('story-like'),
+                    tooltip: 'Like',
+                    iconSize: 30,
+                    onPressed: _toggleLike,
+                    icon: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 180),
+                      transitionBuilder: (c, a) =>
+                          ScaleTransition(scale: a, child: c),
+                      child: (_liked[_story.id] ?? false)
+                          ? const Icon(
+                              Icons.favorite,
+                              key: ValueKey('story-liked'),
+                              color: AppColors.like,
+                            )
+                          : const Icon(
+                              Icons.favorite_border,
+                              key: ValueKey('story-unliked'),
+                              color: Colors.white,
+                            ),
+                    ),
+                  ),
+                ),
+              ),
             if (mine && live)
               Positioned(
                 left: 0,

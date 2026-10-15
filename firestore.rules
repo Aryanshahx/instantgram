@@ -49,8 +49,12 @@ service cloud.firestore {
                                 'coverUrl', 'coverKey', 'postsCount',
                                 'followingCount', 'followersCount',
                                 'language', 'isPrivate', 'country',
-                                'username', 'links', 'bioFont'])
+                                'username', 'links', 'bioFont', 'bioFonts'])
           && usernameOk(uid) && linksOk()
+          // v0.16: many fonts in the bio: [{s, e, f}] (max 60 parts)
+          && (!changed().hasAny(['bioFonts'])
+              || (request.resource.data.bioFonts is list
+                  && request.resource.data.bioFonts.size() <= 60))
           // v0.15: bio font name
           && (!changed().hasAny(['bioFont'])
               || (request.resource.data.bioFont is string
@@ -174,7 +178,7 @@ service cloud.firestore {
         allow create: if signedIn() && uid != me()
           && request.resource.data.fromUid == me()
           && request.resource.data.type in ['like', 'comment', 'follow', 'repost',
-               'reply', 'comment_like', 'unfollow'];
+               'reply', 'comment_like', 'unfollow', 'moment_like'];
         allow update: if signedIn() && me() == uid && changed().hasOnly(['read']);
       }
     }
@@ -215,7 +219,7 @@ service cloud.firestore {
           && changed().hasOnly(['caption', 'tags', 'pinned', 'authorPhotoUrl',
                                 'authorUsername', 'pinnedComment',
                                 'audience', 'hideLikes', 'hideComments',
-                                'hideReposts', 'hideShares'])
+                                'hideReposts', 'hideShares', 'profileOnly'])
           && tagsOk() && optionsOk()
           // v0.11: one pinned comment (its id, '' = none)
           && request.resource.data.get('pinnedComment', '') is string
@@ -250,7 +254,9 @@ service cloud.firestore {
           && (!('hideLikes' in d) || d.hideLikes is bool)
           && (!('hideComments' in d) || d.hideComments is bool)
           && (!('hideReposts' in d) || d.hideReposts is bool)
-          && (!('hideShares' in d) || d.hideShares is bool);
+          && (!('hideShares' in d) || d.hideShares is bool)
+          // v0.16: only on the profile (not in feeds)
+          && (!('profileOnly' in d) || d.profileOnly is bool);
       }
       // shares can only go up by 1
       function shareOk() {
@@ -425,12 +431,18 @@ service cloud.firestore {
           && request.resource.data.count == 1
           && request.resource.data.lastAt == request.time
           && viewerInfoOk();
-        allow update: if signedIn() && me() == vid
-          && request.resource.data.diff(resource.data).affectedKeys()
+        allow update: if signedIn() && me() == vid && (
+          (request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['count', 'lastAt', 'username', 'photoUrl'])
-          && request.resource.data.count == resource.data.count + 1
-          && request.resource.data.lastAt == request.time
-          && viewerInfoOk();
+            && request.resource.data.count == resource.data.count + 1
+            && request.resource.data.lastAt == request.time
+            && viewerInfoOk())
+          ||
+          // v0.16: like / unlike the moment (heart)
+          (request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['liked', 'likedAt'])
+            && request.resource.data.liked is bool
+            && request.resource.data.likedAt == request.time));
         allow delete: if false;
 
         function storyOwner() {
@@ -498,7 +510,10 @@ service cloud.firestore {
                   'postId', 'postType', 'postThumb', 'postAuthor', 'postCaption',
                   'mediaUrl', 'mediaKey', 'width', 'height', 'durationMs',
                   'lat', 'lng', 'address', 'replyTo', 'forwarded',
-                  'expireAt', 'vanish', 'callStatus', 'video', 'durationSec'])
+                  'expireAt', 'vanish', 'callStatus', 'video', 'durationSec',
+                  'font'])
+            // v0.16: font of a text message (see BioFont ids)
+            && d.get('font', '') is string && d.get('font', '').size() <= 20
             && kind in ['text', 'post', 'image', 'gif', 'voice', 'location',
                         'call', 'system']
             // v0.11: disappearing messages (max 7 days + a little)

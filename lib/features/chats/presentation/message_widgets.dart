@@ -16,6 +16,7 @@ import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/net_image.dart';
 import '../data/chat_repository.dart';
 import '../../../shared/widgets/verified_badge.dart';
+import '../../../shared/widgets/bio_font.dart';
 
 /// Quick reactions on a long-press (v0.9).
 const List<String> kReactEmojis = ['❤️', '😂', '😮', '😢', '😡', '👍'];
@@ -406,7 +407,11 @@ class MessageBubble extends StatelessWidget {
     } else if (m.isCall) {
       content = CallLogContent(message: m, mine: mine, onTap: onCallTap);
     } else {
-      content = Text(m.text, style: TextStyle(fontSize: 14.5, color: fg));
+      // v0.16: the font the sender chose (everyone sees it)
+      content = Text(
+        m.text,
+        style: BioFont.style(m.font, TextStyle(fontSize: 14.5, color: fg)),
+      );
     }
 
     final bubble = _bare

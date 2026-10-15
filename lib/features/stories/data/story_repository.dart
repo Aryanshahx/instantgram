@@ -7,6 +7,7 @@ import '../../../core/services/content_filter.dart';
 import '../../../core/services/media_service.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/models/user_profile.dart';
+import '../../notifications/data/notification_repository.dart';
 import '../../profile/data/user_repository.dart';
 import 'highlight_repository.dart';
 import 'story_views.dart';
@@ -69,6 +70,8 @@ class StoryRepository {
     VideoEdits edits = const VideoEdits(),
     int durationMs = 0,
     String audience = Audience.everyone,
+    UploadedMedia? audio,
+    String audioName = '',
   }) async {
     final me = await UserRepository.instance.me();
     final ref = _stories.doc(id);
@@ -80,6 +83,12 @@ class StoryRepository {
         'mediaKey': media.key,
         if (isVideo && durationMs > 0) 'durationMs': durationMs,
         if (isVideo) ...edits.toMap(),
+        // v0.16: music on the moment
+        if (audio != null) ...{
+          'audioUrl': audio.url,
+          'audioKey': audio.key,
+          'audioName': audioName,
+        },
       });
     } catch (e) {
       final done = await ref
@@ -138,6 +147,39 @@ class StoryRepository {
       'count': FieldValue.increment(1),
       'lastAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+  }
+
+  /// v0.16: heart on someone's moment (your view doc must exist:
+  /// [recordView] first). The owner gets "X liked your moment" once.
+  Future<void> setLike(Story st, bool liked) async {
+    final uid = UserRepository.instance.myUid;
+    if (st.authorId == uid || st.id.isEmpty) return;
+    await _stories.doc(st.id).collection('views').doc(uid).update({
+      'liked': liked,
+      'likedAt': FieldValue.serverTimestamp(),
+    });
+    if (!liked || !_likeSent.add(st.id)) return;
+    try {
+      final me = await UserRepository.instance.me();
+      await NotificationRepository.instance.addNow(
+        toUid: st.authorId,
+        from: me,
+        type: AppNotification.momentLike,
+        postId: '',
+        thumb: st.isVideo ? '' : st.mediaUrl,
+      );
+    } catch (e) {
+      debugPrint('moment like notification: $e'); // the like is saved
+    }
+  }
+
+  final Set<String> _likeSent = {};
+
+  /// v0.16: did I like moment [storyId] before?
+  Future<bool> myLike(String storyId) async {
+    final uid = UserRepository.instance.myUid;
+    final d = await _stories.doc(storyId).collection('views').doc(uid).get();
+    return d.data()?['liked'] == true;
   }
 
   /// Who watched your moment [storyId] (only you can read it).

@@ -107,7 +107,7 @@ void main() {
   // ------------------------------------------------------------ bio fonts
   group('bio fonts', () {
     test('ids, names and styles', () {
-      expect(BioFont.ids.length, 11);
+      expect(BioFont.ids.length, 23); // v0.16: 12 more
       expect(BioFont.normalize('nope'), '');
       expect(BioFont.normalize(3), '');
       expect(BioFont.label('lobster'), 'Lobster');
@@ -149,7 +149,7 @@ void main() {
       await _finish(t);
     });
 
-    testWidgets('edit profile: font picker + live preview', (t) async {
+    testWidgets('edit profile: font picker (v0.16: in the field)', (t) async {
       t.view.physicalSize = const Size(1080, 2400);
       t.view.devicePixelRatio = 2.5;
       addTearDown(t.view.reset);
@@ -172,22 +172,23 @@ void main() {
         ),
       );
       await _frames(t);
+      // v0.16: the bio field itself shows the fonts (no separate preview)
       await t.scrollUntilVisible(
-        find.byKey(const ValueKey('bio-preview')),
+        find.byKey(const ValueKey('bio-font-caveat')),
         200,
         scrollable: find.byType(Scrollable).first,
       );
       await _frames(t, 3);
-      Text preview() => t.widget<Text>(
-        find.descendant(
-          of: find.byKey(const ValueKey('bio-preview')),
-          matching: find.byType(Text),
-        ),
-      );
-      expect(preview().style!.fontFamily, 'BioBebas');
+      final ctrl = t
+          .widgetList<EditableText>(find.byType(EditableText))
+          .map((e) => e.controller)
+          .whereType<FontRunController>()
+          .single;
+      expect(ctrl.runs, [const FontRun(0, 11, 'bebas')]);
+      ctrl.selection = const TextSelection.collapsed(offset: 3);
       await t.tap(find.byKey(const ValueKey('bio-font-caveat')));
       await _frames(t, 3);
-      expect(preview().style!.fontFamily, 'BioCaveat');
+      expect(ctrl.runs, [const FontRun(0, 11, 'caveat')]);
       await _finish(t);
     });
   });

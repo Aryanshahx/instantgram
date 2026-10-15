@@ -28,6 +28,7 @@ import '../data/chat_repository.dart';
 import 'message_widgets.dart';
 import '../data/typing_tracker.dart';
 import '../../../shared/widgets/verified_badge.dart';
+import '../../../shared/widgets/bio_font.dart';
 
 export 'message_widgets.dart' show SharedPostCard;
 
@@ -68,6 +69,11 @@ class ChatDetailScreen extends StatefulWidget {
 
 class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final _ctrl = TextEditingController();
+
+  /// v0.16: font for your text messages (kept while the app is open).
+  static String lastFont = '';
+  String _font = lastFont;
+  bool _fontsOpen = false;
   final _focus = FocusNode();
   final _repo = ChatRepository.instance;
   late final String _me = widget.myUid ?? _repo.myUid;
@@ -464,7 +470,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _ctrl.clear();
     await _run(null, () async {
       try {
-        await _repo.send(widget.other, text, replyTo: quote);
+        await _repo.send(widget.other, text, replyTo: quote, font: _font);
       } catch (_) {
         _ctrl.text = text;
         rethrow;
@@ -1209,6 +1215,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 ],
               ),
             ),
+          // v0.16: fonts for your messages (everyone sees them)
+          if (_fontsOpen && !_recording)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+              child: BioFontPicker(
+                value: _font,
+                small: true,
+                keyPrefix: 'chat-font',
+                onChanged: (v) => setState(() {
+                  _font = v;
+                  lastFont = v;
+                }),
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(6, 6, 8, 10),
             child: _recording ? _recordingRow() : _inputRow(),
@@ -1236,10 +1256,35 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             maxLines: 4,
             maxLength: 2000,
             textCapitalization: TextCapitalization.sentences,
+            style: BioFont.style(_font, const TextStyle(fontSize: 15)),
             decoration: InputDecoration(
               counterText: '',
               hintText: 'Message…',
               hintStyle: const TextStyle(color: AppColors.textHint),
+              // v0.16: "Aa" = fonts
+              suffixIcon: GestureDetector(
+                key: const ValueKey('chat-fonts'),
+                onTap: () => setState(() => _fontsOpen = !_fontsOpen),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Center(
+                    widthFactor: 1,
+                    child: Text(
+                      'Aa',
+                      style: BioFont.style(
+                        _font,
+                        TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: _fontsOpen || _font.isNotEmpty
+                              ? AppColors.lime
+                              : AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
               filled: true,
               fillColor: AppColors.surface,
               contentPadding: const EdgeInsets.symmetric(

@@ -8,6 +8,7 @@ import '../../../core/services/content_filter.dart';
 import '../../../core/services/media_service.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/models/user_profile.dart';
+import '../../../shared/widgets/bio_font.dart';
 import '../../notifications/data/notification_repository.dart';
 
 class UserRepository {
@@ -127,9 +128,17 @@ class UserRepository {
     String? website,
     List<ProfileLink>? links,
     String? bioFont,
+    List<FontRun>? bioRuns,
   }) {
     final data = <String, dynamic>{'name': name.trim(), 'bio': bio.trim()};
     if (bioFont != null) data['bioFont'] = bioFont;
+    // v0.16: many fonts (positions are for the trimmed bio)
+    if (bioRuns != null) {
+      data['bioFonts'] = bioRuns
+          .take(FontRuns.maxRuns)
+          .map((r) => r.toMap())
+          .toList();
+    }
     if (links != null) {
       final clean = links
           .where((l) => l.url.isNotEmpty)

@@ -69,12 +69,15 @@ class ChatRepository {
     UserProfile other,
     String text, {
     MessageQuote? replyTo,
+    String font = '',
   }) async {
     final t = text.trim();
     if (t.isEmpty) return;
     await _write(ChatPerson.of(other), {
       'text': t,
       if (replyTo != null) 'replyTo': replyTo.toMap(),
+      // v0.16: custom font (everyone in the chat sees it)
+      if (font.isNotEmpty) 'font': font,
     }, t);
   }
 

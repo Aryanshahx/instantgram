@@ -82,6 +82,7 @@ class VideoOverlay {
     this.background = false,
     this.startMs = 0,
     this.endMs = 0,
+    this.font = '',
   });
 
   static const String textKind = 'text';
@@ -109,7 +110,11 @@ class VideoOverlay {
   bool get isSticker => kind == stickerKind;
   bool visibleAt(int ms) => ms >= startMs && (endMs <= 0 || ms < endMs);
 
+  /// v0.16: font id of a text (see BioFont, '' = app font).
+  final String font;
+
   VideoOverlay copyWith({
+    String? font,
     String? text,
     int? color,
     double? size,
@@ -120,6 +125,7 @@ class VideoOverlay {
     int? endMs,
   }) => VideoOverlay(
     kind: kind,
+    font: font ?? this.font,
     text: text ?? this.text,
     color: color ?? this.color,
     size: size ?? this.size,
@@ -138,6 +144,7 @@ class VideoOverlay {
     'x': double.parse(x.toStringAsFixed(4)),
     'y': double.parse(y.toStringAsFixed(4)),
     if (background) 'bg': true,
+    if (font.isNotEmpty) 'f': font,
     if (startMs > 0) 's': startMs,
     if (endMs > 0) 'e': endMs,
   };
@@ -156,6 +163,9 @@ class VideoOverlay {
       x: d(v['x'], 0.5, 0, 1),
       y: d(v['y'], 0.5, 0, 1),
       background: v['bg'] == true,
+      font: v['f'] is String && (v['f'] as String).length <= 20
+          ? v['f'] as String
+          : '',
       startMs: v['s'] is num ? (v['s'] as num).toInt() : 0,
       endMs: v['e'] is num ? (v['e'] as num).toInt() : 0,
     );
@@ -471,6 +481,7 @@ class Post {
     this.hideComments = false,
     this.hideReposts = false,
     this.hideShares = false,
+    this.profileOnly = false,
     this.durationMs = 0,
     this.audioUrl = '',
     this.audioKey = '',
@@ -520,6 +531,9 @@ class Post {
   final bool hideComments;
   final bool hideReposts;
   final bool hideShares;
+
+  /// v0.16: shown only on the profile grid (not in feeds / Explore / Clips).
+  final bool profileOnly;
 
   /// Video length (old single-video clips).
   final int durationMs;
@@ -625,6 +639,7 @@ class Post {
       hideComments: _bool(m['hideComments']),
       hideReposts: _bool(m['hideReposts']),
       hideShares: _bool(m['hideShares']),
+      profileOnly: _bool(m['profileOnly']),
       durationMs: _int(m['durationMs']),
       audioUrl: _str(m['audioUrl']),
       audioKey: _str(m['audioKey']),
@@ -844,10 +859,22 @@ class Story {
     this.durationMs = 0,
     this.edits = const VideoEdits(),
     this.audience = Audience.everyone,
+    this.audioUrl = '',
+    this.audioKey = '',
+    this.audioName = '',
   });
 
   static const String photo = 'photo';
   static const String video = 'video';
+
+  /// v0.16: a photo moment with music stays this long.
+  static const int musicPhotoMs = 15000;
+
+  /// v0.16: music picked in the editor ('' = none).
+  final String audioUrl;
+  final String audioKey;
+  final String audioName;
+  bool get hasMusic => audioUrl.isNotEmpty;
 
   final String id;
   final String authorId;
@@ -873,6 +900,7 @@ class Story {
     if (durationMs > 0) 'durationMs': durationMs,
     'createdAt': Timestamp.fromDate(createdAt),
     if (isVideo) ...edits.toMap(),
+    if (hasMusic) ...{'audioUrl': audioUrl, 'audioName': audioName},
   };
 
   factory Story.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
@@ -891,6 +919,9 @@ class Story {
       durationMs: _int(m['durationMs']),
       edits: VideoEdits.fromMap(m),
       audience: Audience.normalize(m['audience']),
+      audioUrl: _str(m['audioUrl']),
+      audioKey: _str(m['audioKey']),
+      audioName: _str(m['audioName']),
     );
   }
 }
@@ -1107,6 +1138,7 @@ class Message {
     this.reactions = const {},
     this.hiddenFor = const [],
     this.forwarded = false,
+    this.font = '',
     this.pending = false,
     this.expireAt,
     this.vanish = false,
@@ -1162,6 +1194,9 @@ class Message {
   /// "Delete for you": people who don't see it any more.
   final List<String> hiddenFor;
   final bool forwarded;
+
+  /// v0.16: font of a text message (BioFont id, '' = normal).
+  final String font;
 
   /// v0.10: still on this phone only (not on the server yet) = clock icon.
   final bool pending;
@@ -1296,6 +1331,7 @@ class Message {
           ? List<String>.from((m['hiddenFor'] as List).whereType<String>())
           : const [],
       forwarded: _bool(m['forwarded']),
+      font: _str(m['font']),
       pending: pending,
       expireAt: m['expireAt'] is Timestamp
           ? (m['expireAt'] as Timestamp).toDate()
@@ -1330,6 +1366,9 @@ class AppNotification {
   static const reply = 'reply';
   static const commentLike = 'comment_like';
   static const unfollow = 'unfollow';
+
+  /// v0.16: someone tapped the heart on your moment (postId = '').
+  static const momentLike = 'moment_like';
 
   /// Written by our server: text = the number of views reached.
   static const views = 'views';

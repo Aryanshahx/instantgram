@@ -3,7 +3,7 @@
 // After the app saves an activity notification (users/{to}/notifications/{id})
 // it calls this: the person gets a phone notification, also when the app
 // is closed. Types: like, comment, reply, comment_like, follow, unfollow,
-// repost. Only the person who made the notification can trigger it, and
+// repost, moment_like (v0.16). Only the person who made the notification can trigger it, and
 // only for fresh ones (< 2 minutes). The person can switch each kind off
 // in Settings -> Notifications (prefs/{uid}.pushOff).
 import { requireUser } from '../lib/firebase-auth.js';
@@ -16,6 +16,7 @@ const MAX_AGE_MS = 120_000;
 /** Notification type -> switch in Settings -> Notifications. */
 export const CATEGORY = {
   like: 'likes',
+  moment_like: 'likes', // v0.16
   comment: 'comments',
   reply: 'comments',
   comment_like: 'comment_likes',
@@ -39,6 +40,8 @@ export function textOf(n) {
   switch (n.type) {
     case 'like':
       return `${who} liked your ${what}`;
+    case 'moment_like':
+      return `${who} liked your moment`;
     case 'comment':
       return t ? `${who} commented: ${t}` : `${who} commented on your ${what}`;
     case 'reply':

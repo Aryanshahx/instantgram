@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import 'edit_models.dart';
+import '../../shared/widgets/bio_font.dart';
 
 /// Size of the crop frame and of the photo box inside it, exactly like the
 /// editor lays them out.
@@ -188,9 +189,12 @@ void paintTextLayer(
     text: TextSpan(
       text: t.text,
       style: TextStyle(
-        fontFamily: AppTheme.fontFamily,
+        // v0.16: the chosen font
+        fontFamily: t.sticker
+            ? AppTheme.fontFamily
+            : BioFont.family(t.font, AppTheme.fontFamily),
         color: t.color,
-        fontSize: fs,
+        fontSize: t.sticker ? fs : fs * BioFont.factor(t.font),
         fontWeight: FontWeight.w800,
         height: 1.15,
         shadows: t.background || t.sticker

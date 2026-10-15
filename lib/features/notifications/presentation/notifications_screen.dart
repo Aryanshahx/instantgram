@@ -246,7 +246,7 @@ Widget? _typeIcon(String type) => switch (type) {
     Icons.person_remove_alt_1_outlined,
     color: AppColors.textSecondary,
   ),
-  AppNotification.commentLike => const Icon(
+  AppNotification.commentLike || AppNotification.momentLike => const Icon(
     Icons.favorite,
     color: AppColors.like,
     size: 20,
@@ -259,6 +259,8 @@ String notificationText(AppNotification n) {
   switch (n.type) {
     case AppNotification.like:
       return 'liked your post.';
+    case AppNotification.momentLike:
+      return 'liked your moment.';
     case AppNotification.comment:
       return 'commented: ${n.text}';
     case AppNotification.reply:

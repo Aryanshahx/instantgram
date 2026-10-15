@@ -75,8 +75,11 @@ class EditProfileScreen extends StatefulWidget {
 class _EditProfileScreenState extends State<EditProfileScreen> {
   late final _name = TextEditingController(text: widget.profile.name);
   late final _username = TextEditingController(text: widget.profile.username);
-  late final _bio = TextEditingController(text: widget.profile.bio);
-  late String _bioFont = BioFont.normalize(widget.profile.bioFont);
+  // v0.16: every letter of the bio can have its own font
+  late final _bio = FontRunController(
+    text: widget.profile.bio,
+    runs: widget.profile.bioFontRuns,
+  );
   late final List<_LinkRow> _links = [
     for (final l in widget.profile.allLinks.take(UserProfile.maxLinks))
       _LinkRow(l),
@@ -231,6 +234,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
     final (links, error) = _readLinks();
     if (error.isNotEmpty) return _snack(error);
+    final (bio, runs) = FontRuns.trimmed(_bio.text, _bio.runs);
+    // older app versions show one font: the font of the whole bio
+    final oneFont =
+        runs.length == 1 &&
+            runs.first.start == 0 &&
+            runs.first.end == bio.length
+        ? runs.first.font
+        : '';
     setState(() => _saving = true);
     try {
       if (changeName) {
@@ -244,11 +255,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       try {
         await UserRepository.instance.updateProfile(
           name: _name.text,
-          bio: _bio.text,
+          bio: bio,
           links: links,
-          bioFont: _bioFont != BioFont.normalize(widget.profile.bioFont)
-              ? _bioFont
-              : null,
+          bioFont: oneFont,
+          bioRuns: runs,
         );
       } catch (e) {
         if (!_isDenied(e)) rethrow;
@@ -393,33 +403,23 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 maxLength: 300,
                 textCapitalization: TextCapitalization.sentences,
               ),
-              // v0.15: custom font for the bio
-              _label('Bio font'),
-              BioFontPicker(
-                value: _bioFont,
-                onChanged: (v) => setState(() => _bioFont = v),
+              // v0.16: select words + tap a font (no selection = the line)
+              _label('Bio fonts'),
+              ListenableBuilder(
+                listenable: _bio,
+                builder: (context, _) => BioFontPicker(
+                  value: _bio.fontAtCursor,
+                  onChanged: _bio.applyFont,
+                ),
               ),
-              ValueListenableBuilder<TextEditingValue>(
-                valueListenable: _bio,
-                builder: (context, v, _) => v.text.trim().isEmpty
-                    ? const SizedBox(height: 6)
-                    : Container(
-                        key: const ValueKey('bio-preview'),
-                        width: double.infinity,
-                        margin: const EdgeInsets.only(top: 10),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          v.text.trim(),
-                          style: BioFont.style(
-                            _bioFont,
-                            const TextStyle(fontSize: 14.5, height: 1.35),
-                          ),
-                        ),
-                      ),
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: Text(
+                  'Select words, then tap a font. Nothing selected = the '
+                  'whole line where your cursor is.',
+                  key: ValueKey('bio-font-hint'),
+                  style: TextStyle(fontSize: 11.5, color: AppColors.textHint),
+                ),
               ),
               const SizedBox(height: 14),
               _label('Links (up to ${UserProfile.maxLinks})'),

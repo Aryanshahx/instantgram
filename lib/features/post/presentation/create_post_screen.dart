@@ -17,6 +17,8 @@ import '../../editor/bake_filter.dart';
 import '../../editor/edit_models.dart';
 import '../../editor/filters.dart';
 import '../../editor/video_frames.dart';
+import '../../profile/data/user_repository.dart';
+import '../../stories/data/highlight_repository.dart';
 import '../data/post_repository.dart';
 import '../data/upload_queue.dart';
 import 'create_sheet.dart' show ComposeReply;
@@ -38,8 +40,12 @@ class CreatePostScreen extends StatefulWidget {
   final List<EditedMedia> items;
   final ComposeMode mode;
 
-  /// Music picked in the editor (posts and clips).
+  /// Music picked in the editor (v0.16: also moments).
   final PickedAudio? audio;
+
+  /// Tests: your highlights (else Firestore).
+  @visibleForTesting
+  static Stream<List<Highlight>> Function()? debugHighlights;
 
   @override
   State<CreatePostScreen> createState() => _CreatePostScreenState();
@@ -56,6 +62,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   bool _hideComments = false;
   bool _hideReposts = false;
   bool _hideShares = false;
+
+  /// v0.16: post / clip only on your profile (not in feeds).
+  bool _profileOnly = false;
+
+  /// v0.16: moments straight into a highlight ('' = normal moment).
+  String _hlId = '';
+  String _hlTitle = '';
 
   /// Clip cover chosen by the user (already filtered if from the video).
   File? _cover;
@@ -142,6 +155,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     hideComments: _hideComments,
     hideReposts: _hideReposts,
     hideShares: _hideShares,
+    profileOnly: _profileOnly,
+  );
+
+  PostOptions get _momentOptions => PostOptions(
+    audience: _audience,
+    highlightId: _hlId,
+    highlightTitle: _hlTitle,
   );
 
   Future<void> _share() async {
@@ -186,10 +206,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             : UploadTask.post,
         items: queued,
         caption: _isStory ? '' : _caption.text,
-        options: _isStory ? PostOptions(audience: _audience) : _options,
+        options: _isStory ? _momentOptions : _options,
         coverPath: !_isStory && _hasCover ? _cover?.path : null,
-        audioPath: _isStory ? null : widget.audio?.file.path,
-        audioName: _isStory ? '' : (widget.audio?.name ?? ''),
+        audioPath: widget.audio?.file.path,
+        audioName: widget.audio?.name ?? '',
         replyTo: _isStory ? null : _reply,
       );
       if (!mounted) return;
@@ -197,7 +217,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       Navigator.of(context).popUntil((r) => r.isFirst);
       messenger.showSnackBar(
         const SnackBar(
-          content: Text('Sharing in the background… you can keep using the app'),
+          content: Text(
+            'Sharing in the background… you can keep using the app',
+          ),
           duration: Duration(seconds: 2),
         ),
       );
@@ -463,15 +485,94 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
-  Widget _card(List<Widget> children) => Container(
-    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-    decoration: BoxDecoration(
+  // ------------------------------------------------- v0.16: highlight only
+
+  Future<void> _pickHighlight() async {
+    final stream =
+        (CreatePostScreen.debugHighlights ??
+        () => HighlightRepository.instance.watch(
+          UserRepository.instance.myUid,
+        ))();
+    final res = await showModalBottomSheet<(String, String)>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => _HighlightChooser(stream: stream),
+    );
+    if (res == null || !mounted) return;
+    setState(() {
+      _hlId = res.$1;
+      _hlTitle = res.$2;
+    });
+  }
+
+  Widget _shareTo() {
+    Widget choice(
+      String key,
+      IconData icon,
+      String title,
+      String sub,
+      bool on,
+      VoidCallback onTap,
+    ) => ListTile(
+      key: ValueKey(key),
+      dense: true,
+      enabled: _progress == null,
+      leading: Icon(icon, size: 22, color: on ? AppColors.lime : null),
+      title: Text(
+        title,
+        style: const TextStyle(
+          fontFamily: AppTheme.fontFamily,
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      subtitle: Text(
+        sub,
+        style: const TextStyle(color: AppColors.textSecondary),
+      ),
+      trailing: Icon(
+        on ? Icons.radio_button_checked : Icons.radio_button_off,
+        color: on ? AppColors.lime : AppColors.textHint,
+      ),
+      onTap: onTap,
+    );
+    return _card([
+      choice(
+        'share-to-moment',
+        Icons.amp_stories_outlined,
+        'Your moment',
+        'Shows for 24 hours',
+        _hlId.isEmpty,
+        () => setState(() {
+          _hlId = '';
+          _hlTitle = '';
+        }),
+      ),
+      choice(
+        'share-to-highlight',
+        Icons.bookmark_border,
+        _hlId.isEmpty ? 'Highlight only' : 'Highlight: $_hlTitle',
+        _hlId.isEmpty
+            ? 'Only on your profile highlights, not as a moment'
+            : 'Tap to choose another highlight',
+        _hlId.isNotEmpty,
+        _pickHighlight,
+      ),
+    ]);
+  }
+
+  // A Material (not a coloured box) so the list rows show their taps.
+  Widget _card(List<Widget> children) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+    child: Material(
       color: AppColors.surface,
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: AppColors.border),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: const BorderSide(color: AppColors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: children),
     ),
-    clipBehavior: Clip.antiAlias,
-    child: Column(children: children),
   );
 
   @override
@@ -582,44 +683,54 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         ),
                       ),
                     ),
-                  _card([
-                    ListTile(
-                      key: const ValueKey('audience'),
-                      dense: true,
-                      enabled: !uploading,
-                      leading: Icon(_audienceIcon(_audience), size: 22),
-                      title: const Text(
-                        'Audience',
-                        style: TextStyle(
-                          fontFamily: AppTheme.fontFamily,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            Audience.label(_audience),
-                            style: const TextStyle(
-                              color: AppColors.lime,
-                              fontWeight: FontWeight.w700,
-                            ),
+                  if (_isStory) _shareTo(),
+                  if (!(_isStory && _hlId.isNotEmpty))
+                    _card([
+                      ListTile(
+                        key: const ValueKey('audience'),
+                        dense: true,
+                        enabled: !uploading,
+                        leading: Icon(_audienceIcon(_audience), size: 22),
+                        title: const Text(
+                          'Audience',
+                          style: TextStyle(
+                            fontFamily: AppTheme.fontFamily,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
                           ),
-                          const Icon(Icons.chevron_right),
-                        ],
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              Audience.label(_audience),
+                              style: const TextStyle(
+                                color: AppColors.lime,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right),
+                          ],
+                        ),
+                        onTap: _pickAudience,
                       ),
-                      onTap: _pickAudience,
-                    ),
-                    if (!_isStory)
-                      _switch(
-                        'Also share to your moment',
-                        _alsoMoment,
-                        (v) => setState(() => _alsoMoment = v),
-                        icon: Icons.add_circle_outline,
-                        subtitle: 'Shows for 24 hours',
-                      ),
-                  ]),
+                      if (!_isStory)
+                        _switch(
+                          'Also share to your moment',
+                          _alsoMoment,
+                          (v) => setState(() => _alsoMoment = v),
+                          icon: Icons.add_circle_outline,
+                          subtitle: 'Shows for 24 hours',
+                        ),
+                      if (!_isStory)
+                        _switch(
+                          'Only on your profile',
+                          _profileOnly,
+                          (v) => setState(() => _profileOnly = v),
+                          icon: Icons.grid_on,
+                          subtitle: 'Not shown in feeds, Explore or Clips',
+                        ),
+                    ]),
                   if (!_isStory) ...[
                     const Padding(
                       padding: EdgeInsets.fromLTRB(28, 12, 16, 2),
@@ -834,6 +945,158 @@ class _CoverPickerScreenState extends State<CoverPickerScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// v0.16: choose one of your highlights, or make a new one.
+/// Pops (id, title).
+class _HighlightChooser extends StatefulWidget {
+  const _HighlightChooser({required this.stream});
+
+  final Stream<List<Highlight>> stream;
+
+  @override
+  State<_HighlightChooser> createState() => _HighlightChooserState();
+}
+
+class _HighlightChooserState extends State<_HighlightChooser> {
+  final _name = TextEditingController();
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  void _createNew() {
+    final title = Highlight.cleanTitle(_name.text);
+    Navigator.pop(context, (HighlightRepository.instance.newIdSafe(), title));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.7,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text(
+                  'Add to highlight',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        key: const ValueKey('hl-new-name'),
+                        controller: _name,
+                        maxLength: Highlight.maxTitle,
+                        decoration: const InputDecoration(
+                          counterText: '',
+                          hintText: 'New highlight name',
+                          isDense: true,
+                        ),
+                        onSubmitted: (_) => _createNew(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      key: const ValueKey('hl-new-create'),
+                      onPressed: _createNew,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.lime,
+                        foregroundColor: Colors.black,
+                        textStyle: const TextStyle(
+                          fontFamily: AppTheme.fontFamily,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      child: const Text('Create'),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Flexible(
+                child: StreamBuilder<List<Highlight>>(
+                  stream: widget.stream,
+                  builder: (context, snap) {
+                    final list = snap.data ?? const <Highlight>[];
+                    if (!snap.hasData && !snap.hasError) {
+                      return const Padding(
+                        padding: EdgeInsets.all(20),
+                        child: Center(
+                          child: CircularProgressIndicator(strokeWidth: 2.5),
+                        ),
+                      );
+                    }
+                    if (list.isEmpty) {
+                      return const Padding(
+                        padding: EdgeInsets.fromLTRB(20, 8, 20, 16),
+                        child: Text(
+                          'No highlights yet. Type a name and tap Create.',
+                          style: TextStyle(color: AppColors.textSecondary),
+                        ),
+                      );
+                    }
+                    return ListView(
+                      shrinkWrap: true,
+                      children: [
+                        for (final h in list)
+                          ListTile(
+                            key: ValueKey('hl-choose-${h.id}'),
+                            leading: CircleAvatar(
+                              backgroundColor: AppColors.surfaceHigh,
+                              backgroundImage: h.coverUrl.isEmpty
+                                  ? null
+                                  : NetworkImage(h.coverUrl),
+                              child: h.coverUrl.isEmpty
+                                  ? const Icon(Icons.bookmark, size: 18)
+                                  : null,
+                            ),
+                            title: Text(
+                              h.title,
+                              style: const TextStyle(
+                                fontFamily: AppTheme.fontFamily,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            subtitle: Text(
+                              h.items.length >= Highlight.maxItems
+                                  ? 'Full (${Highlight.maxItems})'
+                                  : '${h.items.length} '
+                                        '${h.items.length == 1 ? 'item' : 'items'}',
+                              style: const TextStyle(
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                            enabled: h.items.length < Highlight.maxItems,
+                            onTap: () =>
+                                Navigator.pop(context, (h.id, h.title)),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

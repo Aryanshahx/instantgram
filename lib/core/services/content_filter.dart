@@ -168,4 +168,11 @@ class ContentFilter {
 
   Stream<List<Post>> visiblePosts(Stream<List<Post>> source) =>
       watch<Post>(source, canSee);
+
+  /// v0.16: feeds, Explore, Clips and search leave out "profile only"
+  /// posts (they are still on the profile grid).
+  bool canSeeInFeeds(Post p) => canSee(p) && !p.profileOnly;
+
+  Stream<List<Post>> feedPosts(Stream<List<Post>> source) =>
+      watch<Post>(source, canSeeInFeeds);
 }

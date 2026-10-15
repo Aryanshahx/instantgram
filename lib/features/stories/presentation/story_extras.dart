@@ -27,6 +27,7 @@ class SeenByBar extends StatelessWidget {
       stream: views,
       builder: (context, snap) {
         final (people, re) = StoryInsights.totals(snap.data ?? const []);
+        final likes = StoryInsights.likes(snap.data ?? const []);
         return GestureDetector(
           key: const ValueKey('story-seen-by'),
           behavior: HitTestBehavior.opaque,
@@ -53,6 +54,17 @@ class SeenByBar extends StatelessWidget {
                   Text(
                     '$re',
                     key: const ValueKey('story-rewatches'),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ],
+                // v0.16: likes
+                if (likes > 0) ...[
+                  const SizedBox(width: 12),
+                  const Icon(Icons.favorite, size: 17, color: AppColors.like),
+                  const SizedBox(width: 4),
+                  Text(
+                    '$likes',
+                    key: const ValueKey('story-likes'),
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ],
@@ -95,12 +107,34 @@ class StoryViewersSheet extends StatefulWidget {
 class _StoryViewersSheetState extends State<StoryViewersSheet> {
   final _q = TextEditingController();
   bool _most = false;
+  bool _likedOnly = false;
 
   @override
   void dispose() {
     _q.dispose();
     super.dispose();
   }
+
+  Widget _stat(
+    IconData icon,
+    Color? color,
+    String text,
+    String key, {
+    bool bold = false,
+  }) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, size: bold ? 20 : 17, color: color),
+      const SizedBox(width: 5),
+      Text(
+        text,
+        key: ValueKey(key),
+        style: bold
+            ? const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)
+            : const TextStyle(color: AppColors.textSecondary),
+      ),
+    ],
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -109,8 +143,12 @@ class _StoryViewersSheetState extends State<StoryViewersSheet> {
       builder: (context, snap) {
         final all = snap.data ?? const <StoryView>[];
         final (people, re) = StoryInsights.totals(all);
+        final likes = StoryInsights.likes(all);
         final list = StoryInsights.sorted(
-          StoryInsights.search(all, _q.text),
+          StoryInsights.search(
+            _likedOnly ? all.where((v) => v.liked).toList() : all,
+            _q.text,
+          ),
           mostWatched: _most,
         );
         return Padding(
@@ -121,27 +159,35 @@ class _StoryViewersSheetState extends State<StoryViewersSheet> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Row(
-                  children: [
-                    const Icon(Icons.visibility_outlined, size: 20),
-                    const SizedBox(width: 6),
-                    Text(
-                      people == 1 ? '1 viewer' : '$people viewers',
-                      key: const ValueKey('viewers-total'),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 16,
+                // v0.16: wraps on small phones (viewers, rewatches, likes)
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    spacing: 14,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      _stat(
+                        Icons.visibility_outlined,
+                        null,
+                        people == 1 ? '1 viewer' : '$people viewers',
+                        'viewers-total',
+                        bold: true,
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.replay_rounded, size: 18),
-                    const SizedBox(width: 4),
-                    Text(
-                      re == 1 ? '1 rewatch' : '$re rewatches',
-                      key: const ValueKey('viewers-rewatches'),
-                      style: const TextStyle(color: AppColors.textSecondary),
-                    ),
-                  ],
+                      _stat(
+                        Icons.replay_rounded,
+                        null,
+                        re == 1 ? '1 rewatch' : '$re rewatches',
+                        'viewers-rewatches',
+                      ),
+                      _stat(
+                        Icons.favorite,
+                        AppColors.like,
+                        likes == 1 ? '1 like' : '$likes likes',
+                        'viewers-likes',
+                      ),
+                    ],
+                  ),
                 ),
               ),
               Padding(
@@ -179,6 +225,20 @@ class _StoryViewersSheetState extends State<StoryViewersSheet> {
                       visualDensity: VisualDensity.compact,
                       onSelected: (v) => setState(() => _most = v),
                     ),
+                    const SizedBox(width: 6),
+                    // v0.16: only people who liked it
+                    FilterChip(
+                      key: const ValueKey('viewers-liked'),
+                      label: const Icon(
+                        Icons.favorite,
+                        size: 16,
+                        color: AppColors.like,
+                      ),
+                      selected: _likedOnly,
+                      showCheckmark: false,
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (v) => setState(() => _likedOnly = v),
+                    ),
                   ],
                 ),
               ),
@@ -189,7 +249,11 @@ class _StoryViewersSheetState extends State<StoryViewersSheet> {
                     : list.isEmpty
                     ? Center(
                         child: Text(
-                          all.isEmpty ? 'No viewers yet' : 'No one found',
+                          all.isEmpty
+                              ? 'No viewers yet'
+                              : _likedOnly && likes == 0
+                              ? 'No likes yet'
+                              : 'No one found',
                           style: const TextStyle(
                             color: AppColors.textSecondary,
                           ),
@@ -228,35 +292,48 @@ class _ViewerTile extends StatelessWidget {
         '${StoryInsights.watchedLabel(v.count)}$when',
         style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
       ),
-      trailing: v.rewatches > 0
-          ? Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: AppColors.lime.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.replay_rounded,
-                    size: 14,
-                    color: AppColors.lime,
+      trailing: v.rewatches > 0 || v.liked
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (v.liked)
+                  Icon(
+                    Icons.favorite,
+                    key: ValueKey('viewer-liked-${v.uid}'),
+                    size: 18,
+                    color: AppColors.like,
                   ),
-                  const SizedBox(width: 3),
-                  Text(
-                    '${v.rewatches}',
-                    style: const TextStyle(
-                      color: AppColors.lime,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
+                if (v.liked && v.rewatches > 0) const SizedBox(width: 8),
+                if (v.rewatches > 0) _rewatchBadge(),
+              ],
             )
           : null,
       onTap: () => openProfile(context, v.uid),
+    );
+  }
+
+  Widget _rewatchBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: AppColors.lime.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.replay_rounded, size: 14, color: AppColors.lime),
+          const SizedBox(width: 3),
+          Text(
+            '${v.rewatches}',
+            style: const TextStyle(
+              color: AppColors.lime,
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -769,14 +769,16 @@ class _Header extends StatelessWidget {
               ),
               if (p.bio.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                Text(
-                  p.bio,
-                  key: const ValueKey('profile-bio'),
-                  // v0.15: the font the person chose
-                  style: BioFont.style(
-                    p.bioFont,
-                    const TextStyle(fontSize: 14.5, height: 1.35),
+                // v0.16: many fonts in one bio
+                Text.rich(
+                  TextSpan(
+                    children: FontRuns.spans(
+                      p.bio,
+                      p.bioFontRuns,
+                      const TextStyle(fontSize: 14.5, height: 1.35),
+                    ),
                   ),
+                  key: const ValueKey('profile-bio'),
                 ),
               ],
               if (p.allLinks.isNotEmpty) ...[

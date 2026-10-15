@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../widgets/bio_font.dart';
+
 /// One link on a profile (max [UserProfile.maxLinks]).
 class ProfileLink {
   const ProfileLink({required this.title, required this.url});
@@ -70,6 +72,7 @@ class UserProfile {
     this.country = '',
     this.links = const [],
     this.bioFont = '',
+    this.bioRuns = const [],
   });
 
   static const int maxLinks = 3;
@@ -102,6 +105,16 @@ class UserProfile {
 
   /// v0.15: font of the bio ('' = normal), see BioFont.
   final String bioFont;
+
+  /// v0.16: many fonts in the bio (`bioFonts: [{s, e, f}]`).
+  final List<FontRun> bioRuns;
+
+  /// Font parts to show: [bioRuns], or the old one font for all.
+  List<FontRun> get bioFontRuns => bioRuns.isNotEmpty
+      ? bioRuns
+      : BioFont.normalize(bioFont).isEmpty || bio.isEmpty
+      ? const []
+      : [FontRun(0, bio.length, BioFont.normalize(bioFont))];
 
   /// Links to show: [links], or the old single website.
   List<ProfileLink> get allLinks => links.isNotEmpty
@@ -140,6 +153,7 @@ class UserProfile {
                 .toList()
           : const [],
       bioFont: s(map['bioFont']),
+      bioRuns: FontRuns.parse(map['bioFonts'], s(map['bio']).length),
     );
   }
 

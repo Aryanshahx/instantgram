@@ -49,10 +49,14 @@ class TextLayer {
     this.pos = const Offset(0.5, 0.5),
     this.background = false,
     this.sticker = false,
+    this.font = '',
   });
 
   String text;
   Color color;
+
+  /// v0.16: font id (see BioFont, '' = app font).
+  String font;
 
   /// v0.12: an emoji sticker (no shadow, bigger).
   final bool sticker;

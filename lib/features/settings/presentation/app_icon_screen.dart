@@ -1,11 +1,18 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/services/app_icon.dart';
+import '../../../core/services/media_service.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../profile/presentation/profile_image_crop.dart';
 
 /// v0.15: Settings -> App icon.
 class AppIconScreen extends StatefulWidget {
   const AppIconScreen({super.key});
+
+  /// Tests: the picked (and cropped) picture.
+  @visibleForTesting
+  static Future<Uint8List?> Function()? debugPickPicture;
 
   @override
   State<AppIconScreen> createState() => _AppIconScreenState();
@@ -45,6 +52,74 @@ class _AppIconScreenState extends State<AppIconScreen> {
       );
   }
 
+  // ---------------------------------------------- v0.16: your own picture
+
+  Future<void> _custom() async {
+    if (_busy) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: const Text('Your own icon'),
+        content: const Text(
+          'Pick a photo. InstantGram adds a new icon with your photo to '
+          'your home screen.\n\nThe icon in your app list stays the same '
+          '(Android does not let apps use any photo there).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(d, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            key: const ValueKey('custom-icon-pick'),
+            onPressed: () => Navigator.pop(d, true),
+            child: const Text('Pick photo'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    Uint8List? bytes;
+    try {
+      if (AppIconScreen.debugPickPicture != null) {
+        bytes = await AppIconScreen.debugPickPicture!();
+      } else {
+        final f = await MediaService.instance.pickGalleryImage();
+        if (f == null || !mounted) return;
+        final cropped = await cropProfileImage(
+          context,
+          f,
+          ProfileImageSpec.photo,
+        );
+        if (cropped == null) return;
+        bytes = await cropped.readAsBytes();
+      }
+    } catch (e) {
+      _snack('Could not open your photos');
+      return;
+    }
+    if (bytes == null || !mounted) return;
+    setState(() => _busy = true);
+    final png = await compute(AppIcons.customIconPng, bytes);
+    final done = png != null && await AppIcons.pinCustom(png);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    _snack(
+      png == null
+          ? 'Could not read this picture'
+          : done
+          ? 'Check your home screen. If your phone asks, tap Add.'
+          : 'Your phone does not allow adding icons',
+    );
+  }
+
+  void _snack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final cur = _current;
@@ -76,12 +151,46 @@ class _AppIconScreenState extends State<AppIconScreen> {
                         selected: e.key == cur,
                         onTap: () => _pick(e.key),
                       ),
+                    // v0.16: your own picture (home-screen icon)
+                    GestureDetector(
+                      key: const ValueKey('app-icon-custom'),
+                      onTap: _custom,
+                      behavior: HitTestBehavior.opaque,
+                      child: Column(
+                        children: [
+                          Container(
+                            width: 76,
+                            height: 76,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: AppColors.surfaceHigh,
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: const Icon(
+                              Icons.add_photo_alternate_outlined,
+                              color: AppColors.lime,
+                              size: 30,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Custom',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w500,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 18),
                 const Text(
                   'Some phones close the app for a moment when the icon '
-                  'changes. Just open it again.',
+                  'changes. Just open it again.\n\nCustom = a new icon with '
+                  'your photo on your home screen. The app list icon stays '
+                  'the same.',
                   style: TextStyle(color: AppColors.textHint, fontSize: 12.5),
                 ),
               ],

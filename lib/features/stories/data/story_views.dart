@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -11,7 +12,11 @@ class StoryView {
     required this.photoUrl,
     required this.count,
     this.lastAt,
+    this.liked = false,
   });
+
+  /// v0.16: tapped the heart on the moment.
+  final bool liked;
 
   final String uid;
   final String username;
@@ -29,12 +34,60 @@ class StoryView {
     lastAt: m['lastAt'] is Timestamp
         ? (m['lastAt'] as Timestamp).toDate()
         : null,
+    liked: m['liked'] == true,
   );
+}
+
+/// v0.16: one live list for many listeners. Each new listener gets the
+/// newest list at once (a Firestore stream is "broadcast": a second
+/// listener got nothing until the next change, so the viewer list
+/// was stuck loading).
+class LatestValue<T> {
+  LatestValue(Stream<T> source) {
+    _sub = source.listen(
+      (v) {
+        _last = v;
+        _has = true;
+        for (final c in [..._out]) {
+          c.add(v);
+        }
+      },
+      onError: (Object e, StackTrace st) {
+        for (final c in [..._out]) {
+          c.addError(e, st);
+        }
+      },
+    );
+  }
+
+  late final StreamSubscription<T> _sub;
+  final List<MultiStreamController<T>> _out = [];
+  T? _last;
+  bool _has = false;
+
+  T? get value => _has ? _last : null;
+
+  Stream<T> get stream => Stream<T>.multi((c) {
+    if (_has) c.add(_last as T);
+    _out.add(c);
+    c.onCancel = () => _out.remove(c);
+  });
+
+  void dispose() {
+    _sub.cancel();
+    for (final c in [..._out]) {
+      c.close();
+    }
+    _out.clear();
+  }
 }
 
 /// Numbers for the "Seen by" bar and the viewer list.
 class StoryInsights {
   StoryInsights._();
+
+  /// v0.16: how many people liked it.
+  static int likes(List<StoryView> views) => views.where((v) => v.liked).length;
 
   /// (people, rewatches)
   static (int, int) totals(List<StoryView> views) {

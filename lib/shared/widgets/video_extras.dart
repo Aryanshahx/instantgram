@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 import 'stickers.dart';
 import '../../core/theme/app_theme.dart';
 import '../models/post.dart';
+import 'bio_font.dart';
 
 /// v0.12: one text / sticker drawn on a video frame [frameWidth] wide.
 /// Same look in the editor and when watching.
@@ -42,9 +43,10 @@ class OverlayView extends StatelessWidget {
       textAlign: TextAlign.center,
       textScaler: TextScaler.noScaling,
       style: TextStyle(
-        fontFamily: AppTheme.fontFamily,
+        // v0.16: the chosen font
+        fontFamily: BioFont.family(o.font, AppTheme.fontFamily),
         color: color,
-        fontSize: fs,
+        fontSize: fs * BioFont.factor(o.font),
         fontWeight: FontWeight.w800,
         height: 1.15,
         shadows: o.background

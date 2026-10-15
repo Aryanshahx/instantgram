@@ -26,6 +26,7 @@ import 'edit_models.dart';
 import 'filters.dart';
 import 'photo_render.dart';
 import 'video_frames.dart';
+import '../../shared/widgets/bio_font.dart';
 
 /// Opens the editor for picked media, then the share screen.
 Future<void> openEditor(
@@ -102,10 +103,10 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
   bool _videoReady = false;
   String? _videoError;
 
-  /// Music from phone storage (posts and clips only).
+  /// Music from phone storage (v0.16: posts, clips and moments).
   PickedAudio? _audio;
   bool _audioPlaying = false;
-  bool get _musicAllowed => widget.mode != ComposeMode.story;
+  bool get _musicAllowed => true;
 
   /// Voice over: posts and clips only (not moments).
   bool get _voiceAllowed => widget.mode != ComposeMode.story;
@@ -960,9 +961,11 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
       textAlign: TextAlign.center,
       textScaler: t.sticker ? TextScaler.noScaling : null,
       style: TextStyle(
-        fontFamily: AppTheme.fontFamily,
+        fontFamily: t.sticker
+            ? AppTheme.fontFamily
+            : BioFont.family(t.font, AppTheme.fontFamily),
         color: t.color,
-        fontSize: fs,
+        fontSize: t.sticker ? fs : fs * BioFont.factor(t.font),
         fontWeight: FontWeight.w800,
         height: 1.15,
         shadows: t.background || t.sticker
@@ -1081,6 +1084,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                 color: Color(o.color),
                 size: o.size,
                 background: o.background,
+                font: o.font,
               ),
       ),
     );
@@ -1099,6 +1103,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
         color: res.color.toARGB32(),
         size: res.size,
         background: res.background,
+        font: res.font,
         x: o?.x ?? 0.5,
         y: o?.y ?? 0.5,
         startMs: o?.startMs ?? 0,
@@ -1126,6 +1131,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                 color: layer.color,
                 size: layer.size,
                 background: layer.background,
+                font: layer.font,
               ),
       ),
     );
@@ -1146,6 +1152,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
             color: res.color,
             size: res.size,
             background: res.background,
+            font: res.font,
           ),
         );
       } else {
@@ -1153,7 +1160,8 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
           ..text = res.text.trim()
           ..color = res.color
           ..size = res.size
-          ..background = res.background;
+          ..background = res.background
+          ..font = res.font;
       }
     });
   }
@@ -3059,12 +3067,16 @@ class _TextResult {
     this.size = 0.08,
     this.background = false,
     this.delete = false,
+    this.font = '',
   });
   final String text;
   final Color color;
   final double size;
   final bool background;
   final bool delete;
+
+  /// v0.16: font id (see BioFont).
+  final String font;
 }
 
 const List<Color> _textColors = [
@@ -3093,6 +3105,7 @@ class _TextSheetState extends State<_TextSheet> {
   late Color _color = widget.initial?.color ?? Colors.white;
   late double _size = widget.initial?.size ?? 0.08;
   late bool _bg = widget.initial?.background ?? false;
+  late String _font = BioFont.normalize(widget.initial?.font);
 
   @override
   void dispose() {
@@ -3119,16 +3132,28 @@ class _TextSheetState extends State<_TextSheet> {
             maxLines: 3,
             minLines: 1,
             maxLength: 120,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              color: _color == Colors.black ? Colors.white : _color,
+            style: BioFont.style(
+              _font,
+              TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: _color == Colors.black ? Colors.white : _color,
+              ),
             ),
             decoration: const InputDecoration(
               hintText: 'Type something…',
               border: InputBorder.none,
             ),
           ),
+          // v0.16: fonts for moment / post texts
+          BioFontPicker(
+            key: const ValueKey('text-fonts'),
+            value: _font,
+            small: true,
+            keyPrefix: 'text-font',
+            onChanged: (v) => setState(() => _font = v),
+          ),
+          const SizedBox(height: 8),
           SizedBox(
             height: 36,
             child: ListView(
@@ -3197,6 +3222,7 @@ class _TextSheetState extends State<_TextSheet> {
                     color: _color,
                     size: _size,
                     background: _bg,
+                    font: _font,
                   ),
                 ),
                 style: FilledButton.styleFrom(

@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.15.0+11
+version: 0.16.0+12
 
 environment:
   sdk: ^3.12.2
@@ -138,6 +138,42 @@ flutter:
     - family: BioPixel
       fonts:
         - asset: assets/fonts/Bio-Pixel.ttf
+    - family: BioBangers
+      fonts:
+        - asset: assets/fonts/Bio-Bangers.ttf
+    - family: BioMarker
+      fonts:
+        - asset: assets/fonts/Bio-Marker.ttf
+    - family: BioKaushan
+      fonts:
+        - asset: assets/fonts/Bio-Kaushan.ttf
+    - family: BioVibes
+      fonts:
+        - asset: assets/fonts/Bio-Vibes.ttf
+    - family: BioRighteous
+      fonts:
+        - asset: assets/fonts/Bio-Righteous.ttf
+    - family: BioOrbitron
+      fonts:
+        - asset: assets/fonts/Bio-Orbitron.ttf
+    - family: BioAmatic
+      fonts:
+        - asset: assets/fonts/Bio-Amatic.ttf
+    - family: BioNeon
+      fonts:
+        - asset: assets/fonts/Bio-Neon.ttf
+    - family: BioComic
+      fonts:
+        - asset: assets/fonts/Bio-Comic.ttf
+    - family: BioShadows
+      fonts:
+        - asset: assets/fonts/Bio-Shadows.ttf
+    - family: BioFatface
+      fonts:
+        - asset: assets/fonts/Bio-Fatface.ttf
+    - family: BioSpooky
+      fonts:
+        - asset: assets/fonts/Bio-Spooky.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

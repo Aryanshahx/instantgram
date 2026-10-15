@@ -5,7 +5,11 @@ import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.BitmapFactory
 import android.graphics.Rect
+import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -18,6 +22,7 @@ import io.flutter.plugin.common.MethodChannel
 // v0.12: + activity channel (likes, comments, followers, views).
 // v0.14: + gesture exclusion for the editor timeline.
 // v0.15: + app icon switch (activity aliases).
+// v0.16: + custom icon = a home-screen shortcut with your own picture.
 class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -85,12 +90,46 @@ class MainActivity : FlutterActivity() {
                             setIcon(call.argument<String>("icon") ?: "default")
                             result.success(currentIcon())
                         }
+                        // v0.16: custom icon (pinned shortcut)
+                        "canPinShortcut" -> result.success(canPin())
+                        "pinShortcut" -> result.success(
+                            pinShortcut(
+                                call.argument<ByteArray>("png"),
+                                call.argument<String>("label") ?: "InstantGram"
+                            )
+                        )
                         else -> result.notImplemented()
                     }
                 } catch (e: Exception) {
                     result.error("settings", e.message, null)
                 }
             }
+    }
+
+    private fun canPin(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        val sm = getSystemService(ShortcutManager::class.java) ?: return false
+        return sm.isRequestPinShortcutSupported
+    }
+
+    /** Asks the launcher to add a home-screen icon with [png] (square). */
+    private fun pinShortcut(png: ByteArray?, label: String): Boolean {
+        if (png == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        val sm = getSystemService(ShortcutManager::class.java) ?: return false
+        if (!sm.isRequestPinShortcutSupported) return false
+        val bmp = BitmapFactory.decodeByteArray(png, 0, png.size) ?: return false
+        val open = (packageManager.getLaunchIntentForPackage(packageName)
+            ?: Intent(this, MainActivity::class.java)).apply {
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val info = ShortcutInfo.Builder(this, "custom_icon_" + System.currentTimeMillis())
+            .setShortLabel(label.take(20).ifBlank { "InstantGram" })
+            .setIcon(Icon.createWithAdaptiveBitmap(bmp))
+            .setIntent(open)
+            .build()
+        return sm.requestPinShortcut(info, null)
     }
 
     private val icons = listOf("default", "night", "sunset", "ocean", "berry", "mono")
