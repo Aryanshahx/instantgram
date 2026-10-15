@@ -865,6 +865,16 @@ class Story {
 
   bool get isVideo => type == video;
 
+  /// v0.15: the copy of this moment kept inside a highlight.
+  Map<String, dynamic> toHighlightItem() => {
+    'id': id,
+    'type': type,
+    'mediaUrl': mediaUrl,
+    if (durationMs > 0) 'durationMs': durationMs,
+    'createdAt': Timestamp.fromDate(createdAt),
+    if (isVideo) ...edits.toMap(),
+  };
+
   factory Story.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
       Story.fromMap(doc.id, doc.data() ?? const <String, dynamic>{});
 

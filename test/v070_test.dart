@@ -695,6 +695,12 @@ void main() {
       // links
       expect(find.text('YouTube'), findsOneWidget);
       final add = find.byKey(const ValueKey('add-link'));
+      // v0.15: the bio font picker moved the links down
+      await t.scrollUntilVisible(
+        add,
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await t.ensureVisible(add);
       await t.tap(add);
       await _frames(t, 2);

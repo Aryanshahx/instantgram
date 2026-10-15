@@ -69,6 +69,7 @@ class UserProfile {
     this.isPrivate = false,
     this.country = '',
     this.links = const [],
+    this.bioFont = '',
   });
 
   static const int maxLinks = 3;
@@ -98,6 +99,9 @@ class UserProfile {
 
   /// Up to 3 links with a title (v0.7).
   final List<ProfileLink> links;
+
+  /// v0.15: font of the bio ('' = normal), see BioFont.
+  final String bioFont;
 
   /// Links to show: [links], or the old single website.
   List<ProfileLink> get allLinks => links.isNotEmpty
@@ -135,6 +139,7 @@ class UserProfile {
                 .take(maxLinks)
                 .toList()
           : const [],
+      bioFont: s(map['bioFont']),
     );
   }
 

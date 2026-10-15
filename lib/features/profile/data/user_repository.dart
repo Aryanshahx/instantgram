@@ -126,8 +126,10 @@ class UserRepository {
     required String bio,
     String? website,
     List<ProfileLink>? links,
+    String? bioFont,
   }) {
     final data = <String, dynamic>{'name': name.trim(), 'bio': bio.trim()};
+    if (bioFont != null) data['bioFont'] = bioFont;
     if (links != null) {
       final clean = links
           .where((l) => l.url.isNotEmpty)

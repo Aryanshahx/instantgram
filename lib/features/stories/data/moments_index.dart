@@ -130,13 +130,19 @@ class MomentsIndex {
 Future<void> openStoryViewer(
   BuildContext context,
   List<StoryGroup> groups,
-  int index,
-) {
+  int index, {
+  bool recordViews = true,
+  String? title,
+}) {
   return Navigator.of(context).push(
     PageRouteBuilder<void>(
       opaque: false,
-      pageBuilder: (_, a, b) =>
-          StoryViewerScreen(groups: groups, initialGroup: index),
+      pageBuilder: (_, a, b) => StoryViewerScreen(
+        groups: groups,
+        initialGroup: index,
+        recordViews: recordViews,
+        title: title,
+      ),
       transitionsBuilder: (_, a, b, child) =>
           FadeTransition(opacity: a, child: child),
     ),

@@ -19,6 +19,7 @@ import '../../../shared/widgets/user_tile.dart';
 import '../../profile/data/user_repository.dart';
 import '../data/chat_repository.dart';
 import 'chat_detail_screen.dart';
+import 'chat_peek.dart';
 import '../data/typing_tracker.dart';
 import '../../../shared/widgets/verified_badge.dart';
 
@@ -28,11 +29,14 @@ void openChat(BuildContext context, UserProfile other) {
 }
 
 class ChatsScreen extends StatefulWidget {
-  const ChatsScreen({super.key, this.chats, this.myUid});
+  const ChatsScreen({super.key, this.chats, this.myUid, this.previewMessages});
 
   /// Tests.
   final Stream<List<Chat>>? chats;
   final String? myUid;
+
+  /// Tests: messages for the long-press preview (v0.15).
+  final Stream<List<Message>> Function(String chatId)? previewMessages;
 
   @override
   State<ChatsScreen> createState() => _ChatsScreenState();
@@ -98,50 +102,66 @@ class _ChatsScreenState extends State<ChatsScreen> {
     final pinned = p.isPinned(c.id);
     final muted = p.isMuted(c.id);
     final calls = p.callsMuted(other);
+    // v0.15: peek at the messages (no "seen")
+    final peek =
+        widget.previewMessages ??
+        (widget.chats == null ? ChatRepository.instance.messages : null);
+    final h = MediaQuery.of(context).size.height;
     final choice = await showModalBottomSheet<String>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: AppColors.surface,
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Text(
-                name,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
-            ),
-            _MenuItem(
-              id: 'pin',
-              icon: pinned ? Icons.push_pin_outlined : Icons.push_pin,
-              label: pinned ? 'Unpin chat' : 'Pin chat',
-            ),
-            _MenuItem(
-              id: 'mute',
-              icon: muted
-                  ? Icons.notifications_active_outlined
-                  : Icons.notifications_off_outlined,
-              label: muted ? 'Unmute messages' : 'Mute messages',
-            ),
-            _MenuItem(
-              id: 'calls',
-              icon: calls
-                  ? Icons.phone_in_talk_outlined
-                  : Icons.phone_disabled_outlined,
-              label: calls ? 'Unmute calls' : 'Mute calls',
-            ),
-            const _MenuItem(
-              id: 'delete',
-              icon: Icons.delete_outline,
-              label: 'Delete chat',
-              danger: true,
-            ),
-            const SizedBox(height: 6),
-          ],
+              if (peek != null)
+                ChatPeek(
+                  messages: peek(c.id),
+                  me: me,
+                  clearedAt: p.clearedAt(c.id),
+                  seenBefore: c.seenAt(me),
+                  maxHeight: (h * 0.32).clamp(140.0, 280.0),
+                ),
+              _MenuItem(
+                id: 'pin',
+                icon: pinned ? Icons.push_pin_outlined : Icons.push_pin,
+                label: pinned ? 'Unpin chat' : 'Pin chat',
+              ),
+              _MenuItem(
+                id: 'mute',
+                icon: muted
+                    ? Icons.notifications_active_outlined
+                    : Icons.notifications_off_outlined,
+                label: muted ? 'Unmute messages' : 'Mute messages',
+              ),
+              _MenuItem(
+                id: 'calls',
+                icon: calls
+                    ? Icons.phone_in_talk_outlined
+                    : Icons.phone_disabled_outlined,
+                label: calls ? 'Unmute calls' : 'Mute calls',
+              ),
+              const _MenuItem(
+                id: 'delete',
+                icon: Icons.delete_outline,
+                label: 'Delete chat',
+                danger: true,
+              ),
+              const SizedBox(height: 6),
+            ],
+          ),
         ),
       ),
     );

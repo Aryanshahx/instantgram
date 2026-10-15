@@ -3,6 +3,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/theme/app_colors.dart';
+
 /// v0.13: built-in sticker pack (`assets/stickers/ID.png`, work offline).
 /// v0.14: 125 stickers, 35 of them animated (`ID.webp`), with search.
 ///
@@ -296,7 +298,7 @@ class StickerPack {
   }
 
   /// New sticker size (part of the frame width).
-  static const double defaultSize = 0.32;
+  static const double defaultSize = 0.45;
   static const double minSize = 0.08;
   static const double maxSize = 0.95;
 
@@ -342,6 +344,87 @@ class StickerImage extends StatelessWidget {
       filterQuality: FilterQuality.medium,
       gaplessPlayback: true,
       errorBuilder: (c, e, s) => SizedBox(width: width, height: width * 0.5),
+    );
+  }
+}
+
+/// v0.15: the big sticker picker (search + 4 big stickers per row).
+/// Returns the chosen sticker id.
+class StickerSheet extends StatefulWidget {
+  const StickerSheet({super.key});
+
+  @override
+  State<StickerSheet> createState() => _StickerSheetState();
+}
+
+class _StickerSheetState extends State<StickerSheet> {
+  String _q = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final found = StickerPack.search(_q);
+    final h = MediaQuery.of(context).size.height;
+    return SizedBox(
+      height: h * 0.72,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+            child: TextField(
+              key: const ValueKey('sticker-search'),
+              onChanged: (v) => setState(() => _q = v),
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                hintText: 'Search stickers',
+                isDense: true,
+                prefixIcon: const Icon(Icons.search, size: 20),
+                filled: true,
+                fillColor: AppColors.surface,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(22),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: found.isEmpty
+                ? const Center(
+                    child: Text(
+                      'No stickers found',
+                      style: TextStyle(color: AppColors.textSecondary),
+                    ),
+                  )
+                : LayoutBuilder(
+                    builder: (context, box) {
+                      final cell = (box.maxWidth - 24) / 4;
+                      return GridView.builder(
+                        key: const ValueKey('sticker-grid'),
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 4,
+                              mainAxisSpacing: 6,
+                              crossAxisSpacing: 6,
+                            ),
+                        itemCount: found.length,
+                        itemBuilder: (context, i) => InkWell(
+                          key: ValueKey('sticker-${found[i]}'),
+                          borderRadius: BorderRadius.circular(14),
+                          onTap: () => Navigator.pop(context, found[i]),
+                          child: Center(
+                            child: StickerImage(
+                              text: StickerPack.textFor(found[i]),
+                              width: cell - 10,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }

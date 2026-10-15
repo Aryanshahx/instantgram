@@ -8,6 +8,8 @@ import '../../../core/services/media_service.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/models/user_profile.dart';
 import '../../profile/data/user_repository.dart';
+import 'highlight_repository.dart';
+import 'story_views.dart';
 
 /// Max length of a video moment.
 const int kMomentMaxMs = 60 * 1000;
@@ -113,8 +115,42 @@ class StoryRepository {
 
   Future<void> delete(Story story) async {
     await _stories.doc(story.id).delete();
-    if (story.mediaKey.isNotEmpty) MediaService.instance.delete(story.mediaKey);
+    if (story.mediaKey.isEmpty) return;
+    // v0.15: a moment kept in a highlight keeps its file
+    final kept = await HighlightRepository.instance
+        .isInHighlight(story.id)
+        .catchError((Object _) => true);
+    if (!kept) MediaService.instance.delete(story.mediaKey);
   }
+
+  // ---------------------------------------------------------------- v0.15
+
+  /// You watched [st] (again): +1 for you in its viewer list. Not for your
+  /// own moments, and not for previews.
+  Future<void> recordView(Story st) async {
+    final uid = UserRepository.instance.myUid;
+    if (st.authorId == uid || st.id.isEmpty) return;
+    final me = await UserRepository.instance.me();
+    await _stories.doc(st.id).collection('views').doc(uid).set({
+      'uid': uid,
+      'username': me.username,
+      'photoUrl': me.photoUrl,
+      'count': FieldValue.increment(1),
+      'lastAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Who watched your moment [storyId] (only you can read it).
+  Stream<List<StoryView>> views(String storyId) => _stories
+      .doc(storyId)
+      .collection('views')
+      .limit(500)
+      .snapshots()
+      .map(
+        (s) => StoryInsights.sorted([
+          for (final d in s.docs) StoryView.fromMap(d.id, d.data()),
+        ]),
+      );
 
   /// Active (last 24h) moments grouped by user, oldest first inside a group.
   Stream<List<StoryGroup>> active() {

@@ -1,3 +1,6 @@
+import '../../stories/presentation/highlights.dart';
+import '../../../shared/widgets/bio_font.dart';
+
 import 'dart:async';
 
 import '../../../core/services/net_priority.dart';
@@ -350,6 +353,7 @@ class _ProfileViewState extends State<ProfileView>
               onPostsTap: () => _tabs.animateTo(0),
               onFollowersTap: hidden ? null : () => _openList(true),
               onFollowingTap: hidden ? null : () => _openList(false),
+              showHighlights: !hidden,
             ),
           ),
           SliverPersistentHeader(
@@ -566,7 +570,11 @@ class _Header extends StatelessWidget {
     required this.onPostsTap,
     required this.onFollowersTap,
     required this.onFollowingTap,
+    this.showHighlights = true,
   });
+
+  /// v0.15: highlights row (not for blocked / private accounts).
+  final bool showHighlights;
 
   final UserProfile profile;
   final bool isMe;
@@ -763,7 +771,12 @@ class _Header extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text(
                   p.bio,
-                  style: const TextStyle(fontSize: 14.5, height: 1.35),
+                  key: const ValueKey('profile-bio'),
+                  // v0.15: the font the person chose
+                  style: BioFont.style(
+                    p.bioFont,
+                    const TextStyle(fontSize: 14.5, height: 1.35),
+                  ),
                 ),
               ],
               if (p.allLinks.isNotEmpty) ...[
@@ -822,8 +835,8 @@ class _Header extends StatelessWidget {
                   onPressed: onDashboard,
                 ),
                 const SizedBox(height: 14),
-                _NewHighlight(onTap: onNewStory),
-                const SizedBox(height: 10),
+                // v0.15: the plus ring makes a HIGHLIGHT
+                HighlightsRow(uid: p.uid, isMe: true),
               ] else if (blocked) ...[
                 IgOutlineButton(
                   label: 'Unblock',
@@ -834,6 +847,7 @@ class _Header extends StatelessWidget {
               ] else ...[
                 _FollowRow(profile: p),
                 const SizedBox(height: 14),
+                if (showHighlights) HighlightsRow(uid: p.uid, isMe: false),
               ],
             ],
           ),
@@ -1102,38 +1116,6 @@ class _Stat extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _NewHighlight extends StatelessWidget {
-  const _NewHighlight({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFF2D3035),
-              border: Border.all(color: const Color(0xFF808186), width: 1.5),
-            ),
-            child: const Icon(Icons.add, size: 26),
-          ),
-          const SizedBox(height: 5),
-          const Text(
-            'New',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-          ),
-        ],
       ),
     );
   }

@@ -15,6 +15,8 @@ import '../../../shared/widgets/video_extras.dart';
 import '../../editor/filters.dart';
 import '../../profile/data/user_repository.dart';
 import '../data/story_repository.dart';
+import '../data/story_views.dart';
+import 'story_extras.dart';
 import '../../../core/services/video_cache.dart';
 import '../../../shared/widgets/verified_badge.dart';
 
@@ -25,10 +27,18 @@ class StoryViewerScreen extends StatefulWidget {
     super.key,
     required this.groups,
     this.initialGroup = 0,
+    this.recordViews = true,
+    this.title,
   });
 
   final List<StoryGroup> groups;
   final int initialGroup;
+
+  /// v0.15: false for highlights (no views, no "seen", no delete).
+  final bool recordViews;
+
+  /// v0.15: highlight name shown next to the username.
+  final String? title;
 
   @override
   State<StoryViewerScreen> createState() => _StoryViewerScreenState();
@@ -39,7 +49,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
   static const _photoTime = Duration(seconds: 5);
 
   late int _g = widget.initialGroup.clamp(0, widget.groups.length - 1);
-  late int _s = _firstUnseen(widget.groups[_g]);
+  late int _s = widget.recordViews ? _firstUnseen(widget.groups[_g]) : 0;
   late final AnimationController _timer =
       AnimationController(vsync: this, duration: _photoTime)
         ..addStatusListener((st) {
@@ -77,7 +87,13 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
   Future<void> _show() async {
     final id = ++_loadId;
     final st = _story;
-    AppSettings.instance.markSeen(st.id);
+    if (widget.recordViews) {
+      AppSettings.instance.markSeen(st.id);
+      // v0.15: every watch counts (rewatches too) — not for my own
+      if (st.authorId != UserRepository.instance.myUid) {
+        StoryRepository.instance.recordView(st).catchError((Object _) {});
+      }
+    }
     _timer.stop();
     _timer.value = 0;
     final old = _video;
@@ -202,7 +218,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     } else if (_g < widget.groups.length - 1) {
       setState(() {
         _g++;
-        _s = _firstUnseen(_group);
+        _s = widget.recordViews ? _firstUnseen(_group) : 0;
       });
       _show();
     } else {
@@ -220,6 +236,24 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
       });
     }
     _show();
+  }
+
+  // v0.15: who watched my moment
+  Stream<List<StoryView>>? _views;
+  String _viewsFor = '';
+
+  Stream<List<StoryView>> _viewsOf(Story st) {
+    if (_views == null || _viewsFor != st.id) {
+      _viewsFor = st.id;
+      _views = StoryRepository.instance.views(st.id);
+    }
+    return _views!;
+  }
+
+  Future<void> _openViewers() async {
+    _pause();
+    await showStoryViewers(context, _viewsOf(_story));
+    if (mounted) _resume();
   }
 
   Future<void> _delete() async {
@@ -290,6 +324,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
   @override
   Widget build(BuildContext context) {
     final mine = _group.authorId == UserRepository.instance.myUid;
+    final live = widget.recordViews;
     return Scaffold(
       backgroundColor: Colors.black,
       body: GestureDetector(
@@ -300,7 +335,10 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
         onLongPressStart: (_) => _pause(),
         onLongPressEnd: (_) => _resume(),
         onVerticalDragEnd: (d) {
-          if ((d.primaryVelocity ?? 0) > 300) Navigator.of(context).maybePop();
+          final v = d.primaryVelocity ?? 0;
+          if (v > 300) Navigator.of(context).maybePop();
+          // v0.15: swipe up on my moment = viewer list
+          if (v < -300 && mine && live) _openViewers();
         },
         child: Stack(
           fit: StackFit.expand,
@@ -380,6 +418,17 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                           ),
                         ),
                         const SizedBox(width: 8),
+                        if (widget.title != null) ...[
+                          Flexible(
+                            child: Text(
+                              widget.title!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
                         Text(
                           timeAgo(_story.createdAt),
                           style: const TextStyle(color: Colors.white70),
@@ -393,7 +442,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                           ),
                         ],
                         const Spacer(),
-                        if (mine)
+                        if (mine && live)
                           IconButton(
                             onPressed: _delete,
                             icon: const Icon(Icons.delete_outline),
@@ -408,6 +457,25 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                 ),
               ),
             ),
+            if (mine && live)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: Center(
+                      child: SeenByBar(
+                        key: ValueKey('seen-${_story.id}'),
+                        views: _viewsOf(_story),
+                        onTap: _openViewers,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

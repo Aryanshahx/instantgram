@@ -1,3 +1,5 @@
+import '../../../shared/widgets/bio_font.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -74,6 +76,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late final _name = TextEditingController(text: widget.profile.name);
   late final _username = TextEditingController(text: widget.profile.username);
   late final _bio = TextEditingController(text: widget.profile.bio);
+  late String _bioFont = BioFont.normalize(widget.profile.bioFont);
   late final List<_LinkRow> _links = [
     for (final l in widget.profile.allLinks.take(UserProfile.maxLinks))
       _LinkRow(l),
@@ -243,6 +246,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           name: _name.text,
           bio: _bio.text,
           links: links,
+          bioFont: _bioFont != BioFont.normalize(widget.profile.bioFont)
+              ? _bioFont
+              : null,
         );
       } catch (e) {
         if (!_isDenied(e)) rethrow;
@@ -386,6 +392,34 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 maxLines: 4,
                 maxLength: 300,
                 textCapitalization: TextCapitalization.sentences,
+              ),
+              // v0.15: custom font for the bio
+              _label('Bio font'),
+              BioFontPicker(
+                value: _bioFont,
+                onChanged: (v) => setState(() => _bioFont = v),
+              ),
+              ValueListenableBuilder<TextEditingValue>(
+                valueListenable: _bio,
+                builder: (context, v, _) => v.text.trim().isEmpty
+                    ? const SizedBox(height: 6)
+                    : Container(
+                        key: const ValueKey('bio-preview'),
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(top: 10),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          v.text.trim(),
+                          style: BioFont.style(
+                            _bioFont,
+                            const TextStyle(fontSize: 14.5, height: 1.35),
+                          ),
+                        ),
+                      ),
               ),
               const SizedBox(height: 14),
               _label('Links (up to ${UserProfile.maxLinks})'),

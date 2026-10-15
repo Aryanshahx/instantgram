@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../../../../shared/models/post.dart';
 import '../../../../shared/models/user_profile.dart';
 import '../../../../shared/widgets/avatar.dart';
+import '../../../../core/services/app_settings.dart';
 import '../../../stories/data/moments_index.dart';
+import '../../../stories/presentation/story_extras.dart';
 
 class StoryBar extends StatelessWidget {
   const StoryBar({
@@ -62,6 +64,18 @@ class StoryBar extends StatelessWidget {
               return _StoryItem(
                 label: g.username,
                 onTap: () => open(g),
+                // v0.15: hold = small preview (not counted as a view)
+                onLongPress: () => showStoryPreview(
+                  context,
+                  g,
+                  index: () {
+                    final i = g.stories.indexWhere(
+                      (s) => !AppSettings.instance.isSeen(s.id),
+                    );
+                    return i < 0 ? 0 : i;
+                  }(),
+                  onOpen: () => open(g),
+                ),
                 child: Avatar(
                   url: g.photoUrl,
                   name: g.username,
@@ -79,16 +93,23 @@ class StoryBar extends StatelessWidget {
 }
 
 class _StoryItem extends StatelessWidget {
-  const _StoryItem({required this.label, required this.child, this.onTap});
+  const _StoryItem({
+    required this.label,
+    required this.child,
+    this.onTap,
+    this.onLongPress,
+  });
 
   final String label;
   final Widget child;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onLongPress,
       behavior: HitTestBehavior.opaque,
       child: SizedBox(
         width: 74,

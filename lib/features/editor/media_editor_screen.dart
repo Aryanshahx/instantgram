@@ -132,8 +132,6 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
   double _tlBasePx = 0; // px per ms when the whole video fits
   double _tlPx = 0; // px per ms now (with zoom)
   int? _selSeg;
-  String _stickerQuery = '';
-  bool _stickerAnimated = false;
   bool _tlUser = false;
   bool _tlWasPlaying = false;
   DateTime _tlSeekAt = DateTime(2000);
@@ -1194,18 +1192,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                     VideoPlayer(c),
                   ),
                   _overlaysOnCanvas(item, c),
-                  ValueListenableBuilder<VideoPlayerValue>(
-                    valueListenable: c,
-                    builder: (context, v, _) => v.isPlaying
-                        ? const SizedBox.shrink()
-                        : Center(
-                            child: Icon(
-                              Icons.play_arrow_rounded,
-                              size: 72,
-                              color: Colors.white.withValues(alpha: 0.9),
-                            ),
-                          ),
-                  ),
+                  // v0.15: play / pause is next to the timeline (not here)
                   if (item.muted)
                     const Positioned(
                       right: 10,
@@ -1423,6 +1410,17 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
     );
   }
 
+  /// v0.15: big sticker sheet (search + 4 big stickers per row).
+  Future<void> _openStickerSheet() async {
+    final id = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.background,
+      builder: (ctx) => const StickerSheet(),
+    );
+    if (id != null && mounted) _addSticker(id);
+  }
+
   Widget _stickersPanel() {
     final sel = _selOverlay;
     final stickerSel =
@@ -1430,91 +1428,19 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
         sel != null &&
         sel < _item.overlays.length &&
         _item.overlays[sel].isSticker;
-    final found = StickerPack.search(
-      _stickerQuery,
-      animatedOnly: _stickerAnimated,
-    );
     return Column(
       children: [
-        // v0.14: search + "moving" filter
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
-          child: Row(
-            children: [
-              Expanded(
-                child: SizedBox(
-                  height: 36,
-                  child: TextField(
-                    key: const ValueKey('sticker-search'),
-                    onChanged: (v) => setState(() => _stickerQuery = v),
-                    style: const TextStyle(fontSize: 14),
-                    textInputAction: TextInputAction.search,
-                    decoration: InputDecoration(
-                      hintText: 'Search stickers',
-                      isDense: true,
-                      prefixIcon: const Icon(Icons.search, size: 18),
-                      prefixIconConstraints: const BoxConstraints(minWidth: 34),
-                      contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                      filled: true,
-                      fillColor: AppColors.surface,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(18),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              FilterChip(
-                key: const ValueKey('sticker-animated'),
-                label: const Text('Moving'),
-                selected: _stickerAnimated,
-                visualDensity: VisualDensity.compact,
-                selectedColor: AppColors.lime.withValues(alpha: 0.25),
-                onSelected: (v) => setState(() => _stickerAnimated = v),
-              ),
-            ],
+        Expanded(
+          child: Center(
+            child: FilledButton.icon(
+              key: const ValueKey('sticker-open'),
+              style: _limeButton,
+              onPressed: _openStickerSheet,
+              icon: const Icon(Icons.emoji_emotions_outlined),
+              label: const Text('Add a sticker'),
+            ),
           ),
         ),
-        if (found.isEmpty)
-          const Expanded(
-            child: Center(
-              child: Text(
-                'No stickers found',
-                style: TextStyle(color: AppColors.textSecondary),
-              ),
-            ),
-          )
-        else
-          Expanded(
-            child: GridView.count(
-              key: const ValueKey('sticker-grid'),
-              crossAxisCount: 2,
-              scrollDirection: Axis.horizontal,
-              childAspectRatio: 0.82,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              mainAxisSpacing: 4,
-              crossAxisSpacing: 4,
-              children: [
-                for (final id in found)
-                  InkWell(
-                    key: ValueKey('sticker-$id'),
-                    borderRadius: BorderRadius.circular(10),
-                    onTap: () => _addSticker(id),
-                    child: Padding(
-                      padding: const EdgeInsets.all(3),
-                      child: Center(
-                        child: StickerImage(
-                          text: StickerPack.textFor(id),
-                          width: 64,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
         SizedBox(
           height: 34,
           child: stickerSel
@@ -1981,7 +1907,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
       _tlSeek(force: true);
       // wait for the player to get there (no jump back)
       _tlHoldUntil = DateTime.now().add(const Duration(milliseconds: 450));
-      if (_tlWasPlaying && !_recording) c?.play();
+      // v0.15: touching the timeline pauses (press play to go on)
     }
     return false;
   }
@@ -1995,6 +1921,12 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
 
   void _tlPointerDown(PointerDownEvent e) {
     _tlPtrs[e.pointer] = e.localPosition;
+    // v0.15: touching the timeline pauses the video
+    final c = _video;
+    if (c != null && c.value.isPlaying && !_recording) {
+      c.pause();
+      _tlWasPlaying = false;
+    }
     if (_tlPtrs.length == 2 && _tlBasePx > 0) {
       _pinchDist = _pinchSpan();
       _pinchZoom = _tlZoom;
@@ -2673,8 +2605,36 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
             padding: const EdgeInsets.symmetric(horizontal: _tlPad - 6),
             child: Row(
               children: [
+                // v0.15: play / pause next to the timeline
+                IconButton(
+                  key: const ValueKey('tl-play'),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 34,
+                    height: 34,
+                  ),
+                  onPressed: () {
+                    if (v.isPlaying) {
+                      c.pause();
+                    } else {
+                      final end = item.endMs;
+                      if (pos >= end - 80) {
+                        c.seekTo(Duration(milliseconds: item.trimStart));
+                      }
+                      c.play();
+                    }
+                  },
+                  icon: Icon(
+                    v.isPlaying
+                        ? Icons.pause_circle_filled_rounded
+                        : Icons.play_circle_fill_rounded,
+                    size: 30,
+                    color: AppColors.lime,
+                  ),
+                ),
                 Padding(
-                  padding: const EdgeInsets.only(left: 6),
+                  padding: const EdgeInsets.only(left: 2),
                   child: Text(
                     '${durationLabel(played)} / ${durationLabel(item.playedMs)}',
                     key: const ValueKey('tl-time'),
@@ -2805,7 +2765,11 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                               : 66,
                           child: InkWell(
                             key: ValueKey('tool-${t.name}'),
-                            onTap: () => setState(() => _tool = t),
+                            onTap: () {
+                              setState(() => _tool = t);
+                              // v0.15: stickers open big, at once
+                              if (t == _Tool.stickers) _openStickerSheet();
+                            },
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [

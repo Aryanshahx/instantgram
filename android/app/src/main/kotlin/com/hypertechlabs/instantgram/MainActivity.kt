@@ -2,7 +2,9 @@ package com.hypertechlabs.instantgram
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
@@ -15,6 +17,7 @@ import io.flutter.plugin.common.MethodChannel
 // v0.11: notification channels (messages, muted calls) + settings pages.
 // v0.12: + activity channel (likes, comments, followers, views).
 // v0.14: + gesture exclusion for the editor timeline.
+// v0.15: + app icon switch (activity aliases).
 class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,12 +79,55 @@ class MainActivity : FlutterActivity() {
                             }
                             result.success(null)
                         }
+                        // v0.15: app icon
+                        "getAppIcon" -> result.success(currentIcon())
+                        "setAppIcon" -> {
+                            setIcon(call.argument<String>("icon") ?: "default")
+                            result.success(currentIcon())
+                        }
                         else -> result.notImplemented()
                     }
                 } catch (e: Exception) {
                     result.error("settings", e.message, null)
                 }
             }
+    }
+
+    private val icons = listOf("default", "night", "sunset", "ocean", "berry", "mono")
+
+    private fun alias(id: String) = ComponentName(
+        packageName,
+        "com.hypertechlabs.instantgram.Icon" + id.replaceFirstChar { it.uppercase() }
+    )
+
+    private fun isOn(id: String): Boolean {
+        return when (packageManager.getComponentEnabledSetting(alias(id))) {
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> true
+            PackageManager.COMPONENT_ENABLED_STATE_DEFAULT -> id == "default"
+            else -> false
+        }
+    }
+
+    private fun currentIcon(): String = icons.firstOrNull { it != "default" && isOn(it) }
+        ?: "default"
+
+    private fun setIcon(id: String) {
+        val want = if (icons.contains(id)) id else "default"
+        val pm = packageManager
+        // turn the new one on first: there is always one icon
+        pm.setComponentEnabledSetting(
+            alias(want),
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+            PackageManager.DONT_KILL_APP
+        )
+        for (other in icons) {
+            if (other == want) continue
+            pm.setComponentEnabledSetting(
+                alias(other),
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP
+            )
+        }
     }
 
     private fun createChannels() {

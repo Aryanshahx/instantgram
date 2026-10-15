@@ -107,7 +107,7 @@
 <section id="app" class="hide">
   <header>
     <div class="row" style="margin-bottom:8px">
-      <div class="logo grow">Instant<b>Gram</b> <span class="muted small">admin</span></div>
+      <div class="logo grow">Instant<b>Gram</b> <span class="muted small">admin</span> <span id="ver" class="muted small" title="Admin page version">v0.15.0</span></div>
       <span id="who" class="muted small"></span>
       <button class="ghost small" id="logout">Log out</button>
     </div>
@@ -307,8 +307,23 @@
   }
   $('nav').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) go(b.dataset.page); });
 
+  // v0.15: shows if Vercel serves an old deployment
+  const PAGE_VERSION = '0.15.0';
+  async function checkVersion() {
+    try {
+      const r = await fetch('/api/health', { cache: 'no-store' });
+      const j = await r.json();
+      const v = String(j.version || '');
+      if (v && v !== PAGE_VERSION) {
+        $('ver').textContent = `v${PAGE_VERSION} · server v${v}`;
+        toast(`Server is v${v}, page is v${PAGE_VERSION}. In Vercel promote the newest deployment.`, 9000);
+      }
+    } catch { /* offline: keep the label */ }
+  }
+
   async function start() {
     $('login').classList.add('hide'); $('app').classList.remove('hide');
+    checkVersion();
     try {
       const me = await api('me');
       $('who').textContent = `logged in until ${new Date(sess.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;

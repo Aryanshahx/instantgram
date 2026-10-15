@@ -14,6 +14,7 @@ import '../../chats/data/chat_receipts.dart';
 import '../../shell/push_router.dart';
 import '../../profile/presentation/saved_screen.dart';
 import 'accounts_screen.dart';
+import 'app_icon_screen.dart';
 import 'call_check_screen.dart';
 import 'history_screen.dart';
 import 'notification_settings_screen.dart';
@@ -161,6 +162,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         subtitle: 'Text size, reduce motion',
         keywords: 'font text size bigger animation motion',
         onTap: (c) => _push(c, const AccessibilityScreen()),
+      ),
+      _Item(
+        section: 'Your app',
+        icon: Icons.apps_rounded,
+        title: 'App icon',
+        subtitle: 'Change the home screen icon',
+        keywords: 'icon logo launcher home screen color theme',
+        onTap: (c) => _push(c, const AppIconScreen()),
       ),
       _Item(
         section: 'Your app',

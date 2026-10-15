@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.14.0+10
+version: 0.15.0+11
 
 environment:
   sdk: ^3.12.2
@@ -111,6 +111,33 @@ flutter:
     - family: Pacifico
       fonts:
         - asset: assets/fonts/Pacifico-Regular.ttf
+    - family: BioLobster
+      fonts:
+        - asset: assets/fonts/Bio-Lobster.ttf
+    - family: BioDancing
+      fonts:
+        - asset: assets/fonts/Bio-Dancing.ttf
+    - family: BioCaveat
+      fonts:
+        - asset: assets/fonts/Bio-Caveat.ttf
+    - family: BioBebas
+      fonts:
+        - asset: assets/fonts/Bio-Bebas.ttf
+    - family: BioPlayfair
+      fonts:
+        - asset: assets/fonts/Bio-Playfair.ttf
+    - family: BioTypewriter
+      fonts:
+        - asset: assets/fonts/Bio-Typewriter.ttf
+    - family: BioComfortaa
+      fonts:
+        - asset: assets/fonts/Bio-Comfortaa.ttf
+    - family: BioMono
+      fonts:
+        - asset: assets/fonts/Bio-Mono.ttf
+    - family: BioPixel
+      fonts:
+        - asset: assets/fonts/Bio-Pixel.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

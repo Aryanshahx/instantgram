@@ -49,8 +49,12 @@ service cloud.firestore {
                                 'coverUrl', 'coverKey', 'postsCount',
                                 'followingCount', 'followersCount',
                                 'language', 'isPrivate', 'country',
-                                'username', 'links'])
+                                'username', 'links', 'bioFont'])
           && usernameOk(uid) && linksOk()
+          // v0.15: bio font name
+          && (!changed().hasAny(['bioFont'])
+              || (request.resource.data.bioFont is string
+                  && request.resource.data.bioFont.size() <= 20))
           && stepOk('postsCount') && stepOk('followingCount')
           && stepOk('followersCount')
           && (!changed().hasAny(['isPrivate'])
@@ -115,6 +119,22 @@ service cloud.firestore {
           || (me() == tid && exists(/databases/$(database)/documents/users/$(tid)/requests/$(uid))));
         allow delete: if signedIn() && (me() == uid || me() == tid);
         allow update: if false;
+      }
+      // v0.15: highlights = moments kept on the profile
+      match /highlights/{hid} {
+        allow read: if signedIn();
+        allow delete: if signedIn() && me() == uid;
+        allow create, update: if signedIn() && me() == uid && highlightOk();
+
+        function highlightOk() {
+          let d = request.resource.data;
+          return d.keys().hasOnly(['title', 'coverUrl', 'username', 'photoUrl',
+                                   'storyIds', 'items', 'createdAt', 'updatedAt'])
+            && d.title is string && d.title.size() >= 1 && d.title.size() <= 30
+            && d.get('coverUrl', '') is string
+            && d.items is list && d.items.size() >= 1 && d.items.size() <= 100
+            && d.storyIds is list && d.storyIds.size() <= 100;
+        }
       }
       // follow requests to a private account (rid = who asks)
       match /requests/{rid} {
@@ -393,6 +413,35 @@ service cloud.firestore {
         && request.resource.data.get('audience', 'everyone') in ['everyone', 'followers', 'only_me'];
       allow delete: if signedIn() && resource.data.authorId == me();
       allow update: if false;
+
+      // v0.15: who watched a moment and how many times (vid = the viewer).
+      // Only the moment's owner can list it. Each watch = count + 1.
+      match /views/{vid} {
+        allow get: if signedIn() && (me() == vid || storyOwner());
+        allow list: if signedIn() && storyOwner();
+        allow create: if signedIn() && me() == vid && !storyOwner()
+          && request.resource.data.keys().hasOnly(['uid', 'username', 'photoUrl', 'count', 'lastAt'])
+          && request.resource.data.uid == me()
+          && request.resource.data.count == 1
+          && request.resource.data.lastAt == request.time
+          && viewerInfoOk();
+        allow update: if signedIn() && me() == vid
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['count', 'lastAt', 'username', 'photoUrl'])
+          && request.resource.data.count == resource.data.count + 1
+          && request.resource.data.lastAt == request.time
+          && viewerInfoOk();
+        allow delete: if false;
+
+        function storyOwner() {
+          return get(/databases/$(database)/documents/stories/$(sid)).data.authorId == me();
+        }
+        function viewerInfoOk() {
+          return request.resource.data.get('username', '') is string
+            && request.resource.data.get('username', '').size() <= 40
+            && request.resource.data.get('photoUrl', '') is string;
+        }
+      }
     }
 
     // ---------------- Direct messages ----------------
