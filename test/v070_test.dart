@@ -211,7 +211,12 @@ void main() {
       lowKey: 'clip/u/low.mp4',
     );
 
-    test('full quality until buffering, then the small copy', () {
+    test('fast network = full quality; buffering = the small copy', () {
+      // v0.14: unknown / slow network starts with the small copy (Reels)
+      Bandwidth.reset();
+      expect(NetQuality.urlFor(m), m.lowUrl);
+      Bandwidth.add(4 * 1024 * 1024, 1000); // ~33 Mbps
+      expect(Bandwidth.fast, isTrue);
       expect(NetQuality.urlFor(m), m.url);
       NetQuality.markSlow();
       expect(NetQuality.slow, isTrue);
@@ -222,6 +227,7 @@ void main() {
         'https://x/o.mp4',
       );
       expect(NetQuality.tileUrl(m), m.lowUrl);
+      Bandwidth.reset();
     });
 
     test('small copy is saved and deleted with the post', () {

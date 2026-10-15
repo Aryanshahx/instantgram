@@ -16,6 +16,7 @@ import '../../editor/filters.dart';
 import '../../profile/data/user_repository.dart';
 import '../data/story_repository.dart';
 import '../../../core/services/video_cache.dart';
+import '../../../shared/widgets/verified_badge.dart';
 
 /// Full-screen moment viewer: tap right = next, tap left = back,
 /// hold = pause, swipe down = close. Plays photo and video moments.
@@ -117,10 +118,11 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
       var end = e.trimEndMs > 0 ? e.trimEndMs.clamp(start, total) : total;
       end = VideoTime.playableEnd(end, e.cuts).clamp(start, total);
       if (VideoTime.playedMs(start, end, e.cuts) > kMomentMaxMs) {
-        end = VideoTime.sourceAt(kMomentMaxMs, start, e.cuts).clamp(
+        end = VideoTime.sourceAt(
+          kMomentMaxMs,
           start,
-          total,
-        );
+          e.cuts,
+        ).clamp(start, total);
       }
       final len = VideoTime.playedMs(
         start,
@@ -131,9 +133,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
       if (start > 0) await c.seekTo(Duration(milliseconds: start));
       if (e.cuts.isNotEmpty) {
         final skipper = CutSkipper();
-        c.addListener(
-          () => skipper.check(c, e, startMs: start, endMs: end),
-        );
+        c.addListener(() => skipper.check(c, e, startMs: start, endMs: end));
       }
       _timer.duration = Duration(milliseconds: len);
       setState(() => _videoReady = true);
@@ -373,9 +373,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                         ),
                         const SizedBox(width: 10),
                         Flexible(
-                          child: Text(
+                          child: NameBadge(
                             _group.username,
-                            overflow: TextOverflow.ellipsis,
+                            uid: _group.authorId,
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                         ),

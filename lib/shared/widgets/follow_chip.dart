@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/utils/errors.dart';
 import '../../features/profile/data/user_repository.dart';
@@ -125,21 +126,10 @@ class _FollowChipState extends State<FollowChip> {
     }
   }
 
-  /// v0.13: "Following" -> ask, then unfollow.
+  /// v0.14: tap "Following" = unfollow right away (no pop-up at the bottom).
   Future<void> _unfollow() async {
     if (_busy) return;
-    final ok = await showModalBottomSheet<bool>(
-      context: context,
-      builder: (c) => SafeArea(
-        child: ListTile(
-          key: const ValueKey('follow-unfollow'),
-          leading: const Icon(Icons.person_remove_alt_1_outlined),
-          title: const Text('Unfollow'),
-          onTap: () => Navigator.pop(c, true),
-        ),
-      ),
-    );
-    if (ok != true || !mounted) return;
+    HapticFeedback.selectionClick();
     setState(() {
       _busy = true;
       _done = false;

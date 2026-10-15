@@ -15,6 +15,7 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/net_image.dart';
 import '../data/chat_repository.dart';
+import '../../../shared/widgets/verified_badge.dart';
 
 /// Quick reactions on a long-press (v0.9).
 const List<String> kReactEmojis = ['❤️', '😂', '😮', '😢', '😡', '👍'];
@@ -1154,9 +1155,9 @@ class _ForwardSheetState extends State<ForwardSheet> {
                           size: 40,
                           uid: p.uid,
                         ),
-                        title: Text(
+                        title: NameBadge(
                           p.username,
-                          overflow: TextOverflow.ellipsis,
+                          uid: p.uid,
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
                         trailing: SizedBox(

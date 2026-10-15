@@ -13,6 +13,7 @@ import '../../post/presentation/post_detail_screen.dart';
 import '../../profile/data/user_repository.dart';
 import '../../settings/presentation/privacy_screens.dart';
 import '../data/notification_repository.dart';
+import '../../../shared/widgets/verified_badge.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -112,7 +113,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 child: ListTile(
                   onTap: () {
                     if (n.type == AppNotification.notice) {
-                      _showNotice(context, n);
+                      showNotice(context, n);
                     } else if (n.postId.isNotEmpty) {
                       Navigator.of(context).push(
                         MaterialPageRoute(
@@ -139,11 +140,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   title: Text.rich(
                     TextSpan(
                       children: [
-                        if (n.fromUsername.isNotEmpty)
+                        if (n.fromUsername.isNotEmpty) ...[
                           TextSpan(
                             text: '${n.fromUsername} ',
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
+                          verifiedSpan(n.fromUid),
+                        ],
                         TextSpan(text: notificationText(n)),
                         TextSpan(
                           text: '  ${timeAgo(n.createdAt)}',
@@ -177,18 +180,36 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 }
 
 /// v0.13: a message from the InstantGram team (admin website).
-void _showNotice(BuildContext context, AppNotification n) {
+/// An admin notice (text + optional picture).
+void showNotice(BuildContext context, AppNotification n) {
   showDialog<void>(
     context: context,
     builder: (d) => AlertDialog(
       icon: const _NoticeBadge(),
       title: const Text('InstantGram'),
-      content: SingleChildScrollView(child: SelectableText(n.text)),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(d),
-          child: const Text('OK'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // v0.14: notices can have a picture
+            if (n.postThumb.isNotEmpty) ...[
+              ClipRRect(
+                key: const ValueKey('notice-image'),
+                borderRadius: BorderRadius.circular(12),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 320),
+                  child: NetImage(n.postThumb, fit: BoxFit.contain),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            SelectableText(n.text),
+          ],
         ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(d), child: const Text('OK')),
       ],
     ),
   );

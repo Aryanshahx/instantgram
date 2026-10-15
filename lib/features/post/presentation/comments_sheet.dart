@@ -26,6 +26,7 @@ import '../data/report_repository.dart';
 import 'create_sheet.dart';
 import 'gif_picker.dart';
 import 'my_post_picker.dart';
+import '../../../shared/widgets/verified_badge.dart';
 
 /// v0.11: text for "Share" on a comment.
 String commentShareText(Post post, Comment c) {
@@ -1184,12 +1185,14 @@ class _CommentTileState extends State<CommentTile> {
                         TextSpan(
                           children: [
                             TextSpan(
-                              text: '${c.authorUsername}  ',
+                              text: '${c.authorUsername} ',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w700,
                                 fontSize: 13,
                               ),
                             ),
+                            verifiedSpan(c.authorId, size: 13),
+                            const TextSpan(text: ' '),
                             TextSpan(
                               text: timeAgo(c.createdAt),
                               style: const TextStyle(

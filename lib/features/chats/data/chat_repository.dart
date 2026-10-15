@@ -6,7 +6,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:flutter/painting.dart' show decodeImageFromList;
 
-import '../../../core/services/chat_prefs.dart';
 import '../../../core/services/api_client.dart';
 import '../../../core/services/gif_search.dart';
 import '../../../core/services/server_clock.dart';
@@ -266,10 +265,38 @@ class ChatRepository {
     return {'expireAt': Timestamp.fromDate(now.add(life))};
   }
 
-  /// v0.13: disappearing messages only on MY phone (the other person's
-  /// chat does not change, nothing is deleted on the server).
-  Future<void> setDisappear(ChatPerson other, String mode) =>
-      ChatPrefs.instance.setVanish(chatIdWith(other.uid), mode);
+  /// Disappearing mode of each chat (kept fresh by the open chat screen).
+  final Map<String, String> _modes = {};
+
+  void rememberMode(String chatId, String mode) => _modes[chatId] = mode;
+
+  Future<String> _modeOf(String chatId) async {
+    final known = _modes[chatId];
+    if (known != null) return known;
+    try {
+      final d = await _chats.doc(chatId).get();
+      return _modes[chatId] = Disappear.normalize(d.data()?['disappear']);
+    } catch (_) {
+      return Disappear.off;
+    }
+  }
+
+  /// Turns disappearing messages on / off (v0.14: for BOTH people again).
+  Future<void> setDisappear(ChatPerson other, String mode) async {
+    final m = Disappear.normalize(mode);
+    final me = await UserRepository.instance.me();
+    final text = '${me.username} ${Disappear.sentence(m)}';
+    _modes[chatIdWith(other.uid)] = m;
+    await _write(
+      other,
+      {'kind': Message.system, 'text': text},
+      m == Disappear.off
+          ? 'Disappearing messages off'
+          : '⏳ Disappearing messages on',
+      chat: {'disappear': m},
+      push: false,
+    );
+  }
 
   // ------------------------------------------------- v0.13 typing
 
@@ -328,25 +355,9 @@ class ChatRepository {
     DateTime? clearedAt,
     DateTime? seenBefore,
     DateTime? now,
-    String vanishMode = Disappear.off,
-    DateTime? vanishSince,
   }) {
     final t = now ?? ServerClock.now();
-    final life = Disappear.lifetime(vanishMode);
     return all.where((m) {
-      // v0.13: disappearing only on my phone (new messages since it's on)
-      if (vanishMode != Disappear.off &&
-          vanishSince != null &&
-          !m.pending &&
-          m.kind != Message.system &&
-          !m.createdAt.isBefore(vanishSince)) {
-        if (life != null && t.isAfter(m.createdAt.add(life))) return false;
-        if (vanishMode == Disappear.seen &&
-            seenBefore != null &&
-            !m.createdAt.isAfter(seenBefore)) {
-          return false;
-        }
-      }
       if (m.hiddenForUid(me)) return false;
       if (clearedAt != null && !m.pending && !m.createdAt.isAfter(clearedAt)) {
         return false;
@@ -401,8 +412,11 @@ class ChatRepository {
     final chatId = chatIdWith(other.uid);
     final chatRef = _chats.doc(chatId);
     final members = [me.uid, other.uid]..sort();
-    // v0.13: disappearing is per person now (old chats: nothing extra)
-    const extra = <String, dynamic>{};
+    final kind = message['kind'];
+    final special = kind == Message.system || kind == Message.call;
+    final extra = special
+        ? const <String, dynamic>{}
+        : disappearFields(await _modeOf(chatId), ServerClock.now());
     // "once seen" messages don't show their text in the chat list
     final shown = extra['vanish'] == true ? '💨 Sent a message' : preview;
     final batch = _db.batch();

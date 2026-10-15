@@ -1,7 +1,6 @@
 // POST /api/admin  { action, ... }   (v0.13: the admin website at /admin)
-// Login: only ADMIN emails (techlabs.hyper@gmail.com + Vercel ADMIN_EMAILS),
-// with a verified email. Needs FIREBASE_SERVICE_ACCOUNT (+ FIREBASE_API_KEY
-// if the key from the app does not work for servers).
+// v0.14: login = one long password (Vercel ADMIN_PASSWORD, 16+ letters).
+// Needs FIREBASE_SERVICE_ACCOUNT.
 import {
   F,
   checkNotice,
@@ -10,15 +9,14 @@ import {
   noticeMessages,
   pool,
   postCard,
-  refresh,
   requireAdmin,
-  sendVerifyEmail,
   str,
   userCard,
 } from '../lib/admin.js';
 import { HttpError, postHandler } from '../lib/http.js';
 import {
   addDoc,
+  authDelete,
   authLookup,
   authSetDisabled,
   commitWrites,
@@ -30,7 +28,7 @@ import {
   sendFcm,
   serviceAccount,
 } from '../lib/google.js';
-import { deleteKeys } from '../lib/tigris.js';
+import { deleteKeys, publicUrl, putNoticeImage } from '../lib/tigris.js';
 import { tokensOf } from './call-push.js';
 
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -73,6 +71,155 @@ async function safeCount(sa, coll, where, opts, fetchFn) {
 async function verifiedSet(sa, fetchFn) {
   const d = await getDoc(sa, 'config/verified', fetchFn).catch(() => null);
   return new Set(Array.isArray(d?.uids) ? d.uids.filter((x) => typeof x === 'string') : []);
+}
+
+// ---------------------------------------------------------------- v0.14
+
+const USER_FILTERS = ['new', 'followers', 'verified', 'banned', 'private', 'online', 'country'];
+const REPORT_KINDS = ['post', 'clip', 'comment', 'user'];
+
+function reportCard(r) {
+  return {
+    id: r.id,
+    kind: str(r.data.kind, 10),
+    reason: str(r.data.reason, 80),
+    message: str(r.data.message, 2000),
+    targetId: str(r.data.targetId, 128),
+    postId: str(r.data.postId, 128),
+    targetUid: str(r.data.targetUid, 128),
+    reporterUid: str(r.data.reporterUid, 128),
+    reporterUsername: str(r.data.reporterUsername, 40),
+    createdAt: r.data.createdAt || null,
+  };
+}
+
+/** Users by a filter. Pages with [offset] (simple, no extra indexes). */
+async function userFilter(filter, { sa, fetchFn, body, verified, card }) {
+  const offset = Math.max(0, Math.min(5000, Math.floor(Number(body.offset) || 0)));
+  const byIds = async (ids) => {
+    const docs = await pool(ids, 8, async (uid) => {
+      const d = await getDoc(sa, `users/${uid}`, fetchFn).catch(() => null);
+      return d ? { id: uid, data: d } : null;
+    });
+    return docs.filter(Boolean);
+  };
+  if (filter === 'verified') {
+    const ids = [...verified].slice(offset, offset + PAGE);
+    return { users: (await byIds(ids)).map(card), offset: ids.length === PAGE ? offset + PAGE : 0 };
+  }
+  if (filter === 'online') {
+    const rows = await runQuery(sa, { from: [{ collectionId: 'presence' }], where: F.eq('online', F.b(true)), limit: 100 }, '', fetchFn);
+    const ids = rows.filter((r) => r.data.hidden !== true).map((r) => r.id).slice(offset, offset + PAGE);
+    return { users: (await byIds(ids)).map(card), offset: ids.length === PAGE ? offset + PAGE : 0 };
+  }
+  const q = { from: [{ collectionId: 'users' }], limit: PAGE, offset };
+  if (filter === 'followers') q.orderBy = order('followersCount');
+  if (filter === 'banned') q.where = F.eq('banned', F.b(true));
+  if (filter === 'private') q.where = F.eq('isPrivate', F.b(true));
+  if (filter === 'country') {
+    const c = typeof body.country === 'string' ? body.country.trim().toUpperCase() : '';
+    if (!/^[A-Z]{2}$/.test(c)) throw new HttpError(400, 'Country: 2 letters, like IN');
+    q.where = F.eq('country', F.s(c));
+  }
+  const rows = await runQuery(sa, q, '', fetchFn);
+  return { users: rows.map(card), offset: rows.length === PAGE ? offset + PAGE : 0 };
+}
+
+/** Only pictures we saved for notices. */
+function noticeImageUrl(v) {
+  if (v === undefined || v === null || v === '') return '';
+  const base = publicUrl('notice/');
+  if (typeof v !== 'string' || !v.startsWith(base) || v.length > 400 || /\.\.|[\s"'<>]/.test(v)) {
+    throw new HttpError(400, 'Bad picture');
+  }
+  return v;
+}
+
+/** "data:image/jpeg;base64,..." -> bytes (max 1.5 MB). */
+export function decodeJpeg(dataUrl) {
+  const m = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(typeof dataUrl === 'string' ? dataUrl : '');
+  if (!m) throw new HttpError(400, 'Send the picture as JPEG');
+  const bytes = Buffer.from(m[1], 'base64');
+  if (bytes.length < 100 || bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new HttpError(400, 'Not a JPEG picture');
+  if (bytes.length > 1.5 * 1024 * 1024) throw new HttpError(413, 'Picture too big (max 1.5 MB)');
+  return bytes;
+}
+
+/** Delete-account steps, in order. Every call does a part of one step. */
+export const DELETE_STEPS = ['posts', 'moments', 'followers', 'following', 'lists', 'account'];
+const SUBS = ['notifications', 'requests', 'blocked', 'private', 'saved', 'reposts'];
+
+async function deleteUserStep(step, uid, { sa, fetchFn, deleteFiles }) {
+  const commitAll = async (writes) => {
+    for (let i = 0; i < writes.length; i += 450) await commitWrites(sa, writes.slice(i, i + 450), fetchFn);
+  };
+  if (step === 'posts') {
+    const rows = await runQuery(sa, { from: [{ collectionId: 'posts' }], where: F.eq('authorId', F.s(uid)), limit: 15 }, '', fetchFn);
+    let files = 0;
+    for (const r of rows) {
+      const comments = await runQuery(sa, { from: [{ collectionId: 'comments' }], limit: 300 }, `posts/${r.id}`, fetchFn).catch(() => []);
+      const keys = fileKeys(r.data, uid);
+      for (const c of comments) keys.push(...fileKeys(c.data, c.data.authorId));
+      await commitAll([...comments.map((c) => ({ delete: `posts/${r.id}/comments/${c.id}` })), { delete: `posts/${r.id}` }]);
+      files += await deleteFiles(keys);
+    }
+    return { n: rows.length, files, more: rows.length === 15 };
+  }
+  if (step === 'moments') {
+    const rows = await runQuery(sa, { from: [{ collectionId: 'stories' }], where: F.eq('authorId', F.s(uid)), limit: 100 }, '', fetchFn);
+    await commitAll(rows.map((r) => ({ delete: `stories/${r.id}` })));
+    const files = await deleteFiles(rows.flatMap((r) => fileKeys(r.data, uid)));
+    return { n: rows.length, files, more: rows.length === 100 };
+  }
+  if (step === 'followers' || step === 'following') {
+    // the other person's list and counter change too
+    const rows = await runQuery(sa, { from: [{ collectionId: step }], limit: 200 }, `users/${uid}`, fetchFn);
+    const other = step === 'followers' ? 'following' : 'followers';
+    const counter = step === 'followers' ? 'followingCount' : 'followersCount';
+    const writes = [];
+    for (const r of rows) {
+      if (!ID.test(r.id)) continue;
+      writes.push({ delete: `users/${r.id}/${other}/${uid}` });
+      writes.push({ transform: `users/${r.id}`, transforms: [{ fieldPath: counter, increment: { integerValue: '-1' } }] });
+    }
+    writes.push(...rows.map((r) => ({ delete: `users/${uid}/${step}/${r.id}` })));
+    // a transform on a deleted user would create an empty document: skip those
+    const alive = new Set();
+    await pool([...new Set(rows.map((r) => r.id).filter((x) => ID.test(x)))], 8, async (o) => {
+      if (await getDoc(sa, `users/${o}`, fetchFn).catch(() => null)) alive.add(o);
+    });
+    await commitAll(writes.filter((w) => !w.transform || alive.has(w.transform.split('/')[1])));
+    return { n: rows.length, more: rows.length === 200 };
+  }
+  if (step === 'lists') {
+    let n = 0;
+    for (const sub of SUBS) {
+      const rows = await runQuery(sa, { from: [{ collectionId: sub }], limit: 300 }, `users/${uid}`, fetchFn).catch(() => []);
+      await commitAll(rows.map((r) => ({ delete: `users/${uid}/${sub}/${r.id}` })));
+      n += rows.length;
+      if (rows.length === 300) return { n, more: true };
+    }
+    return { n, more: false };
+  }
+  // account: profile, name, phone tokens, settings, online status, login
+  const d = await getDoc(sa, `users/${uid}`, fetchFn).catch(() => null);
+  const writes = [
+    { delete: `pushTokens/${uid}` },
+    { delete: `prefs/${uid}` },
+    { delete: `presence/${uid}` },
+    { delete: `users/${uid}` },
+    { transform: 'config/verified', transforms: [{ fieldPath: 'uids', removeAllFromArray: { values: [F.s(uid)] } }] },
+  ];
+  const name = typeof d?.username === 'string' ? d.username.toLowerCase() : '';
+  if (name && ID.test(name)) writes.push({ delete: `usernames/${name}` });
+  await commitAll(writes);
+  // profile picture + banner (chat files stay: the other person keeps the chat)
+  const own = [d?.photoKey, d?.coverKey].filter(
+    (k) => typeof k === 'string' && !k.includes('..') && (k.startsWith(`avatar/${uid}/`) || k.startsWith(`cover/${uid}/`)),
+  );
+  const files = await deleteFiles([...fileKeys(d || {}, uid), ...own]);
+  const login = await authDelete(sa, uid, fetchFn);
+  return { n: 1, files, login, more: false };
 }
 
 // ---------------------------------------------------------------- actions
@@ -144,16 +291,16 @@ export const actions = {
       rows = [...found.values()];
       return { users: rows.map((r) => ({ ...userCard(r.id, r.data), verified: verified.has(r.id) })), cursor: '' };
     }
+    const card = (r) => ({ ...userCard(r.id, r.data), verified: verified.has(r.id) });
+    const filter = USER_FILTERS.includes(body.filter) ? body.filter : 'new';
+    if (filter !== 'new') return userFilter(filter, { sa, fetchFn, body, verified, card });
     rows = await runQuery(
       sa,
       { from: [{ collectionId: 'users' }], orderBy: order('createdAt'), limit: PAGE, ...startAfter(body.cursor) },
       '',
       fetchFn,
     );
-    return {
-      users: rows.map((r) => ({ ...userCard(r.id, r.data), verified: verified.has(r.id) })),
-      cursor: nextCursor(rows, PAGE),
-    };
+    return { users: rows.map(card), cursor: nextCursor(rows, PAGE) };
   },
 
   async user({ sa, fetchFn, body }) {
@@ -281,6 +428,16 @@ export const actions = {
   },
 
   async reports({ sa, fetchFn, body }) {
+    // v0.14: filter by type / reason (looks at the newest 200, no index)
+    const kind = REPORT_KINDS.includes(body.kind) ? body.kind : '';
+    const reason = typeof body.reason === 'string' ? body.reason.trim().toLowerCase().slice(0, 80) : '';
+    if (kind || reason) {
+      const all = await runQuery(sa, { from: [{ collectionId: 'reports' }], orderBy: order('createdAt'), limit: 200 }, '', fetchFn);
+      const hits = all.filter(
+        (r) => (!kind || r.data.kind === kind) && (!reason || String(r.data.reason || '').toLowerCase().includes(reason)),
+      );
+      return { reports: hits.slice(0, 100).map(reportCard), cursor: '', scanned: all.length, total: hits.length };
+    }
     const rows = await runQuery(
       sa,
       { from: [{ collectionId: 'reports' }], orderBy: order('createdAt'), limit: PAGE, ...startAfter(body.cursor) },
@@ -288,18 +445,7 @@ export const actions = {
       fetchFn,
     );
     return {
-      reports: rows.map((r) => ({
-        id: r.id,
-        kind: str(r.data.kind, 10),
-        reason: str(r.data.reason, 80),
-        message: str(r.data.message, 2000),
-        targetId: str(r.data.targetId, 128),
-        postId: str(r.data.postId, 128),
-        targetUid: str(r.data.targetUid, 128),
-        reporterUid: str(r.data.reporterUid, 128),
-        reporterUsername: str(r.data.reporterUsername, 40),
-        createdAt: r.data.createdAt || null,
-      })),
+      reports: rows.map(reportCard),
       cursor: nextCursor(rows, PAGE),
     };
   },
@@ -341,11 +487,36 @@ export const actions = {
     return { uid, verified: on };
   },
 
+  /** v0.14: a picture for a notice (sent once, then used by every page). */
+  async noticeImage({ body, saveImage }) {
+    const bytes = decodeJpeg(body.image);
+    const { url } = await saveImage(bytes);
+    return { url };
+  },
+
+  /** v0.14: deletes an account step by step. The page calls again with
+   *  the returned [step] until [done]. */
+  async deleteUser({ sa, fetchFn, body, deleteFiles }) {
+    const uid = id(body.uid, 'user');
+    if (body.confirm !== 'DELETE') throw new HttpError(400, 'Type DELETE to confirm');
+    let step = DELETE_STEPS.includes(body.step) ? body.step : DELETE_STEPS[0];
+    if (step === DELETE_STEPS[0] && !(await getDoc(sa, `users/${uid}`, fetchFn))) {
+      throw new HttpError(404, 'User not found');
+    }
+    const r = await deleteUserStep(step, uid, { sa, fetchFn, deleteFiles });
+    if (!r.more) {
+      const i = DELETE_STEPS.indexOf(step);
+      step = i + 1 < DELETE_STEPS.length ? DELETE_STEPS[i + 1] : '';
+    }
+    return { ...r, step, done: step === '' };
+  },
+
   /** One person: notification in the app + phone push. Everyone: phone
    *  push, 150 phones per call (the page calls again with [page]). */
   async notice({ sa, fetchFn, body, now }) {
     const { title, text } = checkNotice(body);
-    const send = (tokens) => pool(noticeMessages(tokens, title, text), 10, (m) => sendFcm(sa, m, fetchFn));
+    const image = noticeImageUrl(body.imageUrl);
+    const send = (tokens) => pool(noticeMessages(tokens, title, text, image), 10, (m) => sendFcm(sa, m, fetchFn));
     if (body.to === 'all') {
       const page = await listPage(sa, 'pushTokens', { pageSize: 150, pageToken: typeof body.page === 'string' ? body.page : '', fields: ['tokens'] }, fetchFn);
       const tokens = [];
@@ -360,7 +531,7 @@ export const actions = {
     const nid = await addDoc(
       sa,
       `users/${uid}/notifications`,
-      { type: 'notice', fromUid: '', fromUsername: 'InstantGram', fromPhotoUrl: '', postId: '', postThumb: '', text: title === 'InstantGram' ? text : `${title}: ${text}`, read: false, createdAt: new Date(now) },
+      { type: 'notice', fromUid: '', fromUsername: 'InstantGram', fromPhotoUrl: '', postId: '', postThumb: image, text: title === 'InstantGram' ? text : `${title}: ${text}`, read: false, createdAt: new Date(now) },
       fetchFn,
     );
     const ok = await send(await tokensOf(sa, uid, fetchFn));
@@ -368,18 +539,21 @@ export const actions = {
   },
 };
 
-export async function handle(req, body, { sa = serviceAccount(), fetchFn = fetch, verify, admins, now = Date.now(), deleteFiles = deleteKeys } = {}) {
+export async function handle(
+  req,
+  body,
+  { sa = serviceAccount(), fetchFn = fetch, password = process.env.ADMIN_PASSWORD, wait, now = Date.now(), deleteFiles = deleteKeys, saveImage = putNoticeImage } = {},
+) {
   const action = typeof body.action === 'string' ? body.action : '';
-  // no login needed for these three
-  if (action === 'login') return login(body.email, body.password, { fetchFn, admins });
-  if (action === 'refresh') return refresh(body.refreshToken, { fetchFn, admins });
-  if (action === 'sendVerify') return sendVerifyEmail(body.idToken, { fetchFn });
-  const admin = await requireAdmin(req, { verify, admins });
-  if (action === 'me') return { email: admin.email, ready: !!sa };
+  // the only action without a login
+  // (login time = the real clock; [now] is only for data)
+  if (action === 'login') return login(body.password, { raw: password, wait });
+  const admin = await requireAdmin(req, { raw: password });
+  if (action === 'me') return { ready: !!sa };
   const fn = Object.hasOwn(actions, action) ? actions[action] : null;
   if (!fn) throw new HttpError(400, 'Unknown action');
   if (!sa) throw notSetUp('The admin website');
-  return fn({ sa, fetchFn, body, admin, now, deleteFiles });
+  return fn({ sa, fetchFn, body, admin, now, deleteFiles, saveImage });
 }
 
 export default postHandler((req, body) => handle(req, body));

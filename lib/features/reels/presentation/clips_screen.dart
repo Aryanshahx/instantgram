@@ -488,9 +488,18 @@ class _ClipPlayerState extends State<ClipPlayer>
       return;
     }
     if (kDisableVideoPlayback) return;
-    // full quality, unless videos were buffering a moment ago
-    _usingLow = NetQuality.slow && _cur.lowUrl.isNotEmpty;
-    final url = _usingLow ? _cur.lowUrl : _cur.url;
+    // v0.14 (like Reels): the copy that can start at once; a player that
+    // is already prepared (either copy) wins
+    final mix = widget.clip.hasMusic;
+    final pick = NetQuality.urlFor(_cur);
+    final other = pick == _cur.url ? _cur.lowUrl : _cur.url;
+    final url =
+        !VideoPool.instance.has(pick, mixWithOthers: mix) &&
+            other.isNotEmpty &&
+            VideoPool.instance.has(other, mixWithOthers: mix)
+        ? other
+        : pick;
+    _usingLow = _cur.lowUrl.isNotEmpty && url == _cur.lowUrl;
     _openUrl = url;
     // ready player from the prefetch pool = instant start
     final pooled = VideoPool.instance.take(

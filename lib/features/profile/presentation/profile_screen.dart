@@ -34,6 +34,8 @@ import 'edit_profile_screen.dart';
 import 'profile_image_crop.dart';
 import 'user_list_screen.dart';
 import '../../../shared/widgets/verified_badge.dart';
+import '../../settings/presentation/accounts_screen.dart'
+    show showAccountSwitcher;
 
 /// Profile of any user. [standalone] = opened as its own page (shows back button).
 class ProfileScreen extends StatelessWidget {
@@ -335,6 +337,7 @@ class _ProfileViewState extends State<ProfileView>
                   ? () => Navigator.of(context).maybePop()
                   : null,
               onSettings: _openSettings,
+              onSwitchAccount: () => showAccountSwitcher(context, p),
               onMore: _openUserMenu,
               blocked: blocked,
               onUnblock: _unblock,
@@ -552,6 +555,7 @@ class _Header extends StatelessWidget {
     required this.isMe,
     required this.onBack,
     required this.onSettings,
+    required this.onSwitchAccount,
     required this.onMore,
     required this.blocked,
     required this.onUnblock,
@@ -568,6 +572,7 @@ class _Header extends StatelessWidget {
   final bool isMe;
   final VoidCallback? onBack;
   final VoidCallback onSettings;
+  final VoidCallback onSwitchAccount;
   final VoidCallback onMore;
   final bool blocked;
   final VoidCallback onUnblock;
@@ -650,13 +655,26 @@ class _Header extends StatelessWidget {
                   top: topPad + 8,
                   child: _circleButton(Icons.arrow_back, 'Back', onBack!),
                 ),
-              if (isMe)
+              if (isMe) ...[
+                // v0.14: switch account right from the Me screen
+                Positioned(
+                  right: 72,
+                  top: topPad + 8,
+                  child: KeyedSubtree(
+                    key: const ValueKey('switch-account-btn'),
+                    child: _circleButton(
+                      Icons.switch_account_outlined,
+                      'Switch account',
+                      onSwitchAccount,
+                    ),
+                  ),
+                ),
                 Positioned(
                   right: 24,
                   top: topPad + 8,
                   child: _circleButton(Icons.settings, 'Settings', onSettings),
-                )
-              else
+                ),
+              ] else
                 Positioned(
                   right: 24,
                   top: topPad + 8,
@@ -710,15 +728,27 @@ class _Header extends StatelessWidget {
               Row(
                 children: [
                   Flexible(
-                    child: Text(
-                      '@${p.username}',
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: AppColors.textSecondary,
+                    child: GestureDetector(
+                      onTap: isMe ? onSwitchAccount : null,
+                      child: Text(
+                        '@${p.username}',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: AppColors.textSecondary,
+                        ),
                       ),
                     ),
                   ),
+                  if (isMe)
+                    GestureDetector(
+                      onTap: onSwitchAccount,
+                      child: const Icon(
+                        Icons.keyboard_arrow_down,
+                        size: 18,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
                   if (p.isPrivate) ...[
                     const SizedBox(width: 5),
                     const Icon(

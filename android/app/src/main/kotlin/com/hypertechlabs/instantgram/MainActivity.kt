@@ -3,6 +3,7 @@ package com.hypertechlabs.instantgram
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -13,6 +14,7 @@ import io.flutter.plugin.common.MethodChannel
 
 // v0.11: notification channels (messages, muted calls) + settings pages.
 // v0.12: + activity channel (likes, comments, followers, views).
+// v0.14: + gesture exclusion for the editor timeline.
 class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,6 +52,27 @@ class MainActivity : FlutterActivity() {
                             val tag = call.argument<String>("tag")
                             if (tag != null) {
                                 getSystemService(NotificationManager::class.java)?.cancel(tag, 0)
+                            }
+                            result.success(null)
+                        }
+                        // v0.14: no edge back swipe over the editor timeline
+                        // (left, top, right, bottom, ... in pixels)
+                        "gestureExclusion" -> {
+                            val raw = call.argument<List<Number>>("rects") ?: emptyList()
+                            val rects = ArrayList<Rect>()
+                            var i = 0
+                            while (i + 3 < raw.size) {
+                                rects.add(
+                                    Rect(
+                                        raw[i].toInt(), raw[i + 1].toInt(),
+                                        raw[i + 2].toInt(), raw[i + 3].toInt()
+                                    )
+                                )
+                                i += 4
+                            }
+                            if (Build.VERSION.SDK_INT >= 29) {
+                                val v = window.decorView
+                                v.post { v.systemGestureExclusionRects = rects }
                             }
                             result.success(null)
                         }

@@ -176,6 +176,88 @@ class EditItem {
   bool isCut(VideoCut seg) =>
       activeCuts.any((c) => c.startMs <= seg.startMs && c.endMs >= seg.endMs);
 
+  // ---- v0.14: every part has its own trim (= removed bits at its ends)
+
+  /// Shortest part you can keep.
+  static const int minPartMs = 300;
+
+  /// The kept piece of [seg] (null = the whole part is deleted).
+  VideoCut? keptOf(VideoCut seg) {
+    final cs = activeCuts;
+    var a = seg.startMs, b = seg.endMs;
+    var moved = true;
+    while (moved) {
+      moved = false;
+      for (final c in cs) {
+        if (c.startMs <= a && c.endMs > a) {
+          a = c.endMs < b ? c.endMs : b;
+          moved = true;
+        }
+        if (c.startMs < b && c.endMs >= b) {
+          b = c.startMs > a ? c.startMs : a;
+          moved = true;
+        }
+      }
+      if (a >= b) return null;
+    }
+    return VideoCut(a, b);
+  }
+
+  /// [cuts] without anything inside [seg].
+  List<VideoCut> _cutsOutside(VideoCut seg) {
+    final out = <VideoCut>[];
+    for (final c in cuts) {
+      if (c.endMs <= seg.startMs || c.startMs >= seg.endMs) {
+        out.add(c);
+        continue;
+      }
+      if (c.startMs < seg.startMs) out.add(VideoCut(c.startMs, seg.startMs));
+      if (c.endMs > seg.endMs) out.add(VideoCut(seg.endMs, c.endMs));
+    }
+    return out;
+  }
+
+  /// Keep only [keepStart]..[keepEnd] of the part [seg].
+  void setKept(VideoCut seg, int keepStart, int keepEnd) {
+    if (seg.length <= minPartMs) return;
+    final a = keepStart.clamp(seg.startMs, seg.endMs - minPartMs);
+    final b = keepEnd.clamp(a + minPartMs, seg.endMs);
+    cuts = VideoTime.normalize([
+      ..._cutsOutside(seg),
+      if (a > seg.startMs) VideoCut(seg.startMs, a),
+      if (b < seg.endMs) VideoCut(b, seg.endMs),
+    ]);
+  }
+
+  /// Bring back the whole part [seg] (no trim, not deleted).
+  void restorePart(VideoCut seg) =>
+      cuts = VideoTime.normalize(_cutsOutside(seg));
+
+  /// Split at [ms]. Returns a reason when it can't (null = done).
+  String? splitAt(int ms) {
+    final seg = segmentAt(ms);
+    if (seg == null) return 'Move the white line inside the video.';
+    final kept = keptOf(seg);
+    if (kept == null) return 'This part is deleted. Bring it back first.';
+    if (ms <= kept.startMs + minPartMs || ms >= kept.endMs - minPartMs) {
+      return 'Too close to the end of a part. Move the white line a bit.';
+    }
+    if (splits.any((x) => (x - ms).abs() < minPartMs)) {
+      return 'There is already a split here.';
+    }
+    splits
+      ..add(ms)
+      ..sort();
+    return null;
+  }
+
+  /// Index of the part under [ms] (-1 = none).
+  int segmentIndexAt(int ms) {
+    final seg = segmentAt(ms);
+    if (seg == null) return -1;
+    return segments.indexWhere((s) => s.startMs == seg.startMs);
+  }
+
   VideoEdits get videoEdits => VideoEdits(
     trimStartMs: trimStart,
     trimEndMs: trimEnd > 0 && trimEnd < durationMs ? trimEnd : 0,

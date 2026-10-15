@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -13,6 +14,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../core/services/media_service.dart';
 import '../../core/services/music_player.dart';
+import '../../core/services/gesture_exclusion.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/time_ago.dart';
@@ -85,7 +87,8 @@ class MediaEditorScreen extends StatefulWidget {
   State<MediaEditorScreen> createState() => _MediaEditorScreenState();
 }
 
-class _MediaEditorScreenState extends State<MediaEditorScreen> {
+class _MediaEditorScreenState extends State<MediaEditorScreen>
+    with SingleTickerProviderStateMixin {
   late final List<EditItem> _items = widget.media
       .map((m) => EditItem(m, mode: widget.mode))
       .toList();
@@ -119,7 +122,31 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
   Timer? _recTimer;
   int _recMs = 0;
   bool _musicBeforeRec = false;
-  bool _scrubWasPlaying = false;
+
+  // v0.14 timeline: the white line stays in the middle, slide = move in
+  // time, pinch = zoom, tap a part = select it (its own trim handles)
+  final ScrollController _tlScroll = ScrollController();
+  final GlobalKey _tlKey = GlobalKey();
+  late final Ticker _tlTicker = createTicker(_onTlTick);
+  double _tlZoom = 1;
+  double _tlBasePx = 0; // px per ms when the whole video fits
+  double _tlPx = 0; // px per ms now (with zoom)
+  int? _selSeg;
+  String _stickerQuery = '';
+  bool _stickerAnimated = false;
+  bool _tlUser = false;
+  bool _tlWasPlaying = false;
+  DateTime _tlSeekAt = DateTime(2000);
+  DateTime _tlHoldUntil = DateTime(2000);
+  int _tlPosMs = 0;
+  DateTime _tlPosAt = DateTime(2000);
+  final Map<int, Offset> _tlPtrs = {};
+  bool _pinching = false;
+  double _pinchDist = 1;
+  double _pinchZoom = 1;
+  int _pinchAnchor = 0;
+  int _edgeBase = 0;
+  double _edgeDx = 0;
 
   EditItem get _item => _items[_index];
 
@@ -156,6 +183,9 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     _rec?.dispose();
     _voiceTrack?.dispose();
     _video?.dispose();
+    _tlTicker.dispose();
+    _tlScroll.dispose();
+    GestureExclusion.instance.clear();
     for (final i in _items) {
       i.zoom?.dispose();
     }
@@ -172,6 +202,10 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     _videoReady = false;
     _videoError = null;
     _selOverlay = null;
+    _selSeg = null;
+    _tlZoom = 1;
+    if (_tlTicker.isActive) _tlTicker.stop();
+    GestureExclusion.instance.clear();
     _voiceTrack?.dispose();
     _voiceTrack = null;
     old?.dispose();
@@ -222,6 +256,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
       await c.seekTo(Duration(milliseconds: item.trimStart));
       c.addListener(_loop);
       setState(() => _videoReady = true);
+      if (!_tlTicker.isActive) _tlTicker.start();
       _attachVoicePreview();
       c.play();
       _makeThumbs(item);
@@ -410,31 +445,29 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
 
   // ---------------------------------------------------------------- split
 
-  int get _pos => _video?.value.position.inMilliseconds ?? _item.trimStart;
-
+  /// v0.14: split at the white line (the middle of the timeline).
   void _splitHere() {
     final item = _item;
-    final p = _pos;
-    if (p <= item.trimStart + 300 || p >= item.endMs - 300) {
-      _snack('Move the white line inside the video, then tap Split.');
-      return;
-    }
-    if (item.splits.any((x) => (x - p).abs() < 300)) {
-      _snack('There is already a split here.');
+    final p = _tlMs;
+    final why = item.splitAt(p);
+    if (why != null) {
+      _snack(why);
       return;
     }
     HapticFeedback.selectionClick();
-    setState(() => item.splits.add(p));
+    // the new part on the right is selected (its own trim handles)
+    setState(() => _selSeg = item.segmentIndexAt(p));
   }
 
   void _deletePart() {
     final item = _item;
-    final seg = item.segmentAt(_pos);
-    if (seg == null || item.segments.length < 2) {
+    final segs = item.segments;
+    final seg = _targetPart(segs, _selSeg);
+    if (seg == null || segs.length < 2) {
       _snack('Split the video first, then delete a part.');
       return;
     }
-    if (item.isCut(seg)) return;
+    if (item.keptOf(seg) == null) return;
     final after = VideoTime.playedMs(
       item.trimStart,
       item.endMs,
@@ -451,25 +484,14 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
 
   void _restorePart() {
     final item = _item;
-    final seg = item.segmentAt(_pos);
+    final seg = _targetPart(item.segments, _selSeg);
     setState(() {
-      if (seg != null && item.isCut(seg)) {
-        // remove this part from the cuts
-        final out = <VideoCut>[];
-        for (final c in item.cuts) {
-          if (c.endMs <= seg.startMs || c.startMs >= seg.endMs) {
-            out.add(c);
-            continue;
-          }
-          if (c.startMs < seg.startMs) {
-            out.add(VideoCut(c.startMs, seg.startMs));
-          }
-          if (c.endMs > seg.endMs) out.add(VideoCut(seg.endMs, c.endMs));
-        }
-        item.cuts = VideoTime.normalize(out);
+      if (seg != null && item.keptOf(seg) == null) {
+        item.restorePart(seg);
       } else {
         item.cuts = [];
         item.splits.clear();
+        _selSeg = null;
       }
     });
     _attachVoicePreview();
@@ -477,7 +499,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
 
   Future<void> _makeThumbs(EditItem item) async {
     if (item.thumbs != null || item.durationMs <= 0) return;
-    const n = 8;
+    const n = 12;
     item.thumbs = List<Uint8List?>.filled(n, null);
     for (var i = 0; i < n; i++) {
       final t = (item.durationMs * (i + 0.5) / n).round();
@@ -1408,36 +1430,91 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
         sel != null &&
         sel < _item.overlays.length &&
         _item.overlays[sel].isSticker;
+    final found = StickerPack.search(
+      _stickerQuery,
+      animatedOnly: _stickerAnimated,
+    );
     return Column(
       children: [
-        Expanded(
-          child: GridView.count(
-            key: const ValueKey('sticker-grid'),
-            crossAxisCount: 2,
-            scrollDirection: Axis.horizontal,
-            childAspectRatio: 0.82,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            mainAxisSpacing: 4,
-            crossAxisSpacing: 4,
+        // v0.14: search + "moving" filter
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
+          child: Row(
             children: [
-              for (final id in StickerPack.ids)
-                InkWell(
-                  key: ValueKey('sticker-$id'),
-                  borderRadius: BorderRadius.circular(10),
-                  onTap: () => _addSticker(id),
-                  child: Padding(
-                    padding: const EdgeInsets.all(3),
-                    child: Center(
-                      child: StickerImage(
-                        text: StickerPack.textFor(id),
-                        width: 64,
+              Expanded(
+                child: SizedBox(
+                  height: 36,
+                  child: TextField(
+                    key: const ValueKey('sticker-search'),
+                    onChanged: (v) => setState(() => _stickerQuery = v),
+                    style: const TextStyle(fontSize: 14),
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText: 'Search stickers',
+                      isDense: true,
+                      prefixIcon: const Icon(Icons.search, size: 18),
+                      prefixIconConstraints: const BoxConstraints(minWidth: 34),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                      filled: true,
+                      fillColor: AppColors.surface,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(18),
+                        borderSide: BorderSide.none,
                       ),
                     ),
                   ),
                 ),
+              ),
+              const SizedBox(width: 8),
+              FilterChip(
+                key: const ValueKey('sticker-animated'),
+                label: const Text('Moving'),
+                selected: _stickerAnimated,
+                visualDensity: VisualDensity.compact,
+                selectedColor: AppColors.lime.withValues(alpha: 0.25),
+                onSelected: (v) => setState(() => _stickerAnimated = v),
+              ),
             ],
           ),
         ),
+        if (found.isEmpty)
+          const Expanded(
+            child: Center(
+              child: Text(
+                'No stickers found',
+                style: TextStyle(color: AppColors.textSecondary),
+              ),
+            ),
+          )
+        else
+          Expanded(
+            child: GridView.count(
+              key: const ValueKey('sticker-grid'),
+              crossAxisCount: 2,
+              scrollDirection: Axis.horizontal,
+              childAspectRatio: 0.82,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              mainAxisSpacing: 4,
+              crossAxisSpacing: 4,
+              children: [
+                for (final id in found)
+                  InkWell(
+                    key: ValueKey('sticker-$id'),
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () => _addSticker(id),
+                    child: Padding(
+                      padding: const EdgeInsets.all(3),
+                      child: Center(
+                        child: StickerImage(
+                          text: StickerPack.textFor(id),
+                          width: 64,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         SizedBox(
           height: 34,
           child: stickerSel
@@ -1836,9 +1913,146 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
 
   static const double _tlPad = 18;
 
-  /// v0.13: the whole video editor on one timeline:
-  /// - lime handles at both ends = trim,
-  /// - Split / Delete part / Restore act at the white line,
+  /// Most zoom: 400 px for one second.
+  static const double _tlMaxPxPerMs = 0.4;
+
+  /// The white line's time (what you see in the middle of the timeline).
+  int get _tlMs {
+    if (_tlScroll.hasClients && _tlPx > 0) {
+      return (_tlScroll.offset / _tlPx).round().clamp(0, _item.durationMs);
+    }
+    return _video?.value.position.inMilliseconds ?? _item.trimStart;
+  }
+
+  /// Every frame: the timeline follows the playing video (smooth, also
+  /// between the player's position updates).
+  void _onTlTick(Duration _) {
+    final c = _video;
+    if (c == null ||
+        !_videoReady ||
+        _tlUser ||
+        _pinching ||
+        !_tlScroll.hasClients ||
+        _tlPx <= 0) {
+      return;
+    }
+    final now = DateTime.now();
+    if (now.isBefore(_tlHoldUntil)) return;
+    final v = c.value;
+    var ms = v.position.inMilliseconds;
+    if (ms != _tlPosMs) {
+      _tlPosMs = ms;
+      _tlPosAt = now;
+    } else if (v.isPlaying) {
+      final gone = now.difference(_tlPosAt).inMilliseconds;
+      ms += (math.min(gone, 700) * v.playbackSpeed).round();
+    }
+    final pos = _tlScroll.position;
+    final t = (ms.clamp(0, _item.durationMs) * _tlPx).clamp(
+      0.0,
+      pos.maxScrollExtent,
+    );
+    if ((pos.pixels - t).abs() > 0.5) _tlScroll.jumpTo(t);
+  }
+
+  void _tlSeek({bool force = false}) {
+    final c = _video;
+    if (c == null) return;
+    final now = DateTime.now();
+    if (!force && now.difference(_tlSeekAt).inMilliseconds < 60) return;
+    _tlSeekAt = now;
+    final ms = _tlMs.clamp(_item.trimStart, _item.endMs);
+    _tlPosMs = ms;
+    _tlPosAt = now;
+    c.seekTo(Duration(milliseconds: ms));
+  }
+
+  bool _onTlScroll(ScrollNotification n) {
+    if (n.depth != 0 || n.metrics.axis != Axis.horizontal) return false;
+    final c = _video;
+    if (n is ScrollStartNotification && n.dragDetails != null) {
+      _tlUser = true;
+      _tlWasPlaying = c?.value.isPlaying ?? false;
+      if (_tlWasPlaying && !_recording) c?.pause();
+    } else if (n is ScrollUpdateNotification && _tlUser) {
+      _tlSeek();
+    } else if (n is ScrollEndNotification && _tlUser) {
+      _tlUser = false;
+      _tlSeek(force: true);
+      // wait for the player to get there (no jump back)
+      _tlHoldUntil = DateTime.now().add(const Duration(milliseconds: 450));
+      if (_tlWasPlaying && !_recording) c?.play();
+    }
+    return false;
+  }
+
+  // ---- pinch to zoom (two fingers on the timeline)
+  double _pinchSpan() {
+    final p = _tlPtrs.values.toList();
+    if (p.length < 2) return 1;
+    return math.max(24.0, (p[0].dx - p[1].dx).abs());
+  }
+
+  void _tlPointerDown(PointerDownEvent e) {
+    _tlPtrs[e.pointer] = e.localPosition;
+    if (_tlPtrs.length == 2 && _tlBasePx > 0) {
+      _pinchDist = _pinchSpan();
+      _pinchZoom = _tlZoom;
+      _pinchAnchor = _tlMs;
+      _tlUser = false;
+      setState(() => _pinching = true);
+    }
+  }
+
+  void _tlPointerMove(PointerMoveEvent e) {
+    if (!_tlPtrs.containsKey(e.pointer)) return;
+    _tlPtrs[e.pointer] = e.localPosition;
+    if (!_pinching || _tlBasePx <= 0) return;
+    final maxZoom = math.max(1.0, _tlMaxPxPerMs / _tlBasePx);
+    final z = (_pinchZoom * _pinchSpan() / _pinchDist).clamp(1.0, maxZoom);
+    if ((z - _tlZoom).abs() < 0.01) return;
+    setState(() => _tlZoom = z);
+    // keep the same time under the white line
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_tlScroll.hasClients) return;
+      final t = (_pinchAnchor * _tlBasePx * _tlZoom).clamp(
+        0.0,
+        _tlScroll.position.maxScrollExtent,
+      );
+      _tlScroll.jumpTo(t);
+    });
+  }
+
+  void _tlPointerUp(PointerEvent e) {
+    _tlPtrs.remove(e.pointer);
+    if (_pinching && _tlPtrs.length < 2) {
+      setState(() => _pinching = false);
+      _tlHoldUntil = DateTime.now().add(const Duration(milliseconds: 200));
+    }
+  }
+
+  /// v0.14: Android's edge "back" swipe must not steal the trim handles.
+  void _syncGestureExclusion() {
+    final box = _tlKey.currentContext?.findRenderObject();
+    if (!mounted || box is! RenderBox || !box.hasSize || !box.attached) {
+      GestureExclusion.instance.clear();
+      return;
+    }
+    final mq = MediaQuery.of(context);
+    final r = box.localToGlobal(Offset.zero) & box.size;
+    GestureExclusion.instance.set(
+      r,
+      screenWidth: mq.size.width,
+      devicePixelRatio: mq.devicePixelRatio,
+    );
+  }
+
+  /// v0.14 timeline (like CapCut):
+  /// - the white line stays in the middle; slide the timeline to move in
+  ///   the video, pinch with two fingers to zoom in / out,
+  /// - Split cuts the video at the white line; tap a part to select it,
+  ///   then drag ITS lime handles to trim that part (the first / last
+  ///   part's outer handles trim the whole video),
   /// - voice over and texts / stickers: drag to move, drag the ends to
   ///   choose when a text shows.
   Widget _timeline() {
@@ -1847,75 +2061,102 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
     if (!item.isVideo || c == null || !_videoReady || item.durationMs <= 0) {
       return const SizedBox.shrink();
     }
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _syncGestureExclusion(),
+    );
     final total = item.durationMs;
     final start = item.trimStart, end = item.endMs;
     final cuts = item.activeCuts;
     final maxLen = maxVideoMs(widget.mode);
+    final segs = item.segments;
+    final sel = segs.length == 1
+        ? 0
+        : (_selSeg != null && _selSeg! < segs.length ? _selSeg : null);
     return LayoutBuilder(
       builder: (context, box) {
-        final w = math.max(1.0, box.maxWidth - _tlPad * 2);
-        double xOf(int ms) => _tlPad + (ms / total).clamp(0.0, 1.0) * w;
-        int msOf(double x) =>
-            (((x - _tlPad) / w).clamp(0.0, 1.0) * total).round();
-        int msPerPx(double dx) => (dx / w * total).round();
+        final vw = box.maxWidth;
+        final half = vw / 2;
+        _tlBasePx = math.max(1.0, vw - _tlPad * 2) / total;
+        final px = _tlBasePx * _tlZoom;
+        _tlPx = px;
+        final contentW = vw + total * px;
+        double xOf(int ms) => half + ms.clamp(0, total) * px;
+        int msPerPx(double dx) => (dx / px).round();
 
-        void seek(double x) {
-          final ms = msOf(x).clamp(start, end);
+        // ---- trim handles of the selected part
+        void preview(int ms) {
+          _tlPosMs = ms;
+          _tlPosAt = DateTime.now();
           c.seekTo(Duration(milliseconds: ms));
         }
 
-        // ---- trim handles
-        void trimTo({int? s, int? e}) {
-          var ns = s ?? item.trimStart;
-          var ne = e ?? item.endMs;
-          if (s != null) {
-            ns = ns.clamp(0, ne - 1000);
-            if (ne - ns > maxLen) ne = ns + maxLen;
-          } else {
-            ne = ne.clamp(ns + 1000, total);
-            if (ne - ns > maxLen) ns = ne - maxLen;
-          }
+        void dragEdge(int i, bool left, double dx) {
+          final list = item.segments;
+          if (i >= list.length) return;
+          final seg = list[i];
+          final kept = item.keptOf(seg) ?? seg;
+          final first = i == 0, last = i == list.length - 1;
+          final target = _edgeBase + msPerPx(_edgeDx += dx);
+          const min = EditItem.minPartMs;
           setState(() {
-            item.trimStart = ns;
-            item.trimEnd = ne;
+            if (left && first) {
+              // outer edge = trim start of the whole video
+              final ns = _clampMs(
+                target,
+                math.max(0, item.endMs - maxLen),
+                kept.endMs - min,
+              );
+              item.trimStart = ns;
+              item.setKept(VideoCut(ns, seg.endMs), ns, kept.endMs);
+              preview(ns);
+            } else if (!left && last) {
+              final ne = _clampMs(
+                target,
+                kept.startMs + min,
+                math.min(total, item.trimStart + maxLen),
+              );
+              item.trimEnd = ne;
+              item.setKept(VideoCut(seg.startMs, ne), kept.startMs, ne);
+              preview(math.max(kept.startMs, ne - 400));
+            } else if (left) {
+              final ns = _clampMs(target, seg.startMs, kept.endMs - min);
+              item.setKept(seg, ns, kept.endMs);
+              preview(ns);
+            } else {
+              final ne = _clampMs(target, kept.startMs + min, seg.endMs);
+              item.setKept(seg, kept.startMs, ne);
+              preview(math.max(kept.startMs, ne - 400));
+            }
           });
-          c.seekTo(
-            Duration(milliseconds: s != null ? ns : math.max(ns, ne - 600)),
-          );
         }
 
-        void trimDone() {
-          c.seekTo(
-            Duration(
-              milliseconds: VideoTime.firstPlayable(
-                item.trimStart,
-                item.activeCuts,
-              ),
-            ),
-          );
-          if (!_recording) c.play();
+        void edgeStart(int i, bool left) {
+          if (c.value.isPlaying) c.pause();
+          final list = item.segments;
+          if (i >= list.length) return;
+          final kept = item.keptOf(list[i]) ?? list[i];
+          _edgeBase = left ? kept.startMs : kept.endMs;
+          _edgeDx = 0;
+        }
+
+        void edgeDone() {
           _attachVoicePreview();
+          setState(() {});
         }
 
-        Widget handle(
-          Key key,
-          double x,
-          GestureDragUpdateCallback onDrag, {
-          required bool left,
-        }) {
+        Widget handle(int i, double x, {required bool left}) {
           return Positioned(
-            key: key,
+            key: ValueKey(left ? 'trim-start-$i' : 'trim-end-$i'),
             left: x - (left ? 16 : 0),
             width: 16,
             top: 0,
             bottom: 0,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onHorizontalDragStart: (_) {
-                if (c.value.isPlaying) c.pause();
-              },
-              onHorizontalDragUpdate: onDrag,
-              onHorizontalDragEnd: (_) => trimDone(),
+              onHorizontalDragStart: (_) => edgeStart(i, left),
+              onHorizontalDragUpdate: (d) => dragEdge(i, left, d.delta.dx),
+              onHorizontalDragEnd: (_) => edgeDone(),
+              onHorizontalDragCancel: edgeDone,
               child: Container(
                 decoration: BoxDecoration(
                   color: AppColors.lime,
@@ -2016,17 +2257,17 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
 
         Widget row(double h, List<Widget> children) => SizedBox(
           height: h,
-          width: box.maxWidth,
+          width: contentW,
           child: Stack(clipBehavior: Clip.none, children: children),
         );
 
-        // ---- video row: whole file, trim frame, removed parts, splits
+        // ---- video row: frames, parts (tap = select), trims, deleted parts
         final thumbs = item.thumbs;
-        const slots = 10;
+        final slots = (total * px / 44).ceil().clamp(1, 400);
         final videoRow = row(48, [
           Positioned(
-            left: _tlPad,
-            width: w,
+            left: half,
+            width: total * px,
             top: 0,
             bottom: 0,
             child: ClipRRect(
@@ -2037,13 +2278,11 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                     Expanded(
                       child: Builder(
                         builder: (_) {
-                          final t = (k + 0.5) * total / slots;
                           final idx = thumbs == null
                               ? -1
-                              : (t / total * thumbs.length).floor().clamp(
-                                  0,
-                                  thumbs.length - 1,
-                                );
+                              : ((k + 0.5) / slots * thumbs.length)
+                                    .floor()
+                                    .clamp(0, thumbs.length - 1);
                           final b = idx >= 0 ? thumbs![idx] : null;
                           return b != null
                               ? Image.memory(
@@ -2064,21 +2303,22 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
               ),
             ),
           ),
-          // outside the trim
+          // outside the trim (drag the outer handles to get it back)
           Positioned(
-            left: _tlPad,
-            width: math.max(0, xOf(start) - _tlPad),
+            left: half,
+            width: math.max(0, xOf(start) - half),
             top: 0,
             bottom: 0,
-            child: Container(color: Colors.black.withValues(alpha: 0.68)),
+            child: Container(color: Colors.black.withValues(alpha: 0.72)),
           ),
           Positioned(
             left: xOf(end),
-            width: math.max(0, _tlPad + w - xOf(end)),
+            width: math.max(0, xOf(total) - xOf(end)),
             top: 0,
             bottom: 0,
-            child: Container(color: Colors.black.withValues(alpha: 0.68)),
+            child: Container(color: Colors.black.withValues(alpha: 0.72)),
           ),
+          // trimmed / deleted bits inside the parts
           for (final cut in cuts)
             Positioned(
               key: ValueKey('tl-cut-${cut.startMs}'),
@@ -2094,44 +2334,63 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
                     : null,
               ),
             ),
-          for (final sp in item.splits)
-            if (sp > start && sp < end)
-              Positioned(
-                key: ValueKey('tl-split-$sp'),
-                left: xOf(sp) - 1.5,
-                width: 3,
-                top: 0,
-                bottom: 0,
-                child: const ColoredBox(color: Colors.white),
-              ),
-          // trim frame
-          Positioned(
-            left: xOf(start),
-            width: math.max(0, xOf(end) - xOf(start)),
-            top: 0,
-            bottom: 0,
-            child: IgnorePointer(
-              child: Container(
-                decoration: BoxDecoration(
-                  border: Border.symmetric(
-                    horizontal: BorderSide(color: AppColors.lime, width: 2.5),
-                  ),
-                ),
+          // the parts: tap to select
+          for (var i = 0; i < segs.length; i++)
+            Positioned(
+              key: ValueKey('tl-part-$i'),
+              left: xOf(segs[i].startMs),
+              width: math.max(4.0, xOf(segs[i].endMs) - xOf(segs[i].startMs)),
+              top: 0,
+              bottom: 0,
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _selSeg = _selSeg == i ? null : i);
+                },
               ),
             ),
-          ),
-          handle(
-            const ValueKey('trim-start'),
-            xOf(start),
-            (d) => trimTo(s: item.trimStart + msPerPx(d.delta.dx)),
-            left: true,
-          ),
-          handle(
-            const ValueKey('trim-end'),
-            xOf(end),
-            (d) => trimTo(e: item.endMs + msPerPx(d.delta.dx)),
-            left: false,
-          ),
+          // gaps between the parts
+          for (var i = 1; i < segs.length; i++)
+            Positioned(
+              key: ValueKey('tl-split-${segs[i].startMs}'),
+              left: xOf(segs[i].startMs) - 1.5,
+              width: 3,
+              top: 0,
+              bottom: 0,
+              child: const IgnorePointer(
+                child: ColoredBox(color: Colors.black),
+              ),
+            ),
+          // the selected part: lime frame + its own handles
+          if (sel != null)
+            ...() {
+              final kept = item.keptOf(segs[sel]);
+              if (kept == null) return const <Widget>[];
+              return <Widget>[
+                Positioned(
+                  key: const ValueKey('tl-selected'),
+                  left: xOf(kept.startMs),
+                  width: math.max(0, xOf(kept.endMs) - xOf(kept.startMs)),
+                  top: 0,
+                  bottom: 0,
+                  child: IgnorePointer(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        border: Border.symmetric(
+                          horizontal: BorderSide(
+                            color: AppColors.lime,
+                            width: 2.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                handle(sel, xOf(kept.startMs), left: true),
+                handle(sel, xOf(kept.endMs), left: false),
+              ];
+            }(),
         ]);
 
         // ---- voice over: drag to move
@@ -2183,81 +2442,6 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
         }
 
         final rows = <Widget>[
-          // time + split tools
-          SizedBox(
-            height: 34,
-            child: ValueListenableBuilder<VideoPlayerValue>(
-              valueListenable: c,
-              builder: (context, v, _) {
-                final pos = v.position.inMilliseconds;
-                final played = VideoTime.playedAt(pos, start, cuts);
-                final seg = item.segmentAt(pos);
-                final onCut = seg != null && item.isCut(seg);
-                final parts = item.segments.length;
-                Widget tool(
-                  String k,
-                  IconData icon,
-                  String label,
-                  VoidCallback? f, {
-                  Color? color,
-                }) => TextButton.icon(
-                  key: ValueKey(k),
-                  onPressed: f,
-                  style: TextButton.styleFrom(
-                    foregroundColor: color ?? Colors.white,
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    textStyle: const TextStyle(
-                      fontFamily: AppTheme.fontFamily,
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  icon: Icon(icon, size: 17),
-                  label: Text(label),
-                );
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: _tlPad - 6),
-                  child: Row(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(left: 6),
-                        child: Text(
-                          '${durationLabel(played)} / ${durationLabel(item.playedMs)}',
-                          key: const ValueKey('tl-time'),
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      const Spacer(),
-                      tool(
-                        'split-here',
-                        Icons.vertical_split_outlined,
-                        'Split',
-                        _splitHere,
-                      ),
-                      tool(
-                        'split-delete',
-                        Icons.delete_outline,
-                        'Delete',
-                        parts > 1 && !onCut ? _deletePart : null,
-                        color: AppColors.like,
-                      ),
-                      if (item.cuts.isNotEmpty || item.splits.isNotEmpty)
-                        tool(
-                          'split-restore',
-                          Icons.undo,
-                          onCut ? 'Bring back' : 'Reset',
-                          _restorePart,
-                        ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
           videoRow,
           if (_audio != null && _musicAllowed)
             row(22, [
@@ -2358,66 +2542,187 @@ class _MediaEditorScreenState extends State<MediaEditorScreen> {
             ]),
         ];
 
-        final content = Stack(
+        final scroller = NotificationListener<ScrollNotification>(
+          onNotification: _onTlScroll,
+          child: SingleChildScrollView(
+            key: const ValueKey('editor-timeline-scroll'),
+            controller: _tlScroll,
+            scrollDirection: Axis.horizontal,
+            physics: _pinching
+                ? const NeverScrollableScrollPhysics()
+                : const ClampingScrollPhysics(),
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              // tap an empty place: go there, nothing selected
+              onTapUp: (d) {
+                final ms = ((d.localPosition.dx - half) / px).round().clamp(
+                  0,
+                  total,
+                );
+                setState(() => _selSeg = null);
+                _tlScroll.animateTo(
+                  ms * px,
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOut,
+                );
+                _tlHoldUntil = DateTime.now().add(
+                  const Duration(milliseconds: 500),
+                );
+                preview(ms.clamp(start, end));
+              },
+              child: SizedBox(
+                width: contentW,
+                child: Column(mainAxisSize: MainAxisSize.min, children: rows),
+              ),
+            ),
+          ),
+        );
+
+        return Column(
+          key: const ValueKey('editor-timeline'),
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Column(mainAxisSize: MainAxisSize.min, children: rows),
-            // the white line
-            Positioned.fill(
-              child: IgnorePointer(
-                child: ValueListenableBuilder<VideoPlayerValue>(
-                  valueListenable: c,
-                  builder: (context, v, _) {
-                    final x = xOf(v.position.inMilliseconds);
-                    return Stack(
-                      children: [
-                        Positioned(
-                          key: const ValueKey('tl-playhead'),
-                          left: x - 1,
-                          top: 32,
-                          bottom: 0,
-                          width: 2,
-                          child: const DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              boxShadow: [
-                                BoxShadow(color: Colors.black54, blurRadius: 3),
-                              ],
-                            ),
+            _timelineTools(c, segs, sel),
+            Listener(
+              key: _tlKey,
+              onPointerDown: _tlPointerDown,
+              onPointerMove: _tlPointerMove,
+              onPointerUp: _tlPointerUp,
+              onPointerCancel: _tlPointerUp,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 156),
+                child: Stack(
+                  children: [
+                    SingleChildScrollView(
+                      physics: const ClampingScrollPhysics(),
+                      padding: const EdgeInsets.only(top: 2, bottom: 6),
+                      child: scroller,
+                    ),
+                    // the white line (always in the middle)
+                    Positioned(
+                      key: const ValueKey('tl-playhead'),
+                      left: half - 1,
+                      top: 0,
+                      bottom: 0,
+                      width: 2,
+                      child: const IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            boxShadow: [
+                              BoxShadow(color: Colors.black54, blurRadius: 3),
+                            ],
                           ),
                         ),
-                      ],
-                    );
-                  },
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
           ],
         );
-
-        return GestureDetector(
-          key: const ValueKey('editor-timeline'),
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (d) => seek(d.localPosition.dx),
-          onHorizontalDragStart: (d) {
-            _scrubWasPlaying = c.value.isPlaying;
-            if (_scrubWasPlaying && !_recording) c.pause();
-            seek(d.localPosition.dx);
-          },
-          onHorizontalDragUpdate: (d) => seek(d.localPosition.dx),
-          onHorizontalDragEnd: (_) {
-            if (_scrubWasPlaying && !_recording) c.play();
-          },
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 190),
-            child: SingleChildScrollView(
-              physics: const ClampingScrollPhysics(),
-              padding: const EdgeInsets.only(top: 2, bottom: 6),
-              child: content,
-            ),
-          ),
-        );
       },
     );
+  }
+
+  /// Time + Split / Delete / Bring back (they act on the selected part, or
+  /// the part under the white line).
+  Widget _timelineTools(
+    VideoPlayerController c,
+    List<VideoCut> segs,
+    int? sel,
+  ) {
+    final item = _item;
+    return SizedBox(
+      height: 34,
+      child: ValueListenableBuilder<VideoPlayerValue>(
+        valueListenable: c,
+        builder: (context, v, _) {
+          final pos = v.position.inMilliseconds;
+          final played = VideoTime.playedAt(
+            pos,
+            item.trimStart,
+            item.activeCuts,
+          );
+          final target = _targetPart(segs, sel);
+          final onCut = target != null && item.keptOf(target) == null;
+          Widget tool(
+            String k,
+            IconData icon,
+            String label,
+            VoidCallback? f, {
+            Color? color,
+          }) => TextButton.icon(
+            key: ValueKey(k),
+            onPressed: f,
+            style: TextButton.styleFrom(
+              foregroundColor: color ?? Colors.white,
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              textStyle: const TextStyle(
+                fontFamily: AppTheme.fontFamily,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            icon: Icon(icon, size: 17),
+            label: Text(label),
+          );
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: _tlPad - 6),
+            child: Row(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(left: 6),
+                  child: Text(
+                    '${durationLabel(played)} / ${durationLabel(item.playedMs)}',
+                    key: const ValueKey('tl-time'),
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                tool(
+                  'split-here',
+                  Icons.vertical_split_outlined,
+                  'Split',
+                  _splitHere,
+                ),
+                tool(
+                  'split-delete',
+                  Icons.delete_outline,
+                  'Delete',
+                  segs.length > 1 && !onCut ? _deletePart : null,
+                  color: AppColors.like,
+                ),
+                if (item.cuts.isNotEmpty || item.splits.isNotEmpty)
+                  tool(
+                    'split-restore',
+                    Icons.undo,
+                    onCut ? 'Bring back' : 'Reset',
+                    _restorePart,
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// clamp that never throws (lo wins when lo > hi).
+  static int _clampMs(int v, int lo, int hi) =>
+      v < lo ? lo : (v > hi ? math.max(lo, hi) : v);
+
+  /// The part the tools work on: the selected one, else the one under the
+  /// white line.
+  VideoCut? _targetPart(List<VideoCut> segs, int? sel) {
+    if (sel != null && sel < segs.length) return segs[sel];
+    final i = _item.segmentIndexAt(_tlMs);
+    return i >= 0 ? segs[i] : null;
   }
 
   // ---------------------------------------------------------------- build

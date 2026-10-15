@@ -69,7 +69,10 @@ class MediaPrefetch {
     for (var k = 1; k <= diskVideos && index + k < list.length; k++) {
       final p = list[index + k];
       for (final m in p.items.take(2)) {
-        if (m.isVideo) video(NetQuality.urlFor(m));
+        // v0.14: the copy that will play, enough of it to start at once
+        if (m.isVideo) {
+          video(NetQuality.urlFor(m), bytes: NetQuality.prefetchBytesFor(m));
+        }
       }
     }
     for (var k = 1; k <= images && index + k < list.length; k++) {

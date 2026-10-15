@@ -26,3 +26,48 @@ class VerifiedBadge extends StatelessWidget {
     );
   }
 }
+
+/// v0.14: a username with the blue badge after it (if verified). Use it
+/// everywhere an account is shown.
+class NameBadge extends StatelessWidget {
+  const NameBadge(
+    this.name, {
+    super.key,
+    required this.uid,
+    this.style,
+    this.badgeSize,
+  });
+
+  final String name;
+  final String uid;
+  final TextStyle? style;
+  final double? badgeSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final fs = style?.fontSize ?? 14;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: style,
+          ),
+        ),
+        VerifiedBadge(uid: uid, size: badgeSize ?? fs + 1),
+      ],
+    );
+  }
+}
+
+/// v0.14: the badge inside a sentence (Text.rich).
+InlineSpan verifiedSpan(String uid, {double size = 14}) => WidgetSpan(
+  alignment: PlaceholderAlignment.middle,
+  child: Padding(
+    padding: const EdgeInsets.only(right: 3),
+    child: VerifiedBadge(uid: uid, size: size),
+  ),
+);

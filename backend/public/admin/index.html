@@ -94,14 +94,12 @@
   <form class="box" id="loginForm" autocomplete="on">
     <div class="logo">Instant<b>Gram</b></div>
     <h1>Admin</h1>
-    <div class="muted small">Log in with your InstantGram admin account.</div>
-    <label for="email">Email</label>
-    <input id="email" type="email" autocomplete="username" required value="techlabs.hyper@gmail.com">
-    <label for="password">Password</label>
-    <input id="password" type="password" autocomplete="current-password" required>
+    <div class="muted small">Type the admin password (ADMIN_PASSWORD on Vercel).</div>
+    <input type="text" name="username" value="instantgram-admin" autocomplete="username" class="hide" aria-hidden="true">
+    <label for="password">Admin password</label>
+    <input id="password" type="password" autocomplete="current-password" required minlength="16">
     <button class="lime" style="width:100%;margin-top:18px" id="loginBtn">Log in</button>
     <div id="loginMsg" class="msg hide"></div>
-    <button type="button" id="verifyBtn" class="hide" style="width:100%;margin-top:10px">Send verification email</button>
   </form>
 </section>
 
@@ -133,6 +131,16 @@
 
     <div id="page-users" class="hide">
       <h2>Users</h2>
+      <div class="tabs" id="userTabs">
+        <button data-filter="new" class="on">Newest</button>
+        <button data-filter="followers">Most followers</button>
+        <button data-filter="verified">Verified</button>
+        <button data-filter="banned">Blocked</button>
+        <button data-filter="private">Private</button>
+        <button data-filter="online">Online now</button>
+        <button data-filter="country">Country</button>
+        <input id="userCountry" class="hide" maxlength="2" placeholder="IN" style="width:70px;text-transform:uppercase">
+      </div>
       <form class="row" id="userSearch" style="margin-bottom:12px">
         <input id="userQ" class="grow" placeholder="Search username, email or user id" style="flex:1;width:auto">
         <button class="lime">Search</button>
@@ -155,7 +163,21 @@
 
     <div id="page-reports" class="hide">
       <div class="row"><h2 class="grow">Reports</h2><button id="repRefresh">Refresh</button></div>
-      <div class="muted small" style="margin-bottom:10px">Reports from the app (new since v0.13). Press Done after you handled one.</div>
+      <div class="muted small" style="margin-bottom:10px">Reports from the app. Press Done after you handled one.</div>
+      <div class="tabs" id="repTabs">
+        <button data-kind="" class="on">All</button>
+        <button data-kind="post">Posts</button>
+        <button data-kind="clip">Clips</button>
+        <button data-kind="comment">Comments</button>
+        <button data-kind="user">Users</button>
+        <select id="repReason" style="width:auto">
+          <option value="">Any reason</option>
+          <option>Spam</option><option>Nudity or sexual content</option><option>Hate speech</option>
+          <option>Violence or dangerous acts</option><option>Bullying or harassment</option><option>Scam or fraud</option>
+          <option>False information</option><option>Copyright</option><option>Something else</option>
+        </select>
+      </div>
+      <div class="muted small hide" id="repInfo" style="margin-bottom:8px"></div>
       <div class="list" id="repList"></div>
       <button class="more hide" id="repMore">Load more</button>
     </div>
@@ -176,6 +198,12 @@
         <input id="noticeTitle" value="InstantGram" maxlength="80" style="margin:6px 0 12px">
         <label class="muted small">Message</label>
         <textarea id="noticeText" rows="5" maxlength="900" style="margin-top:6px" placeholder="Write your message"></textarea>
+        <label class="muted small" style="display:block;margin-top:12px">Picture (optional)</label>
+        <div class="row" style="margin-top:6px">
+          <input id="noticeImg" type="file" accept="image/*" style="flex:1;width:auto">
+          <button type="button" class="ghost small hide" id="noticeImgDel">Remove</button>
+        </div>
+        <img id="noticeImgPreview" class="hide" alt="" style="margin-top:8px;max-width:100%;max-height:220px;border-radius:12px">
         <button class="lime" id="noticeSend" style="margin-top:14px">Send</button>
         <div class="progress hide" id="noticeBar"><div></div></div>
         <div class="small muted" id="noticeStatus" style="margin-top:8px"></div>
@@ -205,6 +233,8 @@
     if (s < 86400 * 30) return `${Math.floor(s / 86400)} d ago`;
     return d.toLocaleDateString();
   };
+  // ids are letters, numbers, _ and - only
+  const cssEsc = (v) => (window.CSS && CSS.escape ? CSS.escape(String(v)) : String(v).replace(/[^A-Za-z0-9_-]/g, ''));
   const full = (t) => (t ? new Date(t).toLocaleString() : '–');
 
   // ---------------- session ----------------
@@ -224,14 +254,11 @@
     return j;
   }
 
+  // v0.14: one password -> a 12 hour session token
+  const live = (x) => !!(x && x.token && Date.parse(x.expiresAt) > Date.now());
   async function fresh() {
-    if (!sess) throw Object.assign(new Error('Not logged in'), { status: 401 });
-    if (Date.now() > sess.until - 120000) {
-      const s = await raw({ action: 'refresh', refreshToken: sess.refreshToken });
-      sess = { ...sess, ...s, until: Date.now() + s.expiresIn * 1000 };
-      save();
-    }
-    return sess.idToken;
+    if (!live(sess)) throw Object.assign(new Error(sess ? 'Login expired. Please log in again.' : 'Not logged in'), { status: 401 });
+    return sess.token;
   }
 
   async function api(action, body = {}) {
@@ -250,30 +277,19 @@
   const fail = (e) => toast(e.message || String(e), 6000);
 
   // ---------------- login ----------------
-  let pendingVerify = '';
   function showMsg(text, ok = false) {
     const m = $('loginMsg'); m.textContent = text; m.className = ok ? 'msg ok' : 'msg';
   }
   $('loginForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    $('loginBtn').disabled = true; $('verifyBtn').classList.add('hide');
+    $('loginBtn').disabled = true;
     try {
-      const s = await raw({ action: 'login', email: $('email').value, password: $('password').value });
-      if (!s.emailVerified) {
-        pendingVerify = s.idToken;
-        showMsg('Your email is not verified yet. Press the button, open the email, click the link, then log in again.');
-        $('verifyBtn').classList.remove('hide');
-        return;
-      }
-      sess = { ...s, until: Date.now() + s.expiresIn * 1000 };
-      save(); $('password').value = '';
+      const s = await raw({ action: 'login', password: $('password').value });
+      sess = { token: s.token, expiresAt: s.expiresAt };
+      save(); $('password').value = ''; $('loginMsg').classList.add('hide');
       start();
     } catch (e) { showMsg(e.message); }
     finally { $('loginBtn').disabled = false; }
-  });
-  $('verifyBtn').addEventListener('click', async () => {
-    try { await raw({ action: 'sendVerify', idToken: pendingVerify }); showMsg('Email sent. Check your inbox (and spam), click the link, then log in again.', true); $('verifyBtn').classList.add('hide'); }
-    catch (e) { showMsg(e.message); }
   });
   function logout(reason) {
     sess = null; save();
@@ -295,7 +311,7 @@
     $('login').classList.add('hide'); $('app').classList.remove('hide');
     try {
       const me = await api('me');
-      $('who').textContent = me.email;
+      $('who').textContent = `logged in until ${new Date(sess.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
       if (!me.ready) toast('FIREBASE_SERVICE_ACCOUNT is missing on Vercel: data can not load.', 9000);
     } catch (e) { if (e.status !== 401) fail(e); return; }
     for (const k of Object.keys(loaded)) delete loaded[k];
@@ -349,17 +365,35 @@
   $('dashRefresh').addEventListener('click', loadDash);
 
   // ---------------- users ----------------
-  let userCursor = '';
+  // v0.14: filters (search text wins over the filter)
+  let userCursor = '', userOffset = 0, userFilter = 'new';
   async function loadUsers(reset) {
-    if (reset) { userCursor = ''; $('userList').innerHTML = '<div class="muted">Loading…</div>'; }
+    if (reset) { userCursor = ''; userOffset = 0; $('userList').innerHTML = '<div class="muted">Loading…</div>'; }
     try {
       const q = $('userQ').value.trim();
-      const r = await api('users', { q, cursor: userCursor });
+      const country = $('userCountry').value.trim().toUpperCase();
+      if (!q && userFilter === 'country' && !/^[A-Z]{2}$/.test(country)) {
+        $('userList').innerHTML = '<div class="muted">Type a 2 letter country code (like IN) and press Search.</div>';
+        $('userMore').classList.add('hide');
+        return;
+      }
+      const r = await api('users', q ? { q, cursor: userCursor } : { filter: userFilter, country, cursor: userCursor, offset: userOffset });
       if (reset) $('userList').innerHTML = '';
       $('userList').insertAdjacentHTML('beforeend', r.users.map(userRow).join('') || (reset ? '<div class="muted">No users found</div>' : ''));
-      userCursor = r.cursor; $('userMore').classList.toggle('hide', !r.cursor);
+      userCursor = r.cursor || ''; userOffset = r.offset || 0;
+      $('userMore').classList.toggle('hide', !userCursor && !userOffset);
     } catch (e) { $('userList').innerHTML = `<div class="msg">${esc(e.message)}</div>`; }
   }
+  $('userTabs').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    userFilter = b.dataset.filter;
+    for (const x of $('userTabs').querySelectorAll('button')) x.classList.toggle('on', x === b);
+    $('userCountry').classList.toggle('hide', userFilter !== 'country');
+    $('userQ').value = '';
+    if (userFilter === 'country') $('userCountry').focus();
+    loadUsers(true);
+  });
+  $('userCountry').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); loadUsers(true); } });
   $('userSearch').addEventListener('submit', (e) => { e.preventDefault(); loadUsers(true); });
   $('userMore').addEventListener('click', () => loadUsers(false));
 
@@ -383,7 +417,7 @@
   $('postMore').addEventListener('click', () => loadPosts(false));
 
   // ---------------- reports ----------------
-  let repCursor = '';
+  let repCursor = '', repKind = '';
   const repRow = (r) => `
     <div class="item" style="cursor:default;align-items:flex-start" id="rep-${esc(r.id)}">
       <div class="grow">
@@ -399,13 +433,23 @@
   async function loadReports(reset) {
     if (reset) { repCursor = ''; $('repList').innerHTML = '<div class="muted">Loading…</div>'; }
     try {
-      const r = await api('reports', { cursor: repCursor });
+      const reason = $('repReason').value;
+      const r = await api('reports', { cursor: repCursor, kind: repKind, reason });
+      $('repInfo').classList.toggle('hide', !(repKind || reason));
+      if (repKind || reason) $('repInfo').textContent = `${fmt(r.total)} found in the newest ${fmt(r.scanned)} reports`;
       if (reset) $('repList').innerHTML = '';
       $('repList').insertAdjacentHTML('beforeend', r.reports.map(repRow).join('') || (reset ? '<div class="muted">No open reports 🎉</div>' : ''));
       repCursor = r.cursor; $('repMore').classList.toggle('hide', !r.cursor);
     } catch (e) { $('repList').innerHTML = `<div class="msg">${esc(e.message)}</div>`; }
   }
   $('repRefresh').addEventListener('click', () => loadReports(true));
+  $('repTabs').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    repKind = b.dataset.kind;
+    for (const x of $('repTabs').querySelectorAll('button')) x.classList.toggle('on', x === b);
+    loadReports(true);
+  });
+  $('repReason').addEventListener('change', () => loadReports(true));
   $('repMore').addEventListener('click', () => loadReports(false));
   document.addEventListener('click', async (e) => {
     const b = e.target.closest('button'); if (!b) return;
@@ -449,19 +493,78 @@
           <button class="blue" id="uVerify">${u.verified ? 'Remove badge' : 'Give verified badge'}</button>
           <button class="red" id="uBan">${u.banned ? 'Unblock' : 'Block account'}</button>
           <button id="uNotice">Send notice</button>
+          <button id="uMail">Email</button>
+          <button class="red" id="uDelete">Delete account</button>
         </div>
+        <div class="progress hide" id="uDelBar"><div></div></div>
+        <div class="small muted" id="uDelStatus"></div>
         ${r.reports.length ? `<h3>Reports about this user (${r.reports.length})</h3>${r.reports.map((x) => `<div class="small" style="margin:4px 0">• ${esc(x.reason)} — ${esc(x.message || '')} <span class="muted">${esc(when(x.createdAt))}</span></div>`).join('')}` : ''}
         <h3>Posts &amp; clips</h3>
         <div class="grid">${r.posts.map(tile).join('') || '<div class="muted">No posts</div>'}</div>`);
       $('uVerify').onclick = async () => {
-        try { await api('verify', { uid, on: !u.verified }); toast(u.verified ? 'Badge removed' : 'Verified badge given ✔'); openUser(uid); } catch (e) { fail(e); }
+        try {
+          await api('verify', { uid, on: !u.verified });
+          toast(u.verified ? 'Badge removed' : 'Verified badge given ✔');
+          mail(u, u.verified ? 'unverify' : 'verify');
+          openUser(uid);
+        } catch (e) { fail(e); }
       };
       $('uBan').onclick = async () => {
         if (!u.banned && !confirm(`Block @${u.username}? They are logged out and can't log in any more.`)) return;
-        try { await api('ban', { uid, on: !u.banned }); toast(u.banned ? 'Unblocked' : 'Account blocked'); openUser(uid); } catch (e) { fail(e); }
+        try {
+          await api('ban', { uid, on: !u.banned });
+          toast(u.banned ? 'Unblocked' : 'Account blocked');
+          mail(u, u.banned ? 'unblock' : 'block');
+          openUser(uid);
+        } catch (e) { fail(e); }
       };
+      $('uMail').onclick = () => mail(u, 'plain');
+      $('uDelete').onclick = () => deleteAccount(u);
       $('uNotice').onclick = () => { closeDrawer(); go('notice'); document.querySelector('input[name=to][value=one]').click(); $('noticeUser').value = u.username; pickUser(); };
     } catch (e) { openDrawer(drawerHead('User') + `<div class="msg">${esc(e.message)}</div>`); }
+  }
+
+  // ---------------- v0.14: email templates + delete account ----------------
+  const MAILS = {
+    verify: ['You are verified on InstantGram ✔', 'Good news! Your account now has the blue verified badge. People can see that your account is real.'],
+    unverify: ['Your InstantGram verified badge was removed', 'Your account no longer has the verified badge.'],
+    block: ['Your InstantGram account is blocked', 'Your account was blocked because it broke the InstantGram community rules. You can not log in now.'],
+    unblock: ['Your InstantGram account is active again', 'Your account is not blocked any more. You can log in again.'],
+    delete: ['Your InstantGram account was deleted', 'Your account and everything you shared (posts, clips, moments) were deleted because it broke the InstantGram community rules.'],
+    plain: ['InstantGram', ''],
+  };
+  const openMail = (url) => (typeof window.igOpenMail === 'function' ? window.igOpenMail(url) : (window.location.href = url));
+  function mail(u, kind) {
+    if (!u.email) { toast('This user has no email address'); return; }
+    const [subject, text] = MAILS[kind] || MAILS.plain;
+    const body = `Hi @${u.username || 'there'},\n\n${text}${text ? '\n\nIf you think this is a mistake, just reply to this email.' : ''}\n\nThe InstantGram team\ntechlabs.hyper@gmail.com`;
+    openMail(`mailto:${encodeURIComponent(u.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+  }
+  async function deleteAccount(u) {
+    const typed = prompt(`Delete @${u.username} for ever? Posts, clips, moments, followers and the login are removed. This can not be undone.\n\nType DELETE to confirm.`);
+    if (typed !== 'DELETE') { if (typed !== null) toast('Not deleted (you must type DELETE)'); return; }
+    const bar = $('uDelBar'), status = $('uDelStatus');
+    $('uDelete').disabled = true; bar.classList.remove('hide');
+    const names = { posts: 'posts & clips', moments: 'moments', followers: 'followers', following: 'following', lists: 'notifications & lists', account: 'profile & login' };
+    let step = '', total = 0;
+    try {
+      for (let round = 0; round < 2000; round++) {
+        const r = await api('deleteUser', { uid: u.uid, confirm: 'DELETE', step });
+        total += r.n || 0;
+        const i = r.done ? 6 : Math.max(0, ['posts', 'moments', 'followers', 'following', 'lists', 'account'].indexOf(r.step));
+        bar.firstElementChild.style.width = `${Math.round((i / 6) * 100)}%`;
+        status.textContent = r.done ? `Deleted ✔ (${fmt(total)} items)` : `Deleting ${names[r.step] || ''}… (${fmt(total)} items)`;
+        if (r.done) break;
+        step = r.step;
+      }
+      toast(`@${u.username} deleted`);
+      document.querySelectorAll(`[data-uid="${cssEsc(u.uid)}"]`).forEach((el) => el.remove());
+      mail(u, 'delete');
+      setTimeout(closeDrawer, 1200);
+    } catch (e) {
+      status.textContent = `Stopped: ${e.message}. Press Delete again to continue.`;
+      $('uDelete').disabled = false;
+    }
   }
 
   async function openPost(id, kind) {
@@ -489,7 +592,7 @@
           </div>`).join('') || '<div class="muted">No comments</div>'}`}`);
       $('pDel').onclick = async () => {
         if (!confirm('Delete it for everyone? This can not be undone.')) return;
-        try { await api('deletePost', { id, kind: p.kind }); toast('Deleted'); closeDrawer(); document.querySelectorAll(`[data-pid="${CSS.escape(id)}"]`).forEach((el) => el.remove()); } catch (e) { fail(e); }
+        try { await api('deletePost', { id, kind: p.kind }); toast('Deleted'); closeDrawer(); document.querySelectorAll(`[data-pid="${cssEsc(id)}"]`).forEach((el) => el.remove()); } catch (e) { fail(e); }
       };
       $('drawer').querySelectorAll('[data-del-comment]').forEach((b) => {
         b.onclick = async () => {
@@ -518,6 +621,44 @@
     } catch (e) { $('noticeUserInfo').textContent = e.message; }
   }
   $('noticeUser').addEventListener('input', () => { clearTimeout(pickTimer); pickTimer = setTimeout(pickUser, 400); });
+  // v0.14: notice picture -> made smaller in the browser (JPEG, max 1280 px)
+  let noticeJpeg = '';
+  function shrink(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const k = Math.min(1, 1280 / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.naturalWidth * k));
+        c.height = Math.max(1, Math.round(img.naturalHeight * k));
+        const g = c.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        let q = 0.85, out = c.toDataURL('image/jpeg', q);
+        while (out.length > 1.3 * 1024 * 1024 && q > 0.4) { q -= 0.15; out = c.toDataURL('image/jpeg', q); }
+        resolve(out);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('This picture can not be opened')); };
+      img.src = url;
+    });
+  }
+  $('noticeImg').addEventListener('change', async () => {
+    const f = $('noticeImg').files[0];
+    noticeJpeg = '';
+    $('noticeImgPreview').classList.add('hide'); $('noticeImgDel').classList.add('hide');
+    if (!f) return;
+    try {
+      noticeJpeg = await shrink(f);
+      $('noticeImgPreview').src = noticeJpeg;
+      $('noticeImgPreview').classList.remove('hide'); $('noticeImgDel').classList.remove('hide');
+    } catch (e) { fail(e); $('noticeImg').value = ''; }
+  });
+  $('noticeImgDel').addEventListener('click', () => {
+    noticeJpeg = ''; $('noticeImg').value = '';
+    $('noticeImgPreview').classList.add('hide'); $('noticeImgDel').classList.add('hide');
+  });
+
   $('noticeSend').addEventListener('click', async () => {
     const all = document.querySelector('input[name=to]:checked').value === 'all';
     const title = $('noticeTitle').value.trim() || 'InstantGram';
@@ -527,15 +668,19 @@
     if (all && !confirm('Send this notice to EVERYONE?')) return;
     $('noticeSend').disabled = true;
     const bar = $('noticeBar'), status = $('noticeStatus');
-    let sent = 0, failed = 0, people = 0, page = '';
+    let sent = 0, failed = 0, people = 0, page = '', imageUrl = '';
     try {
+      if (noticeJpeg) {
+        status.textContent = 'Uploading the picture…';
+        imageUrl = (await api('noticeImage', { image: noticeJpeg })).url;
+      }
       if (!all) {
-        const r = await api('notice', { to: noticeUid, title, text });
+        const r = await api('notice', { to: noticeUid, title, text, imageUrl });
         status.textContent = `Done: saved in the app's notifications, ${r.sent} phone(s) got it${r.failed ? `, ${r.failed} old phone(s) failed` : ''}.`;
       } else {
         bar.classList.remove('hide');
         for (let round = 0; round < 1000; round++) {
-          const r = await api('notice', { to: 'all', title, text, page });
+          const r = await api('notice', { to: 'all', title, text, page, imageUrl });
           sent += r.sent; failed += r.failed; people += r.people;
           bar.firstElementChild.style.width = r.done ? '100%' : `${Math.min(95, 10 + round * 8)}%`;
           status.textContent = `${fmt(people)} people · ${fmt(sent)} phones got it${failed ? ` · ${fmt(failed)} old phones failed` : ''}${r.done ? ' · Done ✔' : ' …'}`;
@@ -544,12 +689,13 @@
         }
       }
       $('noticeText').value = '';
+      $('noticeImgDel').click();
     } catch (e) { status.textContent = `Stopped: ${e.message}`; }
     finally { $('noticeSend').disabled = false; }
   });
 
   // ---------------- go ----------------
-  if (sess && sess.refreshToken) start(); else $('login').classList.remove('hide');
+  if (live(sess)) start(); else { sess = null; save(); $('login').classList.remove('hide'); }
 })();
 </script>
 </body>

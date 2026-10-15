@@ -316,7 +316,7 @@ void main() {
       await t.tap(find.byKey(const ValueKey('disappear-7d')));
       await t.pumpAndSettle();
       expect(find.byKey(const ValueKey('disappear-bar')), findsOneWidget);
-      expect(find.text('Disappearing for you · 7 days'), findsOneWidget);
+      expect(find.text('Disappearing messages · 7 days'), findsOneWidget);
       await msgs.close();
       await _finish(t);
     });
@@ -341,7 +341,7 @@ void main() {
 
       await slide();
       expect(find.byKey(const ValueKey('disappear-bar')), findsOneWidget);
-      expect(find.text('Disappearing for you · 24 hours'), findsOneWidget);
+      expect(find.text('Disappearing messages · 24 hours'), findsOneWidget);
       await slide();
       expect(find.byKey(const ValueKey('disappear-bar')), findsNothing);
       // a small slide does nothing
@@ -356,11 +356,7 @@ void main() {
     });
 
     testWidgets('system note, timer icon, once-seen icon', (t) async {
-      // v0.13: the mode is my own setting (prefs), not the chat's
-      ChatPrefs.instance.debugSet(
-        ChatPrefsData(vanish: {'me_other': (Disappear.day, DateTime(2020))}),
-      );
-      addTearDown(() => ChatPrefs.instance.debugSet(const ChatPrefsData()));
+      // v0.14: the chat's mode again (both people)
       final msgs = StreamController<List<Message>>();
       await t.pumpWidget(_detail(messages: msgs.stream, disappear: '24h'));
       final later = Timestamp.fromDate(

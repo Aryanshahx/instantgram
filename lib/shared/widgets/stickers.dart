@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 /// v0.13: built-in sticker pack (`assets/stickers/ID.png`, work offline).
+/// v0.14: 125 stickers, 35 of them animated (`ID.webp`), with search.
 ///
 /// A sticker is saved as the text `stk:ID` (video overlays and photo
 /// layers). Its size is its WIDTH as a part of the frame width.
@@ -12,8 +13,43 @@ class StickerPack {
 
   static const String prefix = 'stk:';
 
-  /// Order shown in the editor.
+  /// Order shown in the editor (animated ones first).
   static const List<String> ids = [
+    'a_heart',
+    'a_fire',
+    'a_haha',
+    'a_yay',
+    'a_wow',
+    'a_wow_text',
+    'a_omg',
+    'a_omg_text',
+    'a_lol',
+    'a_lol_text',
+    'a_star',
+    'a_sparkle',
+    'a_bolt',
+    'a_crown',
+    'a_hundred',
+    'a_likes',
+    'a_smiley',
+    'a_sun',
+    'a_music',
+    'a_pin',
+    'a_arrow',
+    'a_check',
+    'a_new',
+    'a_boom',
+    'a_pow',
+    'a_hi',
+    'a_rainbow',
+    'a_cloud',
+    'a_diya',
+    'a_balloon',
+    'a_kite',
+    'a_gift',
+    'a_cake',
+    'a_party',
+    'a_wah',
     'wow',
     'lol',
     'omg',
@@ -64,7 +100,200 @@ class StickerPack {
     'weekend',
     'party',
     'blessed',
+    'bindaas',
+    'jhakaas',
+    'mast',
+    'sahi_hai',
+    'arre_yaar',
+    'pakka',
+    'dhamaal',
+    'kya_baat',
+    'chalo',
+    'full_on',
+    'bhai',
+    'yaar',
+    'same',
+    'mood',
+    'goals',
+    'brb',
+    'idk',
+    'nope',
+    'haha',
+    'slay',
+    'lit',
+    'facts',
+    'oh_no',
+    'aww',
+    'yummy',
+    'hi_wah',
+    'hi_mast',
+    'hi_diwali',
+    'hi_dhanyavad',
+    'hi_namaste',
+    'diya',
+    'chai',
+    'kite',
+    'balloon',
+    'gift',
+    'cake',
+    'moon',
+    'diamond',
+    'flower',
+    'pizza',
   ];
+
+  /// v0.14: animated stickers (`assets/stickers/ID.webp`, they move on
+  /// videos and moments; a photo keeps the first frame).
+  static bool isAnimated(String id) => id.startsWith('a_');
+
+  /// v0.14: words for the sticker search.
+  static const Map<String, String> tags = {
+    'a_heart': 'heart love like beat',
+    'a_fire': 'fire hot lit flame',
+    'a_haha': 'haha lol funny laugh',
+    'a_yay': 'yay happy party',
+    'a_wow': 'wow amazing omg',
+    'a_wow_text': 'wow amazing',
+    'a_omg': 'omg shock',
+    'a_omg_text': 'omg shock',
+    'a_lol': 'lol funny laugh',
+    'a_lol_text': 'lol funny laugh',
+    'a_star': 'star shine',
+    'a_sparkle': 'sparkle shine magic',
+    'a_bolt': 'bolt lightning energy',
+    'a_crown': 'crown king queen',
+    'a_hundred': '100 hundred perfect',
+    'a_likes': 'likes heart 1k',
+    'a_smiley': 'smiley smile happy face',
+    'a_sun': 'sun sunny morning summer',
+    'a_music': 'music song note',
+    'a_pin': 'pin location place',
+    'a_arrow': 'arrow look here',
+    'a_check': 'check done ok yes tick',
+    'a_new': 'new badge',
+    'a_boom': 'boom comic',
+    'a_pow': 'pow comic',
+    'a_hi': 'hi hello bubble',
+    'a_rainbow': 'rainbow pride colors',
+    'a_cloud': 'cloud chill relax',
+    'a_diya': 'diya diwali lamp festival',
+    'a_balloon': 'balloon birthday party',
+    'a_kite': 'kite patang sankranti',
+    'a_gift': 'gift present birthday',
+    'a_cake': 'cake birthday',
+    'a_party': 'party celebrate',
+    'a_wah': 'wah wow hindi',
+    'wow': 'wow amazing',
+    'lol': 'lol funny laugh',
+    'omg': 'omg shock',
+    'yes': 'yes ok agree',
+    'love_it': 'love it heart',
+    'hello': 'hello hi',
+    'thank_you': 'thank you thanks',
+    'cool': 'cool nice',
+    'heart': 'heart love',
+    'fire': 'fire hot lit',
+    'star': 'star',
+    'sparkle': 'sparkle shine',
+    'bolt': 'bolt lightning',
+    'crown': 'crown king queen',
+    'hundred': '100 hundred',
+    'likes': 'likes heart 1k',
+    'hello_script': 'hello hi',
+    'love_script': 'love',
+    'thanks_script': 'thanks thank you',
+    'yay': 'yay happy',
+    'cute': 'cute',
+    'oops': 'oops sorry',
+    'boom': 'boom comic',
+    'pow': 'pow comic',
+    'omg_wait': '?! wait what',
+    'hi_bubble': 'hi hello',
+    'smiley': 'smiley smile happy',
+    'sun': 'sun sunny',
+    'rainbow': 'rainbow',
+    'chill_cloud': 'chill cloud relax',
+    'music': 'music song',
+    'pin': 'pin location',
+    'arrow': 'arrow',
+    'check': 'check done tick',
+    'new_badge': 'new',
+    'sale': 'sale offer',
+    'no_way': 'no way',
+    'bye': 'bye goodbye',
+    'sorry': 'sorry',
+    'epic': 'epic',
+    'vibes': 'vibes',
+    'good_morning': 'good morning',
+    'good_night': 'good night',
+    'happy_birthday': 'happy birthday bday',
+    'congrats': 'congrats congratulations',
+    'miss_you': 'miss you',
+    'follow_me': 'follow me',
+    'weekend': 'weekend',
+    'party': 'party',
+    'blessed': 'blessed',
+    'bindaas': 'bindaas hinglish',
+    'jhakaas': 'jhakaas hinglish awesome',
+    'mast': 'mast hinglish great',
+    'sahi_hai': 'sahi hai hinglish right',
+    'arre_yaar': 'arre yaar hinglish',
+    'pakka': 'pakka hinglish sure',
+    'dhamaal': 'dhamaal hinglish fun',
+    'kya_baat': 'kya baat hinglish wow',
+    'chalo': 'chalo hinglish lets go',
+    'full_on': 'full on hinglish',
+    'bhai': 'bhai bro hinglish',
+    'yaar': 'yaar friend hinglish',
+    'same': 'same',
+    'mood': 'mood',
+    'goals': 'goals',
+    'brb': 'brb be right back',
+    'idk': 'idk dont know',
+    'nope': 'nope no',
+    'haha': 'haha lol funny',
+    'slay': 'slay',
+    'lit': 'lit fire',
+    'facts': 'facts true',
+    'oh_no': 'oh no',
+    'aww': 'aww cute',
+    'yummy': 'yummy food tasty',
+    'hi_wah': 'wah hindi wow',
+    'hi_mast': 'mast hindi',
+    'hi_diwali': 'diwali deepavali hindi festival',
+    'hi_dhanyavad': 'dhanyavad thanks hindi',
+    'hi_namaste': 'namaste hello hindi',
+    'diya': 'diya diwali lamp',
+    'chai': 'chai tea cup',
+    'kite': 'kite patang',
+    'balloon': 'balloon party',
+    'gift': 'gift present',
+    'cake': 'cake birthday',
+    'moon': 'moon night stars',
+    'diamond': 'diamond gem',
+    'flower': 'flower',
+    'pizza': 'pizza food',
+  };
+
+  /// Stickers that match [query] (empty = all). [animatedOnly] = only
+  /// the moving ones.
+  static List<String> search(String query, {bool animatedOnly = false}) {
+    final words = query
+        .toLowerCase()
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .toList();
+    return [
+      for (final id in ids)
+        if ((!animatedOnly || isAnimated(id)) &&
+            words.every(
+              (w) =>
+                  (tags[id] ?? '').contains(w) ||
+                  id.replaceAll('_', ' ').contains(w),
+            ))
+          id,
+    ];
+  }
 
   /// New sticker size (part of the frame width).
   static const double defaultSize = 0.32;
@@ -79,8 +308,10 @@ class StickerPack {
 
   static String idOf(String text) => text.substring(prefix.length);
 
-  static String assetFor(String text) =>
-      'assets/stickers/${isPack(text) ? idOf(text) : text}.png';
+  static String assetFor(String text) {
+    final id = isPack(text) ? idOf(text) : text;
+    return 'assets/stickers/$id.${isAnimated(id) ? 'webp' : 'png'}';
+  }
 
   /// For drawing into a saved photo.
   static Future<ui.Image?> load(String text) async {

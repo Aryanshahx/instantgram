@@ -11,6 +11,7 @@ import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/ig_text_field.dart';
 import '../../post/data/post_repository.dart';
 import '../data/chat_repository.dart';
+import '../../../shared/widgets/verified_badge.dart';
 
 /// Loads who you can share with (tests replace this).
 typedef ShareTargetsLoader = Future<List<ChatPerson>> Function();
@@ -211,10 +212,9 @@ class _ShareSheetState extends State<ShareSheet> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                NameBadge(
                   p.username,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  uid: p.uid,
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 14.5,

@@ -347,6 +347,23 @@ export async function authSetDisabled(sa, uid, disabled, fetchFn = fetch) {
   );
 }
 
+/** v0.14 Firebase Auth (admin): delete an account (gone = fine). */
+export async function authDelete(sa, uid, fetchFn = fetch) {
+  try {
+    await gfetch(
+      sa,
+      `https://identitytoolkit.googleapis.com/v1/projects/${sa.project_id}/accounts:delete`,
+      { method: 'POST', body: JSON.stringify({ localId: uid }) },
+      'auth delete',
+      fetchFn,
+    );
+    return true;
+  } catch (e) {
+    if (/USER_NOT_FOUND/.test(String(e?.message))) return false;
+    throw e;
+  }
+}
+
 /** Tests. */
 export function _resetTokenCache() {
   cached = null;

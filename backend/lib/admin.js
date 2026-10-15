@@ -1,156 +1,82 @@
-// v0.13: admin website helpers (login, who is admin, small data shapes).
+// v0.13: admin website helpers (login, small data shapes).
 // The page is /admin (public/admin/index.html), the API is /api/admin.
-import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
-import { HttpError, env, requireEnv } from './http.js';
-import { FIREBASE_WEB_KEY } from './web-key.js';
+// v0.14: login with ONE long password (Vercel setting ADMIN_PASSWORD, 16+
+// letters). No email login. The server signs its own session token; a new
+// password logs everybody out.
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { HttpError } from './http.js';
 
-/** Only these emails can use the admin website. */
-export const DEFAULT_ADMINS = ['techlabs.hyper@gmail.com'];
+export const MIN_PASSWORD = 16;
 
-export function adminEmails(raw = process.env.ADMIN_EMAILS) {
-  const extra = String(raw || '')
-    .split(/[,\s;]+/)
-    .map((s) => s.trim().toLowerCase())
-    .filter((s) => s.includes('@'));
-  return [...new Set([...DEFAULT_ADMINS, ...extra])];
+/** How long a login lasts. */
+export const SESSION_MS = 12 * 3600 * 1000;
+
+/** The admin password from Vercel ('' = not set up / too short). */
+export function adminPassword(raw = process.env.ADMIN_PASSWORD) {
+  const p = String(raw || '').trim();
+  return p.length >= MIN_PASSWORD ? p : '';
 }
 
-export function isAdminEmail(email, raw) {
-  return typeof email === 'string' && adminEmails(raw).includes(email.trim().toLowerCase());
-}
-
-/** Firebase Web API key: Vercel setting, or the one taken from the app. */
-export function webKey() {
-  const k = env('FIREBASE_API_KEY') || env('FIREBASE_WEB_API_KEY') || FIREBASE_WEB_KEY || '';
-  if (!k) {
-    throw new HttpError(
-      503,
-      'Admin login is not set up: add FIREBASE_API_KEY on Vercel (Firebase console -> Project settings -> General -> Web API Key), then Redeploy.',
-    );
-  }
-  return k;
-}
-
-/** Google's sign-in errors -> simple words. */
-export function loginError(status, j) {
-  const m = String(j?.error?.message || '');
-  if (/INVALID_LOGIN_CREDENTIALS|INVALID_PASSWORD|EMAIL_NOT_FOUND|INVALID_EMAIL/.test(m)) {
-    return new HttpError(401, 'Wrong email or password. Use the same password as in the InstantGram app.');
-  }
-  if (/USER_DISABLED/.test(m)) return new HttpError(403, 'This account is blocked.');
-  if (/TOO_MANY_ATTEMPTS/.test(m)) return new HttpError(429, 'Too many tries. Wait a few minutes.');
-  if (/API key not valid|API_KEY_INVALID/.test(m)) {
-    return new HttpError(503, 'FIREBASE_API_KEY is wrong. Copy the Web API Key from Firebase console -> Project settings -> General.');
-  }
-  if (status === 403 || /blocked|PERMISSION_DENIED|API_KEY_/.test(m)) {
-    return new HttpError(
-      503,
-      'Google blocked this API key for servers. Add FIREBASE_API_KEY on Vercel = Web API Key (Firebase console -> Project settings -> General), then Redeploy.',
-    );
-  }
-  return new HttpError(502, `Login failed: ${m || status}`);
-}
-
-async function postJson(url, body, fetchFn, form = false) {
-  const r = await fetchFn(url, {
-    method: 'POST',
-    headers: { 'Content-Type': form ? 'application/x-www-form-urlencoded' : 'application/json' },
-    body: form ? new URLSearchParams(body).toString() : JSON.stringify(body),
-  });
-  const j = await r.json().catch(() => ({}));
-  return { r, j };
-}
-
-function session(idToken, refreshToken, expiresIn) {
-  const claims = decodeJwt(idToken);
-  return {
-    idToken,
-    refreshToken,
-    expiresIn: Number(expiresIn) || 3600,
-    email: String(claims.email || ''),
-    emailVerified: claims.email_verified === true,
-  };
-}
-
-/** Email + password -> tokens (only admin emails). */
-export async function login(email, password, { fetchFn = fetch, admins } = {}) {
-  if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
-    throw new HttpError(400, 'Type your email and password');
-  }
-  // check first: this page never tests passwords of normal users
-  if (!isAdminEmail(email, admins)) throw new HttpError(403, 'This email is not an admin.');
-  const { r, j } = await postJson(
-    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(webKey())}`,
-    { email: email.trim(), password, returnSecureToken: true },
-    fetchFn,
+function notSetUpError(raw) {
+  const p = String(raw || '').trim();
+  return new HttpError(
+    503,
+    p
+      ? `ADMIN_PASSWORD on Vercel is too short (use ${MIN_PASSWORD}+ letters), then Redeploy.`
+      : 'Admin login is not set up: add ADMIN_PASSWORD (a long password, 16+ letters) on Vercel -> Settings -> Environment Variables, then Redeploy.',
   );
-  if (!r.ok || !j.idToken) throw loginError(r.status, j);
-  return session(j.idToken, j.refreshToken, j.expiresIn);
 }
 
-/** New token before the old one ends (1 hour). */
-export async function refresh(refreshToken, { fetchFn = fetch, admins } = {}) {
-  if (typeof refreshToken !== 'string' || refreshToken.length < 20) throw new HttpError(400, 'Bad request');
-  const { r, j } = await postJson(
-    `https://securetoken.googleapis.com/v1/token?key=${encodeURIComponent(webKey())}`,
-    { grant_type: 'refresh_token', refresh_token: refreshToken },
-    fetchFn,
-    true,
-  );
-  if (!r.ok || !j.id_token) throw new HttpError(401, 'Login expired. Please log in again.');
-  const s = session(j.id_token, j.refresh_token, j.expires_in);
-  if (!isAdminEmail(s.email, admins)) throw new HttpError(403, 'This email is not an admin.');
-  return s;
+const sha = (s) => createHash('sha256').update(String(s)).digest();
+const key = (pw) => createHmac('sha256', 'instantgram-admin-v14').update(pw).digest();
+const sign = (pw, payload) => createHmac('sha256', key(pw)).update(payload).digest('base64url');
+
+/** Same length compare that takes the same time for any text. */
+export function samePassword(a, b) {
+  return timingSafeEqual(sha(a), sha(b));
 }
 
-/** Sends the "verify your email" mail (needed once). */
-export async function sendVerifyEmail(idToken, { fetchFn = fetch } = {}) {
-  if (typeof idToken !== 'string' || idToken.length < 20) throw new HttpError(400, 'Bad request');
-  const { r, j } = await postJson(
-    `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(webKey())}`,
-    { requestType: 'VERIFY_EMAIL', idToken },
-    fetchFn,
-  );
-  if (!r.ok) throw loginError(r.status, j);
-  return { sent: true };
+/** "<expires ms>.<random>.<signature>" */
+export function makeToken(pw, now = Date.now()) {
+  const payload = `${now + SESSION_MS}.${randomBytes(12).toString('base64url')}`;
+  return `${payload}.${sign(pw, payload)}`;
 }
 
-const JWKS = createRemoteJWKSet(
-  new URL('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com'),
-);
+/** true when [token] was made with [pw] and is not too old. */
+export function checkToken(token, pw, now = Date.now()) {
+  if (typeof token !== 'string' || !pw) return false;
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
+  const exp = Number(parts[0]);
+  if (!Number.isFinite(exp) || exp < now || exp > now + SESSION_MS + 60_000) return false;
+  const want = Buffer.from(sign(pw, `${parts[0]}.${parts[1]}`));
+  const got = Buffer.from(parts[2]);
+  return want.length === got.length && timingSafeEqual(want, got);
+}
 
-/** Checks the token claims: admin email + verified email. */
-export function checkAdminClaims(payload, admins) {
-  if (!payload || !payload.sub) throw new HttpError(401, 'Login expired. Please log in again.');
-  if (!isAdminEmail(payload.email, admins)) throw new HttpError(403, 'This email is not an admin.');
-  if (payload.email_verified !== true) {
-    throw new HttpError(403, 'Verify your email first (log in again and press "Send verification email").');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Password -> session token. A wrong password waits a bit (slows guessing). */
+export async function login(password, { raw = process.env.ADMIN_PASSWORD, now = Date.now(), wait = sleep } = {}) {
+  const pw = adminPassword(raw);
+  if (!pw) throw notSetUpError(raw);
+  if (typeof password !== 'string' || !password) throw new HttpError(400, 'Type the admin password');
+  if (password.length > 500 || !samePassword(password.trim(), pw)) {
+    await wait(800);
+    throw new HttpError(401, 'Wrong password');
   }
-  return { uid: payload.sub, email: String(payload.email).toLowerCase() };
+  return { token: makeToken(pw, now), expiresAt: new Date(now + SESSION_MS).toISOString() };
 }
 
-/** Header "Authorization: Bearer <token>" -> { uid, email } or throws. */
-export async function requireAdmin(req, { verify, admins } = {}) {
+/** Header "Authorization: Bearer <token>" -> admin, or throws. */
+export async function requireAdmin(req, { raw = process.env.ADMIN_PASSWORD, now = Date.now() } = {}) {
+  const pw = adminPassword(raw);
+  if (!pw) throw notSetUpError(raw);
   const header = req.headers?.authorization || '';
   const match = /^Bearer (.+)$/.exec(header);
   if (!match) throw new HttpError(401, 'Not logged in');
-  let payload;
-  try {
-    if (verify) {
-      payload = await verify(match[1]);
-    } else {
-      const projectId = requireEnv('FIREBASE_PROJECT_ID');
-      ({ payload } = await jwtVerify(match[1], JWKS, {
-        issuer: `https://securetoken.google.com/${projectId}`,
-        audience: projectId,
-        algorithms: ['RS256'],
-      }));
-    }
-  } catch (e) {
-    if (e instanceof HttpError) throw e;
-    throw new HttpError(401, 'Login expired. Please log in again.');
-  }
-  return checkAdminClaims(payload, admins);
+  if (!checkToken(match[1], pw, now)) throw new HttpError(401, 'Login expired. Please log in again.');
+  return { uid: 'admin', email: 'admin' };
 }
 
 // ---------------- data helpers ----------------
@@ -237,7 +163,7 @@ export const F = {
 };
 
 /** Text of a notice push. */
-export function noticeMessages(tokens, title, text) {
+export function noticeMessages(tokens, title, text, image = '') {
   return tokens.map((token) => ({
     token,
     data: { type: 'notice' },
@@ -250,6 +176,8 @@ export function noticeMessages(tokens, title, text) {
         color: '#C6FF3D',
         title: str(title || 'InstantGram', 80),
         body: str(text, 900),
+        // v0.14: big picture in the notification
+        ...(image ? { image } : {}),
       },
     },
   }));
@@ -276,8 +204,4 @@ export async function pool(items, n, fn) {
   });
   await Promise.all(workers);
   return out;
-}
-
-export function _decode(t) {
-  return decodeJwt(t);
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
 import '../models/user_profile.dart';
 import 'avatar.dart';
+import 'verified_badge.dart';
 
 class UserTile extends StatelessWidget {
   const UserTile({super.key, required this.user, this.onTap, this.trailing});
@@ -23,8 +24,9 @@ class UserTile extends StatelessWidget {
         size: 42,
         uid: user.uid,
       ),
-      title: Text(
+      title: NameBadge(
         user.username,
+        uid: user.uid,
         style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
       ),
       subtitle: Text(

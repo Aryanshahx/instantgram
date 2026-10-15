@@ -19,6 +19,8 @@ import '../../../shared/widgets/user_tile.dart';
 import '../../profile/data/user_repository.dart';
 import '../data/chat_repository.dart';
 import 'chat_detail_screen.dart';
+import '../data/typing_tracker.dart';
+import '../../../shared/widgets/verified_badge.dart';
 
 void openChat(BuildContext context, UserProfile other) {
   Navigator.of(context)
@@ -42,11 +44,30 @@ class _ChatsScreenState extends State<ChatsScreen> {
   Timer? _debounce;
   String _query = '';
   List<UserProfile> _people = const [];
+  Timer? _typingTick;
 
   @override
   void dispose() {
     _debounce?.cancel();
+    _typingTick?.cancel();
     super.dispose();
+  }
+
+  /// v0.14: redraw when a "typing…" should go away.
+  void _armTyping(List<Chat> chats, String me) {
+    Duration? soonest;
+    for (final c in chats) {
+      final other = c.otherUid(me);
+      if (c.typing[other] == null) continue;
+      final left = TypingTracker.instance.left(c, other);
+      if (left != null && (soonest == null || left < soonest)) soonest = left;
+    }
+    _typingTick?.cancel();
+    _typingTick = null;
+    if (soonest == null) return;
+    _typingTick = Timer(soonest + const Duration(milliseconds: 50), () {
+      if (mounted) setState(() {});
+    });
   }
 
   void _onChanged(String v) {
@@ -202,6 +223,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
               id: (c) => c.id,
               updatedAt: (c) => c.updatedAt,
             );
+            // after the tiles are built (they mark who is typing)
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _armTyping(chats, me);
+            });
 
             return ListView(
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -360,13 +385,15 @@ class _ChatTile extends StatelessWidget {
       }
     }
     // v0.13: "typing…", and messages that disappeared for you
-    final typing = chat.isTyping(other, ServerClock.now());
+    final typing = TypingTracker.instance.isTyping(
+      chat,
+      other,
+      serverNow: ServerClock.now(),
+    );
     final preview = typing
         ? 'typing…'
         : chat.lastMessage.isEmpty
         ? 'Say hi 👋'
-        : vanishedForMe(chat, me, ChatPrefs.instance.value.value)
-        ? '⏳ Messages disappeared'
         : fromMe
         ? '$state · You: ${chat.lastMessage}'
         : chat.lastMessage;
@@ -409,10 +436,9 @@ class _ChatTile extends StatelessWidget {
                     Row(
                       children: [
                         Flexible(
-                          child: Text(
+                          child: NameBadge(
                             name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                            uid: other,
                             style: const TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w700,
@@ -498,20 +524,4 @@ class _ChatTile extends StatelessWidget {
       ),
     );
   }
-}
-
-/// v0.13: the last message is gone for you (disappearing only on your
-/// phone).
-bool vanishedForMe(Chat chat, String me, ChatPrefsData prefs, {DateTime? now}) {
-  final mode = prefs.vanishMode(chat.id);
-  final since = prefs.vanishSince(chat.id);
-  if (mode == Disappear.off || since == null) return false;
-  if (chat.updatedAt.isBefore(since)) return false;
-  final life = Disappear.lifetime(mode);
-  if (life != null) {
-    return (now ?? ServerClock.now()).isAfter(chat.updatedAt.add(life));
-  }
-  final seen = chat.seenAt(me);
-  return chat.lastSenderId == me ||
-      (seen != null && !chat.updatedAt.isAfter(seen));
 }

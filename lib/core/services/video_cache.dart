@@ -1,5 +1,3 @@
-import 'net_priority.dart';
-
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
@@ -8,6 +6,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
+
+import 'net_priority.dart';
+import 'net_quality.dart';
 
 /// Videos are saved on the phone while they play (v0.8):
 ///  * a tiny server on the phone (127.0.0.1) sits between the player and
@@ -40,6 +41,19 @@ class VideoCache {
 
   /// Meta data in memory: name -> total size.
   final Map<String, int> _totals = {};
+
+  /// v0.14: bytes on the disk we know of (no disk access: for quick
+  /// choices like "full or small copy").
+  final Map<String, int> _haveMem = {};
+
+  /// Saved bytes of [remote] as far as we know right now (0 = unknown).
+  int knownBytes(String remote) =>
+      remote.isEmpty ? 0 : (_haveMem[nameFor(remote)] ?? 0);
+
+  /// Tests: pretend [bytes] of [remote] are saved.
+  @visibleForTesting
+  void debugSetKnown(String remote, int bytes) =>
+      _haveMem[nameFor(remote)] = bytes;
 
   final LinkedHashSet<String> _prefetched = LinkedHashSet<String>();
 
@@ -160,7 +174,7 @@ class VideoCache {
 
   Future<int> _have(String name) async {
     try {
-      return await _data(name).length();
+      return _haveMem[name] = await _data(name).length();
     } catch (_) {
       return 0;
     }
@@ -326,12 +340,23 @@ class VideoCache {
       used = true;
       try {
         // addStream waits for the player (no big memory buffer)
+        // v0.14: the start of the download also measures the speed
+        final clock = Stopwatch();
+        var got = 0;
+        var measured = false;
         await res.addStream(
           up.asyncMap((chunk) async {
+            if (!clock.isRunning) clock.start();
             await file.writeFrom(chunk);
+            got += chunk.length;
+            if (!measured && got >= 1024 * 1024) {
+              measured = true;
+              Bandwidth.add(got, clock.elapsedMilliseconds);
+            }
             return chunk;
           }),
         );
+        if (!measured) Bandwidth.add(got, clock.elapsedMilliseconds);
       } catch (_) {
         // player closed the connection (swiped away / seek): the part
         // saved so far stays on the disk
@@ -412,7 +437,9 @@ class VideoCache {
       if (t != null && t > 0 && total == null) await _saveTotal(name, t);
       out = await _data(name).open(mode: FileMode.append);
       var got = have;
+      final clock = Stopwatch();
       await for (final chunk in up) {
+        if (!clock.isRunning) clock.start();
         await out.writeFrom(chunk);
         got += chunk.length;
         if (got >= want) break; // 200 = whole file: stop early
@@ -422,6 +449,8 @@ class VideoCache {
           break;
         }
       }
+      Bandwidth.add(got - have, clock.elapsedMilliseconds);
+      _haveMem[name] = got;
     } catch (e) {
       _prefetched.remove(key);
       debugPrint('video prefetch: $e');

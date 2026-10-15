@@ -145,6 +145,21 @@ export async function deleteKeys(keys, send = (c) => s3().send(c)) {
   return n;
 }
 
+/** v0.14 (admin notices): saves a picture -> its public url. */
+export async function putNoticeImage(bytes, send = (c) => s3().send(c)) {
+  const key = `notice/${Date.now()}-${randomUUID()}.jpg`;
+  await send(
+    new PutObjectCommand({
+      Bucket: requireEnv('TIGRIS_BUCKET'),
+      Key: key,
+      Body: bytes,
+      ContentType: 'image/jpeg',
+      CacheControl: CACHE_CONTROL,
+    }),
+  );
+  return { key, url: publicUrl(key) };
+}
+
 // ---------------- multipart (big videos, parts in parallel) ----------------
 
 const MIN_PART = 5 * MB;

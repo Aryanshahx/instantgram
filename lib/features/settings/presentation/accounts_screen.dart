@@ -64,7 +64,10 @@ class _AccountsScreenState extends State<AccountsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(d, true),
-            child: const Text('Remove', style: TextStyle(color: AppColors.like)),
+            child: const Text(
+              'Remove',
+              style: TextStyle(color: AppColors.like),
+            ),
           ),
         ],
       ),
@@ -88,7 +91,11 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 ListTile(
                   key: const ValueKey('account-current'),
                   dense: true,
-                  leading: Avatar(url: me.photoUrl, name: me.username, size: 38),
+                  leading: Avatar(
+                    url: me.photoUrl,
+                    name: me.username,
+                    size: 38,
+                  ),
                   title: Text(
                     '@${me.username}',
                     style: const TextStyle(fontWeight: FontWeight.w700),
@@ -114,7 +121,11 @@ class _AccountsScreenState extends State<AccountsScreen> {
                       key: ValueKey('account-${a.uid}'),
                       dense: true,
                       enabled: !_busy,
-                      leading: Avatar(url: a.photoUrl, name: a.username, size: 38),
+                      leading: Avatar(
+                        url: a.photoUrl,
+                        name: a.username,
+                        size: 38,
+                      ),
                       title: Text(
                         a.label,
                         style: const TextStyle(fontWeight: FontWeight.w700),
@@ -124,7 +135,8 @@ class _AccountsScreenState extends State<AccountsScreen> {
                         style: const TextStyle(color: AppColors.textSecondary),
                       ),
                       onTap: () => _run(
-                        () => (widget.onSwitch ??
+                        () =>
+                            (widget.onSwitch ??
                             (x) => switchToAccount(context, x))(a),
                       ),
                       trailing: PopupMenuButton<String>(
@@ -270,7 +282,10 @@ Future<void> addAccount(BuildContext context) async {
         ),
         TextButton(
           onPressed: () => Navigator.pop(d, true),
-          child: const Text('Continue', style: TextStyle(color: AppColors.lime)),
+          child: const Text(
+            'Continue',
+            style: TextStyle(color: AppColors.lime),
+          ),
         ),
       ],
     ),
@@ -278,4 +293,103 @@ Future<void> addAccount(BuildContext context) async {
   if (ok != true || !context.mounted) return;
   Navigator.of(context).popUntil((r) => r.isFirst);
   await signOutEverything();
+}
+
+/// v0.14: Me screen -> switch account (a small sheet like Instagram).
+Future<void> showAccountSwitcher(
+  BuildContext context,
+  UserProfile me, {
+  Future<void> Function(SavedAccount a)? onSwitch,
+  Future<void> Function()? onAdd,
+}) async {
+  final store = SavedAccounts.instance;
+  await store.load();
+  await store.updateProfile(me);
+  if (!context.mounted) return;
+  final picked = await showModalBottomSheet<Object>(
+    context: context,
+    isScrollControlled: true,
+    builder: (ctx) => SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(ctx).size.height * 0.7,
+        ),
+        child: ValueListenableBuilder<List<SavedAccount>>(
+          valueListenable: store.accounts,
+          builder: (ctx, list, _) {
+            final others = list.where((a) => a.uid != me.uid).toList();
+            return ListView(
+              shrinkWrap: true,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 0, 20, 6),
+                  child: Text(
+                    'Switch account',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  ),
+                ),
+                ListTile(
+                  key: const ValueKey('switch-current'),
+                  dense: true,
+                  leading: Avatar(
+                    url: me.photoUrl,
+                    name: me.username,
+                    size: 36,
+                  ),
+                  title: Text(
+                    '@${me.username}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  trailing: const Icon(
+                    Icons.check_circle,
+                    color: AppColors.lime,
+                    size: 22,
+                  ),
+                  onTap: () => Navigator.pop(ctx),
+                ),
+                for (final a in others)
+                  ListTile(
+                    key: ValueKey('switch-to-${a.uid}'),
+                    dense: true,
+                    leading: Avatar(
+                      url: a.photoUrl,
+                      name: a.username,
+                      size: 36,
+                    ),
+                    title: Text(
+                      a.label,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    trailing: const Icon(
+                      Icons.radio_button_off,
+                      color: AppColors.textSecondary,
+                      size: 22,
+                    ),
+                    onTap: () => Navigator.pop(ctx, a),
+                  ),
+                ListTile(
+                  key: const ValueKey('switch-add'),
+                  dense: true,
+                  leading: const CircleAvatar(
+                    radius: 18,
+                    backgroundColor: AppColors.surface,
+                    child: Icon(Icons.add, color: AppColors.lime),
+                  ),
+                  title: const Text('Add account'),
+                  onTap: () => Navigator.pop(ctx, 'add'),
+                ),
+                const SizedBox(height: 6),
+              ],
+            );
+          },
+        ),
+      ),
+    ),
+  );
+  if (!context.mounted) return;
+  if (picked is SavedAccount) {
+    await (onSwitch ?? (a) => switchToAccount(context, a))(picked);
+  } else if (picked == 'add') {
+    await (onAdd ?? () => addAccount(context))();
+  }
 }

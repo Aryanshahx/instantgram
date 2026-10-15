@@ -2,6 +2,7 @@
 import { env } from '../lib/http.js';
 import { accessToken, checkServiceAccount } from '../lib/google.js';
 import { turnProviders } from './turn.js';
+import { adminPassword } from '../lib/admin.js';
 
 const NEED = ['TIGRIS_ACCESS_KEY_ID', 'TIGRIS_SECRET_ACCESS_KEY', 'TIGRIS_BUCKET', 'FIREBASE_PROJECT_ID'];
 
@@ -36,7 +37,7 @@ export default async function handler(req, res) {
     JSON.stringify({
       ok: missing.length === 0,
       app: 'instantgram',
-      version: '0.13.0',
+      version: '0.14.0',
       firebaseServiceAccount,
       bucket: bucket || null,
       firebaseProject: env('FIREBASE_PROJECT_ID') || null,
@@ -54,6 +55,8 @@ export default async function handler(req, res) {
         messageNotifications: !!sa,
         // v0.12: likes, comments, followers, views ... notifications
         activityNotifications: !!sa,
+        // v0.14: admin website login (ADMIN_PASSWORD, 16+ letters)
+        adminLogin: adminPassword() ? 'ok' : process.env.ADMIN_PASSWORD ? 'ADMIN_PASSWORD too short (16+)' : 'add ADMIN_PASSWORD',
       },
     }),
   );

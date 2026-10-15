@@ -6,11 +6,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:instantgram/core/services/account_status.dart';
-import 'package:instantgram/core/services/chat_prefs.dart';
 import 'package:instantgram/core/services/net_priority.dart';
 import 'package:instantgram/core/theme/app_theme.dart';
-import 'package:instantgram/features/chats/data/chat_repository.dart';
-import 'package:instantgram/features/chats/presentation/chats_screen.dart';
 import 'package:instantgram/features/editor/edit_models.dart';
 import 'package:instantgram/features/editor/photo_render.dart';
 import 'package:instantgram/features/notifications/presentation/notifications_screen.dart';
@@ -20,17 +17,12 @@ import 'package:instantgram/shared/widgets/net_image.dart';
 import 'package:instantgram/shared/widgets/stickers.dart';
 import 'package:instantgram/shared/widgets/verified_badge.dart';
 
-// v0.13: personal disappearing messages, typing, refresh priority,
+// v0.13: typing, refresh priority,
 // sticker pack, verified badge, reports, admin notices.
 
 final _t0 = DateTime(2026, 10, 14, 12);
 Timestamp _ts(int minutes) =>
     Timestamp.fromDate(_t0.add(Duration(minutes: minutes)));
-
-Message _m(String id, {String sender = 'other', int at = 0}) => Message.fromMap(
-  id,
-  {'senderId': sender, 'text': 'hi $id', 'createdAt': _ts(at)},
-);
 
 Chat _chat({int updated = 0, String last = 'other', Map? typing, Map? seen}) {
   final m = <String, dynamic>{
@@ -94,92 +86,8 @@ void main() {
     );
   });
 
-  group('Disappearing messages: only for me', () {
-    final since = _t0.add(const Duration(minutes: 10));
-    final all = [
-      _m('old', at: 0), // before I switched it on: stays
-      _m('new', at: 20),
-      _m('mine', sender: 'me', at: 30),
-    ];
-
-    test('24h: only messages since it was turned on, after 24 hours', () {
-      final soon = ChatRepository.visible(
-        all,
-        me: 'me',
-        now: _t0.add(const Duration(hours: 2)),
-        vanishMode: Disappear.day,
-        vanishSince: since,
-      );
-      expect(soon.map((m) => m.id), ['old', 'new', 'mine']);
-      final later = ChatRepository.visible(
-        all,
-        me: 'me',
-        now: _t0.add(const Duration(hours: 30)),
-        vanishMode: Disappear.day,
-        vanishSince: since,
-      );
-      expect(later.map((m) => m.id), ['old']);
-    });
-
-    test('once seen: gone after I saw them; off = nothing changes', () {
-      final seen = ChatRepository.visible(
-        all,
-        me: 'me',
-        now: _t0.add(const Duration(hours: 1)),
-        seenBefore: _t0.add(const Duration(minutes: 25)),
-        vanishMode: Disappear.seen,
-        vanishSince: since,
-      );
-      expect(seen.map((m) => m.id), ['old', 'mine']);
-      final off = ChatRepository.visible(
-        all,
-        me: 'me',
-        now: _t0.add(const Duration(days: 30)),
-        seenBefore: _t0.add(const Duration(minutes: 25)),
-      );
-      expect(off.length, 3);
-    });
-
-    test('my setting is saved per chat (with the time it was turned on)', () {
-      final p = ChatPrefsData(vanish: {'me_other': (Disappear.week, since)});
-      expect(p.vanishMode('me_other'), Disappear.week);
-      expect(p.vanishSince('me_other'), since);
-      expect(p.vanishMode('me_x'), Disappear.off);
-      expect(p.vanishSince('me_x'), isNull);
-    });
-
-    test('chat list: "Messages disappeared" only on my side', () {
-      final p = ChatPrefsData(vanish: {'me_other': (Disappear.day, since)});
-      final chat = _chat(updated: 20);
-      expect(
-        vanishedForMe(chat, 'me', p, now: _t0.add(const Duration(hours: 1))),
-        isFalse,
-      );
-      expect(
-        vanishedForMe(chat, 'me', p, now: _t0.add(const Duration(hours: 26))),
-        isTrue,
-      );
-      expect(
-        vanishedForMe(
-          chat,
-          'me',
-          const ChatPrefsData(),
-          now: _t0.add(const Duration(days: 9)),
-        ),
-        isFalse,
-      );
-      // last message from before it was on: stays
-      expect(
-        vanishedForMe(
-          _chat(updated: 0),
-          'me',
-          p,
-          now: _t0.add(const Duration(days: 9)),
-        ),
-        isFalse,
-      );
-    });
-  });
+  // (v0.14: disappearing messages are for both people again, see
+  // v0140_test.dart)
 
   group('Typing', () {
     test('isTyping: fresh time only, per person', () {
@@ -208,9 +116,14 @@ void main() {
         final t = StickerPack.textFor(id);
         expect(StickerPack.isPack(t), isTrue);
         expect(StickerPack.idOf(t), id);
-        expect(StickerPack.assetFor(t), 'assets/stickers/$id.png');
         expect(
-          File('assets/stickers/$id.png').existsSync(),
+          StickerPack.assetFor(t),
+          'assets/stickers/$id.${StickerPack.isAnimated(id) ? 'webp' : 'png'}',
+        );
+        expect(
+          File(
+            'assets/stickers/$id.${StickerPack.isAnimated(id) ? 'webp' : 'png'}',
+          ).existsSync(),
           isTrue,
           reason: id,
         );
