@@ -7,7 +7,6 @@ import 'package:instantgram/core/services/content_filter.dart';
 import 'package:instantgram/core/theme/app_theme.dart';
 import 'package:instantgram/core/utils/email.dart';
 import 'package:instantgram/features/post/data/report_repository.dart';
-import 'package:instantgram/features/settings/presentation/settings_pages.dart';
 import 'package:instantgram/features/settings/presentation/settings_screen.dart';
 import 'package:instantgram/features/settings/presentation/time_screen.dart';
 import 'package:instantgram/shared/models/post.dart';
@@ -44,25 +43,6 @@ void main() {
     expect(compareVersions('0.3.9', '0.4.0'), -1);
     expect(compareVersions('1.0.0+5', '0.9.9'), 1);
     expect(compareVersions('0.10.0', '0.9.0'), 1);
-  });
-
-  test('github release parsing picks the apk', () {
-    final r = ReleaseInfo.fromJson({
-      'tag_name': 'v0.4.0',
-      'html_url': 'https://github.com/x/y/releases/tag/v0.4.0',
-      'body': 'notes',
-      'published_at': '2026-10-13T10:00:00Z',
-      'assets': [
-        {'name': 'notes.txt', 'browser_download_url': 'https://t'},
-        {
-          'name': 'InstantGram-build-9.apk',
-          'browser_download_url': 'https://a',
-        },
-      ],
-    })!;
-    expect(r.version, '0.4.0');
-    expect(r.downloadUrl, 'https://a');
-    expect(ReleaseInfo.fromJson({'message': 'Not Found'}), isNull);
   });
 
   test('mailto keeps spaces and new lines', () {
@@ -135,7 +115,6 @@ void main() {
       'Blocked',
       'Accessibility',
       'Language',
-      'App update',
       'About',
       'Privacy policy',
       'Terms of use',
@@ -149,6 +128,7 @@ void main() {
       );
       expect(find.text(t), findsOneWidget, reason: t);
     }
+    expect(find.text('App update'), findsNothing); // v0.17: removed
     await tester.drag(find.byType(Scrollable).first, const Offset(0, 3000));
     await tester.pump();
     await tester.enterText(

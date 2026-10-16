@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
@@ -835,9 +837,30 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 }
 
 /// Pick a cover frame from the video (returns the time in ms).
+/// v0.17: a row of frames from the video - tap one (no slider).
 class CoverPickerScreen extends StatefulWidget {
   const CoverPickerScreen({super.key, required this.item});
   final EditedMedia item;
+
+  /// How many frames are shown.
+  static const int frameCount = 12;
+
+  /// Tests: makes a frame picture without the video plugin.
+  static Future<Uint8List?> Function(String path, int ms)? debugFrame;
+
+  /// Tests: no video player.
+  static bool debugNoVideo = false;
+
+  /// Times (ms) of [count] frames spread over start..end.
+  static List<int> frameTimes(int start, int end, [int count = frameCount]) {
+    if (end <= start) return [start];
+    final last = math.max(start, end - 100); // the very end is often black
+    if (count <= 1 || last == start) return [start];
+    return [
+      for (var i = 0; i < count; i++)
+        start + ((last - start) * i / (count - 1)).round(),
+    ];
+  }
 
   @override
   State<CoverPickerScreen> createState() => _CoverPickerScreenState();
@@ -845,46 +868,149 @@ class CoverPickerScreen extends StatefulWidget {
 
 class _CoverPickerScreenState extends State<CoverPickerScreen> {
   VideoPlayerController? _c;
-  bool _ready = false;
-  int _start = 0;
-  int _end = 1;
-  int _ms = 0;
+  bool _videoReady = false;
+  List<int> _times = const [];
+  final Map<int, Uint8List?> _thumbs = {};
+  int _selected = 0;
+  bool _disposed = false;
+
+  int get _ms => _times.isEmpty ? 0 : _times[_selected];
 
   @override
   void initState() {
     super.initState();
+    final dur = widget.item.durationMs;
+    if (dur > 0) _setRange(dur);
+    if (CoverPickerScreen.debugNoVideo) return;
     final c = VideoPlayerController.file(widget.item.file);
     _c = c;
     c
         .initialize()
         .then((_) async {
           if (!mounted) return;
-          final total = c.value.duration.inMilliseconds;
-          final e = widget.item.edits;
-          _start = e.trimStartMs.clamp(0, total);
-          _end = (e.trimEndMs > 0 ? e.trimEndMs : total).clamp(
-            _start + 1,
-            total,
-          );
-          _ms = _start;
+          if (_times.isEmpty) _setRange(c.value.duration.inMilliseconds);
           await c.setVolume(0);
           await c.seekTo(Duration(milliseconds: _ms));
-          setState(() => _ready = true);
+          if (mounted) setState(() => _videoReady = true);
         })
         .catchError((Object _) {
-          if (mounted) setState(() => _ready = false);
+          if (mounted) setState(() => _videoReady = false);
         });
+  }
+
+  /// Frames inside the trimmed part of the video.
+  void _setRange(int total) {
+    if (total <= 0) return;
+    final e = widget.item.edits;
+    final start = e.trimStartMs.clamp(0, total);
+    final end = (e.trimEndMs > 0 ? e.trimEndMs : total).clamp(start, total);
+    setState(() => _times = CoverPickerScreen.frameTimes(start, end));
+    unawaited(_loadThumbs());
+  }
+
+  /// One by one (phones get slow when many frames are made at once).
+  Future<void> _loadThumbs() async {
+    final times = _times;
+    for (var i = 0; i < times.length; i++) {
+      if (_disposed || times != _times) return;
+      final f = CoverPickerScreen.debugFrame ?? _frame;
+      Uint8List? b;
+      try {
+        b = await f(widget.item.file.path, times[i]);
+      } catch (_) {}
+      if (_disposed || times != _times) return;
+      setState(() => _thumbs[i] = b);
+    }
+  }
+
+  static Future<Uint8List?> _frame(String path, int ms) =>
+      VideoFrames.bytes(path, ms, maxHeight: 260, quality: 70);
+
+  void _pick(int i) {
+    setState(() => _selected = i);
+    final c = _c;
+    if (c != null && _videoReady) c.seekTo(Duration(milliseconds: _ms));
   }
 
   @override
   void dispose() {
+    _disposed = true;
     _c?.dispose();
     super.dispose();
   }
 
+  Widget _bigPreview() {
+    final c = _c;
+    if (c != null && _videoReady) {
+      return AspectRatio(
+        aspectRatio: c.value.aspectRatio,
+        child: applyMatrix(widget.item.edits.filter, VideoPlayer(c)),
+      );
+    }
+    final b = _thumbs[_selected];
+    if (b != null) {
+      return applyMatrix(
+        widget.item.edits.filter,
+        Image.memory(b, fit: BoxFit.contain, gaplessPlayback: true),
+      );
+    }
+    return const CircularProgressIndicator();
+  }
+
+  Widget _frameTile(int i) {
+    final b = _thumbs[i];
+    final on = i == _selected;
+    final ar = widget.item.aspectRatio.clamp(0.5, 1.2).toDouble();
+    return GestureDetector(
+      key: ValueKey('cover-frame-$i'),
+      onTap: () => _pick(i),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        margin: const EdgeInsets.symmetric(horizontal: 3),
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: on ? AppColors.lime : Colors.transparent,
+            width: 2.5,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(7),
+          child: AspectRatio(
+            aspectRatio: ar,
+            child: b == null
+                ? Container(
+                    color: AppColors.surfaceHigh,
+                    alignment: Alignment.center,
+                    child: _thumbs.containsKey(i)
+                        ? const Icon(
+                            Icons.broken_image_outlined,
+                            size: 18,
+                            color: AppColors.textHint,
+                          )
+                        : const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                  )
+                : Opacity(
+                    opacity: on ? 1 : 0.75,
+                    child: applyMatrix(
+                      widget.item.edits.filter,
+                      Image.memory(b, fit: BoxFit.cover, gaplessPlayback: true),
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final c = _c;
+    final canDone = _times.isNotEmpty;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -892,7 +1018,8 @@ class _CoverPickerScreenState extends State<CoverPickerScreen> {
         title: const Text('Choose cover'),
         actions: [
           TextButton(
-            onPressed: _ready ? () => Navigator.pop(context, _ms) : null,
+            key: const ValueKey('cover-done'),
+            onPressed: canDone ? () => Navigator.pop(context, _ms) : null,
             child: const Text(
               'Done',
               style: TextStyle(
@@ -905,43 +1032,32 @@ class _CoverPickerScreenState extends State<CoverPickerScreen> {
       ),
       body: Column(
         children: [
-          Expanded(
-            child: Center(
-              child: c == null || !_ready
-                  ? const CircularProgressIndicator()
-                  : AspectRatio(
-                      aspectRatio: c.value.aspectRatio,
-                      child: applyMatrix(
-                        widget.item.edits.filter,
-                        VideoPlayer(c),
-                      ),
+          Expanded(child: Center(child: _bigPreview())),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 12, 10, 16),
+              child: Column(
+                children: [
+                  SizedBox(
+                    height: 104,
+                    child: ListView.builder(
+                      key: const ValueKey('cover-frames'),
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _times.length,
+                      itemBuilder: (_, i) => _frameTile(i),
                     ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-            child: Column(
-              children: [
-                Slider(
-                  value: _ms.toDouble().clamp(
-                    _start.toDouble(),
-                    _end.toDouble(),
                   ),
-                  min: _start.toDouble(),
-                  max: _end.toDouble(),
-                  activeColor: AppColors.lime,
-                  onChanged: !_ready
-                      ? null
-                      : (v) {
-                          setState(() => _ms = v.round());
-                          c?.seekTo(Duration(milliseconds: _ms));
-                        },
-                ),
-                Text(
-                  'Slide to pick a frame · ${durationLabel(_ms - _start)}',
-                  style: const TextStyle(color: AppColors.textSecondary),
-                ),
-              ],
+                  const SizedBox(height: 10),
+                  Text(
+                    _times.isEmpty
+                        ? 'Loading frames…'
+                        : 'Tap a frame to make it the cover · '
+                              '${durationLabel(_ms - _times.first)}',
+                    style: const TextStyle(color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
             ),
           ),
         ],

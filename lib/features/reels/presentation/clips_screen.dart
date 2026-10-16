@@ -35,6 +35,7 @@ import '../../post/presentation/post_menu.dart';
 import '../../profile/data/user_repository.dart';
 import '../../../core/services/video_cache.dart';
 import '../../../shared/widgets/bounce.dart';
+import '../../../shared/widgets/tagged_text.dart';
 import '../../../shared/widgets/verified_badge.dart';
 
 /// Full-screen vertical clips.
@@ -1526,30 +1527,6 @@ class _CaptionBar extends StatelessWidget {
   final bool open;
   final VoidCallback onTap;
 
-  /// Caption with #hashtags in lime.
-  static TextSpan _captionSpan(String text) {
-    final spans = <TextSpan>[];
-    final re = RegExp(r'#[\p{L}\p{M}\p{N}_]+', unicode: true);
-    var last = 0;
-    for (final m in re.allMatches(text)) {
-      if (m.start > last) {
-        spans.add(TextSpan(text: text.substring(last, m.start)));
-      }
-      spans.add(
-        TextSpan(
-          text: m.group(0),
-          style: const TextStyle(
-            color: AppColors.lime,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      );
-      last = m.end;
-    }
-    if (last < text.length) spans.add(TextSpan(text: text.substring(last)));
-    return TextSpan(children: spans);
-  }
-
   @override
   Widget build(BuildContext context) {
     final hasCaption = post.caption.isNotEmpty;
@@ -1592,8 +1569,9 @@ class _CaptionBar extends StatelessWidget {
                         ),
                         if (hasCaption) ...[
                           const SizedBox(height: 6),
-                          Text.rich(
-                            _captionSpan(post.caption),
+                          TaggedText(
+                            post.caption,
+                            key: const ValueKey('clip-caption-open'),
                             style: const TextStyle(fontSize: 14.5, height: 1.4),
                           ),
                         ],
@@ -1610,8 +1588,9 @@ class _CaptionBar extends StatelessWidget {
                   children: [
                     Expanded(
                       child: hasCaption
-                          ? Text.rich(
-                              _captionSpan(post.caption),
+                          ? TaggedText(
+                              post.caption,
+                              key: const ValueKey('clip-caption'),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontSize: 14.5),

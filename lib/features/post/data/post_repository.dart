@@ -42,16 +42,23 @@ class PostRepository {
   }
 
   /// Clips with a hashtag (newest first).
-  Future<List<Post>> clipsByTag(String tag) async {
-    final t = tag.replaceFirst('#', '').trim().toLowerCase();
+  Future<List<Post>> clipsByTag(String tag) async =>
+      (await postsByTag(tag)).where((p) => p.isClip).toList();
+
+  /// v0.17: clips AND posts with a hashtag (newest first) - hashtag page.
+  Future<List<Post>> postsByTag(String tag, {int limit = 150}) async {
+    final t = normalizeTag(tag);
     if (t.isEmpty) return [];
     // Single-field query -> no extra Firestore index needed.
-    final s = await _posts.where('tags', arrayContains: t).limit(150).get();
-    final list =
-        _map(s).where((p) => p.isClip && _filter.canSeeInFeeds(p)).toList()
-          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final s = await _posts.where('tags', arrayContains: t).limit(limit).get();
+    final list = _map(s).where(_filter.canSeeInFeeds).toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return list;
   }
+
+  /// "#Goa " -> "goa" (how tags are saved).
+  static String normalizeTag(String tag) =>
+      tag.trim().replaceFirst(RegExp(r'^#+'), '').trim().toLowerCase();
 
   // ---------------- Create / delete ----------------
 

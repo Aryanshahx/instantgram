@@ -20,9 +20,8 @@ class NotificationSettingsScreen extends StatelessWidget {
       await (onChanged ?? ChatPrefs.instance.setPush)(kind, on);
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(friendlyError(e))));
       }
     }
   }
@@ -54,7 +53,7 @@ class NotificationSettingsScreen extends StatelessWidget {
               SettingsTile(
                 icon: Icons.ring_volume_outlined,
                 title: 'Calls & notifications check',
-                subtitle: 'Test ringing when the app is closed',
+                subtitle: 'Make sure calls ring when the app is closed',
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const CallCheckScreen(),

@@ -532,8 +532,7 @@ void main() {
 
   // ------------------------------------------------------- call check
   group('calls & notifications check', () {
-    testWidgets('problems, fix buttons, phone tip, test ring', (t) async {
-      final ring = Completer<String>();
+    testWidgets('problems, fix buttons, phone tip, no test ring', (t) async {
       await t.pumpWidget(
         MaterialApp(
           theme: AppTheme.dark,
@@ -545,7 +544,6 @@ void main() {
               battery: false,
               registered: true,
             ),
-            testRing: () => ring.future,
           ),
         ),
       );
@@ -560,16 +558,7 @@ void main() {
       expect(find.byKey(const ValueKey('fix-battery')), findsOneWidget);
       expect(find.byKey(const ValueKey('fix-registered')), findsNothing);
       expect(find.byKey(const ValueKey('check-autostart')), findsOneWidget);
-      await t.ensureVisible(find.byKey(const ValueKey('test-ring')));
-      await t.pumpAndSettle();
-      await t.tap(find.byKey(const ValueKey('test-ring')));
-      await t.pump();
-      expect(find.text('Ringing in a few seconds…'), findsOneWidget);
-      ring.complete('Sent. Leave the app now.');
-      await t.pump();
-      await t.pump();
-      expect(find.byKey(const ValueKey('test-result')), findsOneWidget);
-      expect(find.text('Sent. Leave the app now.'), findsOneWidget);
+      expect(find.byKey(const ValueKey('test-ring')), findsNothing);
       await _finish(t);
     });
 
@@ -585,7 +574,6 @@ void main() {
               battery: true,
               registered: true,
             ),
-            testRing: () async => 'ok',
           ),
         ),
       );

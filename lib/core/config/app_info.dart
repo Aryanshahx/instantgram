@@ -2,15 +2,12 @@
 class AppInfo {
   AppInfo._();
 
-  static const String version = '0.16.0';
+  static const String version = '0.17.0';
   static const String supportEmail = 'techlabs.hyper@gmail.com';
   static const String company = 'HyperTech Labs';
 
-  /// GitHub repo used by "App update" (releases come from version tags).
+  /// GitHub repo (legal pages).
   static const String githubRepo = 'Aryanshahx/instantgram';
-  static const String releasesPage = 'https://github.com/$githubRepo/releases';
-  static const String latestReleaseApi =
-      'https://api.github.com/repos/$githubRepo/releases/latest';
 
   /// Legal pages (files in the GitHub repo).
   static const String privacyPolicyUrl =

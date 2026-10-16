@@ -8,14 +8,12 @@ import '../../../core/theme/app_colors.dart';
 import 'settings_widgets.dart';
 
 /// v0.11 Settings -> Calls & notifications: checks everything a phone
-/// needs to ring when the app is closed, with a button to fix each one
-/// and a "Test ring".
+/// needs to ring when the app is closed, with a button to fix each one.
 class CallCheckScreen extends StatefulWidget {
-  const CallCheckScreen({super.key, this.check, this.testRing, this.maker});
+  const CallCheckScreen({super.key, this.check, this.maker});
 
   /// Tests.
   final Future<CallCheck> Function()? check;
-  final Future<String> Function()? testRing;
   final String? maker;
 
   @override
@@ -25,8 +23,6 @@ class CallCheckScreen extends StatefulWidget {
 class _CallCheckScreenState extends State<CallCheckScreen> {
   CallCheck? _c;
   String _maker = '';
-  bool _testing = false;
-  String? _testResult;
   late final AppLifecycleListener _life;
 
   @override
@@ -53,19 +49,6 @@ class _CallCheckScreenState extends State<CallCheckScreen> {
   Future<void> _load() async {
     final c = await (widget.check ?? Calls.instance.check)();
     if (mounted) setState(() => _c = c);
-  }
-
-  Future<void> _test() async {
-    setState(() {
-      _testing = true;
-      _testResult = null;
-    });
-    final r = await (widget.testRing ?? Calls.instance.testRing)();
-    if (!mounted) return;
-    setState(() {
-      _testing = false;
-      _testResult = r;
-    });
   }
 
   bool get _chinaRom => const [
@@ -101,7 +84,10 @@ class _CallCheckScreenState extends State<CallCheckScreen> {
               onPressed: fix,
               child: const Text(
                 'Fix',
-                style: TextStyle(color: AppColors.lime, fontWeight: FontWeight.w800),
+                style: TextStyle(
+                  color: AppColors.lime,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
     );
@@ -150,7 +136,8 @@ class _CallCheckScreenState extends State<CallCheckScreen> {
                 title: 'Notifications',
                 okText: 'Allowed',
                 badText: 'Off: no ringing, no message notifications',
-                fix: () => Calls.instance.fixNotifications().then((_) => _load()),
+                fix: () =>
+                    Calls.instance.fixNotifications().then((_) => _load()),
               ),
               _row(
                 id: 'fullscreen',
@@ -195,50 +182,6 @@ class _CallCheckScreenState extends State<CallCheckScreen> {
               ],
             ),
           ],
-          const SettingsHeader('Test'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  '1. Tap "Test ring".\n'
-                  '2. Press the Home button right away (leave the app).\n'
-                  '3. In about 6 seconds the phone should ring.',
-                  style: TextStyle(color: AppColors.textSecondary, height: 1.4),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    key: const ValueKey('test-ring'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.lime,
-                      foregroundColor: Colors.black,
-                    ),
-                    onPressed: _testing ? null : _test,
-                    icon: _testing
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.ring_volume_rounded),
-                    label: Text(_testing ? 'Ringing in a few seconds…' : 'Test ring'),
-                  ),
-                ),
-                if (_testResult != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Text(
-                      _testResult!,
-                      key: const ValueKey('test-result'),
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-              ],
-            ),
-          ),
         ],
       ],
     );
@@ -249,7 +192,9 @@ class _CallCheckScreenState extends State<CallCheckScreen> {
       return 'Tap here → Battery → "Allow background activity" (High '
           'background power). Also turn on "Autostart".';
     }
-    if (_maker.contains('xiaomi') || _maker.contains('redmi') || _maker.contains('poco')) {
+    if (_maker.contains('xiaomi') ||
+        _maker.contains('redmi') ||
+        _maker.contains('poco')) {
       return 'Tap here → turn on "Autostart" → Battery saver → "No restrictions".';
     }
     return 'Tap here → Battery usage → turn on "Allow background activity" '

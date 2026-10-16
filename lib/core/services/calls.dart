@@ -14,7 +14,6 @@ import '../../features/calls/call_screen.dart';
 import '../../features/calls/call_session.dart';
 import '../../features/calls/incoming_call_screen.dart';
 import '../../firebase_options.dart';
-import 'api_client.dart';
 import 'chat_prefs.dart';
 import 'server_clock.dart';
 import 'system_settings.dart';
@@ -188,7 +187,10 @@ class Calls {
         list.removeAt(0);
       }
       list.add(token);
-      await ref.set({'tokens': list, 'updatedAt': FieldValue.serverTimestamp()});
+      await ref.set({
+        'tokens': list,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
     } catch (e) {
       debugPrint('push token: $e');
     }
@@ -476,7 +478,11 @@ class Calls {
     showDialog<void>(
       context: ctx,
       builder: (d) => AlertDialog(
-        icon: const Icon(Icons.check_circle, color: Color(0xFF3DDC84), size: 44),
+        icon: const Icon(
+          Icons.check_circle,
+          color: Color(0xFF3DDC84),
+          size: 44,
+        ),
         title: const Text('Ringing works'),
         content: const Text('Calls to you will ring on this phone.'),
         actions: [
@@ -504,7 +510,8 @@ class Calls {
     var battery = true;
     try {
       final s = await FirebaseMessaging.instance.getNotificationSettings();
-      notifications = s.authorizationStatus == AuthorizationStatus.authorized ||
+      notifications =
+          s.authorizationStatus == AuthorizationStatus.authorized ||
           s.authorizationStatus == AuthorizationStatus.provisional;
     } catch (_) {}
     try {
@@ -527,6 +534,26 @@ class Calls {
     );
   }
 
+  /// v0.17: the two things every user MUST allow (the app waits on a
+  /// "please allow" page until both are on).
+  Future<({bool notifications, bool lockScreen})> mustHave() async {
+    if (disabled) return (notifications: true, lockScreen: true);
+    var notifications = false;
+    var lockScreen = true;
+    try {
+      final s = await FirebaseMessaging.instance.getNotificationSettings();
+      notifications =
+          s.authorizationStatus == AuthorizationStatus.authorized ||
+          s.authorizationStatus == AuthorizationStatus.provisional;
+    } catch (_) {
+      notifications = true; // can't check -> don't lock the app
+    }
+    try {
+      lockScreen = await FlutterCallkitIncoming.canUseFullScreenIntent();
+    } catch (_) {}
+    return (notifications: notifications, lockScreen: lockScreen);
+  }
+
   Future<void> fixNotifications() async {
     try {
       final s = await FirebaseMessaging.instance.requestPermission();
@@ -547,33 +574,11 @@ class Calls {
   Future<void> fixBattery() async {
     try {
       final ok = await FlutterForegroundTask.requestIgnoreBatteryOptimization();
-      if (!ok) await FlutterForegroundTask.openIgnoreBatteryOptimizationSettings();
+      if (!ok) {
+        await FlutterForegroundTask.openIgnoreBatteryOptimizationSettings();
+      }
     } catch (_) {
       await SystemSettings.app();
-    }
-  }
-
-  /// Asks our server to ring THIS phone in 4 seconds. Returns a message
-  /// for the user.
-  Future<String> testRing() async {
-    if (disabled || _me == null) return 'Please wait a moment and try again.';
-    try {
-      final r = await ApiClient.instance.post('/api/call-push', {
-        'action': 'test',
-      });
-      if (r['tokens'] == 0) {
-        return 'This phone is not saved for calls yet. Allow notifications, '
-            'then open the app again.';
-      }
-      if ((r['sent'] as num? ?? 0) == 0) {
-        return 'Google did not accept the push. Open the app again and retry.';
-      }
-      return 'Sent! It should ring now.';
-    } on ApiException catch (e) {
-      if (e.statusCode == 503) return CallsText.notSetUp(e.message);
-      return e.message;
-    } catch (e) {
-      return 'Could not reach the server. Check internet.';
     }
   }
 

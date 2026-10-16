@@ -182,7 +182,11 @@ class PostGrid extends StatelessWidget {
       itemCount: posts.length,
       itemBuilder: (context, i) => ColoredBox(
         color: AppColors.surface,
-        child: PostTile(post: posts[i], onTap: () => onTap(i)),
+        child: PostTile(
+          key: ValueKey('grid-${posts[i].id}'),
+          post: posts[i],
+          onTap: () => onTap(i),
+        ),
       ),
     );
   }

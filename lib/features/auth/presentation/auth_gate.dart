@@ -5,6 +5,7 @@ import '../../shell/main_shell.dart';
 import '../../splash/presentation/splash_screen.dart';
 import '../data/auth_service.dart';
 import 'login_screen.dart';
+import 'permission_gate.dart';
 
 /// Shows Login when signed out, the main app when signed in.
 class AuthGate extends StatelessWidget {
@@ -20,7 +21,11 @@ class AuthGate extends StatelessWidget {
         }
         final user = snap.data;
         if (user == null) return const LoginScreen();
-        return MainShell(key: ValueKey(user.uid), uid: user.uid);
+        // v0.17: notifications + lock screen calls must be allowed
+        return PermissionGate(
+          key: ValueKey('gate-${user.uid}'),
+          child: MainShell(key: ValueKey(user.uid), uid: user.uid),
+        );
       },
     );
   }

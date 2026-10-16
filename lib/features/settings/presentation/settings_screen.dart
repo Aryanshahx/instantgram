@@ -180,14 +180,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         onTap: (c) => _push(c, LanguageScreen(profile: p)),
       ),
       _Item(
-        section: 'Your app',
-        icon: Icons.system_update_outlined,
-        title: 'App update',
-        subtitle: 'Version ${AppInfo.version}',
-        keywords: 'update new version download apk github',
-        onTap: (c) => _push(c, const UpdateScreen()),
-      ),
-      _Item(
         section: 'More info and support',
         icon: Icons.info_outline,
         title: 'About',

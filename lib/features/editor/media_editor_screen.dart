@@ -671,7 +671,16 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
   Future<void> _next() async {
     if (_exporting) return;
     if (_recording) await _stopVoice();
+    // v0.17: stop the video + music first (nothing plays behind the
+    // share screen), go on again when coming back
+    final c = _video;
+    final wasPlaying = c != null && c.value.isPlaying;
+    final musicWasOn = _audioPlaying;
+    if (wasPlaying) await c.pause();
+    if (musicWasOn) _playMusic(false);
+    if (!mounted) return;
     setState(() => _exporting = true);
+    var resume = true;
     try {
       final out = <EditedMedia>[];
       for (var i = 0; i < _items.length; i++) {
@@ -715,7 +724,6 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
       if (widget.onDone != null) {
         widget.onDone!(out);
       } else {
-        _playMusic(false);
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) =>
@@ -723,6 +731,8 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
           ),
         );
       }
+      // the editor closes (moment / reply) -> stays stopped
+      resume = widget.onDone == null;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -730,7 +740,15 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
         ).showSnackBar(SnackBar(content: Text('Could not prepare media: $e')));
       }
     } finally {
-      if (mounted) setState(() => _exporting = false);
+      if (mounted) {
+        setState(() => _exporting = false);
+        if (resume) {
+          if (musicWasOn && _audio != null) _playMusic(true);
+          if (wasPlaying && _video == c && c.value.isInitialized) {
+            unawaited(c.play());
+          }
+        }
+      }
     }
   }
 

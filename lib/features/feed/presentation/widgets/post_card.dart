@@ -16,6 +16,7 @@ import '../../../post/presentation/comments_sheet.dart';
 import '../../../post/presentation/my_post_picker.dart' show ReplyStickerChip;
 import '../../../post/presentation/post_menu.dart';
 import '../../../../shared/widgets/bounce.dart';
+import '../../../../shared/widgets/tagged_text.dart';
 import '../../../../shared/widgets/verified_badge.dart';
 
 class PostCard extends StatefulWidget {
@@ -307,16 +308,15 @@ class _PostCardState extends State<PostCard>
                       ),
                     ),
                   if (p.caption.isNotEmpty) ...[
-                    Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(
-                            text: '${p.authorUsername} ',
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          TextSpan(text: p.caption),
-                        ],
-                      ),
+                    TaggedText(
+                      p.caption,
+                      key: const ValueKey('post-caption'),
+                      prefix: [
+                        TextSpan(
+                          text: '${p.authorUsername} ',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ],
                     ),
                   ],
                   const SizedBox(height: 4),

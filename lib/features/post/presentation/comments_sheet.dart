@@ -26,6 +26,7 @@ import '../data/report_repository.dart';
 import 'create_sheet.dart';
 import 'gif_picker.dart';
 import 'my_post_picker.dart';
+import '../../../shared/widgets/tagged_text.dart';
 import '../../../shared/widgets/verified_badge.dart';
 
 /// v0.11: text for "Share" on a comment.
@@ -1331,24 +1332,9 @@ class _CommentText extends StatelessWidget {
   final String text;
 
   @override
-  Widget build(BuildContext context) {
-    const base = TextStyle(color: AppColors.textPrimary, fontSize: 14.5);
-    final m = RegExp(r'^@[a-z0-9._]+').firstMatch(text);
-    if (m == null) return Text(text, style: base);
-    return Text.rich(
-      TextSpan(
-        style: base,
-        children: [
-          TextSpan(
-            text: m.group(0),
-            style: const TextStyle(
-              color: AppColors.lime,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          TextSpan(text: text.substring(m.end)),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => TaggedText(
+    text,
+    mentionAtStart: true,
+    style: const TextStyle(color: AppColors.textPrimary, fontSize: 14.5),
+  );
 }
