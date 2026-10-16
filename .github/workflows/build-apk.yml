@@ -73,14 +73,52 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
-            printf '%s' "$KEYSTORE_B64" | tr -d ' \r\n' | base64 -d > android/app/upload-keystore.jks
-            echo "ANDROID_KEYSTORE_PATH=$GITHUB_WORKSPACE/android/app/upload-keystore.jks" >> "$GITHUB_ENV"
-            echo "HAS_RELEASE_KEY=1" >> "$GITHUB_ENV"
-            echo "Release key found"
-          else
+          bad=0
+          if [ -z "$KEYSTORE_B64$KEYSTORE_PASSWORD$KEY_ALIAS$KEY_PASSWORD" ]; then
             echo "::warning::No signing key secrets. The APK uses a temporary debug key and no .aab is made. Add the 4 ANDROID_* secrets (Settings > Secrets and variables > Actions)."
+            exit 0
           fi
+          for n in KEYSTORE_B64:ANDROID_KEYSTORE_BASE64 KEYSTORE_PASSWORD:ANDROID_KEYSTORE_PASSWORD KEY_ALIAS:ANDROID_KEY_ALIAS KEY_PASSWORD:ANDROID_KEY_PASSWORD; do
+            v="${n%%:*}"
+            if [ -z "${!v}" ]; then echo "::error::Secret ${n#*:} is missing or empty."; bad=1; fi
+          done
+          for n in KEYSTORE_PASSWORD:ANDROID_KEYSTORE_PASSWORD KEY_ALIAS:ANDROID_KEY_ALIAS KEY_PASSWORD:ANDROID_KEY_PASSWORD; do
+            v="${n%%:*}"
+            case "${!v}" in
+              *[[:space:]]*) echo "::error::Secret ${n#*:} has a space or a new line in it. Paste it again with no spaces before or after."; bad=1 ;;
+            esac
+          done
+          [ "$bad" = 0 ] || exit 1
+          KS="$RUNNER_TEMP/ci-signing.jks"
+          B64="$(printf '%s' "$KEYSTORE_B64" | tr -d ' \t\r\n"')"
+          if ! printf '%s' "$B64" | base64 -d > "$KS" 2>/dev/null || [ ! -s "$KS" ]; then
+            echo "::error::Secret ANDROID_KEYSTORE_BASE64 is wrong. It must be the CONTENT of the file ~/instantgram-keys/upload-keystore.jks.b64 (one long line, about 3,500 letters, starts with MII). Yours has ${#B64} letters."
+            case "$KEYSTORE_B64" in
+              *everything*|*inside*|*/home/*|*.b64*|*ANDROID_*) echo "::error::It looks like you pasted the text from passwords.txt, not the file content." ;;
+            esac
+            bad=1
+          fi
+          if [ "$bad" = 0 ]; then
+            if ! keytool -list -keystore "$KS" -storepass "$KEYSTORE_PASSWORD" >/dev/null 2>&1; then
+              echo "::error::Secret ANDROID_KEYSTORE_PASSWORD is wrong (or the key file is broken). Copy it again from ~/instantgram-keys/passwords.txt (only the password, no spaces)."
+              bad=1
+            elif ! keytool -list -keystore "$KS" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null 2>&1; then
+              echo "::error::Secret ANDROID_KEY_ALIAS is wrong. It must be exactly: upload"
+              bad=1
+            elif [ "$KEY_PASSWORD" != "$KEYSTORE_PASSWORD" ]; then
+              echo "::error::Secret ANDROID_KEY_PASSWORD is wrong. It must be the SAME password as ANDROID_KEYSTORE_PASSWORD."
+              bad=1
+            fi
+          fi
+          if [ "$bad" != 0 ]; then
+            rm -f "$KS"
+            echo "::error::Fix the secret(s) in GitHub: repo > Settings > Secrets and variables > Actions > click the pencil next to the secret. Then Actions > this run > Re-run jobs."
+            exit 1
+          fi
+          echo "ANDROID_KEYSTORE_PATH=$KS" >> "$GITHUB_ENV"
+          echo "HAS_RELEASE_KEY=1" >> "$GITHUB_ENV"
+          keytool -list -v -keystore "$KS" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" | grep -E '^\s*SHA(1|256):' || true
+          echo "Release key OK"
 
       - name: Build release APK
         env:
@@ -114,7 +152,7 @@ jobs:
             cp build/app/outputs/bundle/release/app-release.aab \
                release/InstantGram-build-${{ github.run_number }}.aab
           fi
-          rm -f android/app/upload-keystore.jks
+          rm -f "$RUNNER_TEMP/ci-signing.jks"
           ls -la release
 
       - name: Show signing key fingerprint
