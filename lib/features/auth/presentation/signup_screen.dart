@@ -13,6 +13,7 @@ import '../../../shared/widgets/ig_buttons.dart';
 import '../../../shared/widgets/ig_logo.dart';
 import '../../../shared/widgets/ig_text_field.dart';
 import '../data/auth_service.dart';
+import '../../../shared/widgets/hi_text_check.dart';
 
 /// Create account, step 2 (after [ChooseLanguageScreen]).
 class SignupScreen extends StatefulWidget {
@@ -100,6 +101,9 @@ class _SignupScreenState extends State<SignupScreen> {
   Future<void> _signup() async {
     FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) return;
+    // v0.18 Hyper Intelligence: no strong abuse in name / username
+    if (!await hiTextOk(context, [_nameCtrl.text, _userCtrl.text])) return;
+    if (!mounted) return;
     setState(() => _loading = true);
     try {
       await AuthService.instance.signUp(

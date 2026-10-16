@@ -4,8 +4,10 @@ import '../../core/theme/app_colors.dart';
 import '../../core/utils/time_ago.dart';
 import '../models/post.dart';
 import '../../core/services/content_filter.dart';
+import '../../core/services/hyper_intelligence.dart';
 import '../../features/insights/owner_sheet.dart';
 import 'empty_state.dart';
+import 'hi_blur.dart';
 import 'net_image.dart';
 
 /// Cover image of a post / clip (gradient when there is no image).
@@ -16,6 +18,10 @@ class ClipCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // v0.18: sensitive -> blurred tile (open it to "Tap to view")
+    if (HyperIntelligence.instance.blurs(post)) {
+      return HiBlur(imageUrl: post.coverUrl, compact: true);
+    }
     if (post.coverUrl.isNotEmpty) return NetImage(post.coverUrl);
     return Container(
       decoration: const BoxDecoration(

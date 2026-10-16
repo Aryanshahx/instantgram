@@ -16,6 +16,7 @@ import '../../../shared/widgets/ig_text_field.dart';
 import '../../../shared/widgets/net_image.dart';
 import '../data/user_repository.dart';
 import 'profile_image_crop.dart';
+import '../../../shared/widgets/hi_text_check.dart';
 
 /// Lower case letters, numbers, "." and "_" only.
 class UsernameFormatter extends TextInputFormatter {
@@ -224,6 +225,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   Future<void> _save() async {
     final newName = _username.text.trim();
+    // v0.18 Hyper Intelligence: no strong abuse in name, username, bio
+    if (!await hiTextOk(context, [newName, _name.text, _bio.text])) return;
+    if (!mounted) return;
     final changeName = newName != widget.profile.username;
     if (changeName) {
       final problem = UserRepository.usernameProblem(newName);

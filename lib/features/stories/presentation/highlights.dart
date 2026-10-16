@@ -5,6 +5,7 @@ import '../../../shared/models/post.dart';
 import '../../../shared/widgets/net_image.dart';
 import '../data/highlight_repository.dart';
 import '../data/moments_index.dart';
+import '../../../shared/widgets/hi_text_check.dart';
 
 /// v0.15: the row of highlights under the profile buttons.
 /// Your own row starts with "New" (plus ring) to make a highlight.
@@ -308,6 +309,8 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> {
   Future<void> _save() async {
     final items = _selected;
     if (items.isEmpty || _saving) return;
+    // v0.18 Hyper Intelligence: no strong abuse in the name
+    if (!await hiTextOk(context, [_title.text]) || !mounted) return;
     setState(() => _saving = true);
     final cover = Highlight.coverOf(items, preferred: _cover);
     try {

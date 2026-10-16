@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../core/services/gif_search.dart';
+import '../../../core/services/hyper_intelligence.dart';
 import '../../../core/services/media_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/email.dart';
@@ -28,6 +29,7 @@ import 'gif_picker.dart';
 import 'my_post_picker.dart';
 import '../../../shared/widgets/tagged_text.dart';
 import '../../../shared/widgets/verified_badge.dart';
+import '../../../shared/widgets/hi_text_check.dart';
 
 /// v0.11: text for "Share" on a comment.
 String commentShareText(Post post, Comment c) {
@@ -465,6 +467,8 @@ class _CommentsSheetState extends State<CommentsSheet> {
     // "@name " alone is not a comment
     if (reply != null && text == '@${reply.authorUsername}') text = '';
     if ((text.isEmpty && draft == null && linked == null) || _sending) return;
+    // v0.18 Hyper Intelligence: no strong abuse
+    if (!await hiTextOk(context, [text]) || !mounted) return;
     setState(() => _sending = true);
     try {
       CommentPicture? pic;
@@ -1126,6 +1130,8 @@ class _CommentTileState extends State<CommentTile> {
     final c = widget.comment;
     final reply = c.isReply;
     final pic = c.pictureUrl;
+    // v0.18 Hyper Intelligence: sensitive comment -> "Tap to view"
+    final blurred = HyperIntelligence.instance.blursComment(c);
     return StreamBuilder<bool>(
       stream: _liked,
       builder: (context, snap) {
@@ -1204,12 +1210,30 @@ class _CommentTileState extends State<CommentTile> {
                           ],
                         ),
                       ),
-                      if (c.text.isNotEmpty)
+                      if (blurred)
+                        GestureDetector(
+                          key: ValueKey('hi-comment-${c.id}'),
+                          onTap: () => setState(
+                            () => HyperIntelligence.instance.revealComment(c),
+                          ),
+                          child: const Padding(
+                            padding: EdgeInsets.only(top: 2),
+                            child: Text(
+                              'Hidden by Hyper Intelligence · Tap to view',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontStyle: FontStyle.italic,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (c.text.isNotEmpty && !blurred)
                         Padding(
                           padding: const EdgeInsets.only(top: 2),
                           child: _CommentText(text: c.text),
                         ),
-                      if (pic.isNotEmpty)
+                      if (pic.isNotEmpty && !blurred)
                         Padding(
                           padding: const EdgeInsets.only(top: 6),
                           child: ConstrainedBox(

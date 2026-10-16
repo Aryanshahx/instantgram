@@ -8,6 +8,7 @@ import 'package:video_player/video_player.dart';
 import '../../../core/navigation/page_cover.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
+import '../../../core/services/hyper_intelligence.dart';
 import '../../../core/services/media_prefetch.dart';
 import '../../../core/services/music_player.dart';
 import '../../../core/services/net_quality.dart';
@@ -22,6 +23,7 @@ import '../../../shared/widgets/async_views.dart';
 import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/follow_chip.dart';
+import '../../../shared/widgets/hi_blur.dart';
 import '../../../shared/widgets/media_view.dart';
 import '../../../shared/widgets/net_image.dart';
 import '../../../shared/widgets/seek_bar.dart';
@@ -194,24 +196,35 @@ class _ClipsScreenState extends State<ClipsScreen> {
         scrollDirection: Axis.vertical,
         itemCount: clips.length,
         onPageChanged: _onPageChanged,
-        itemBuilder: (context, i) => ClipPlayer(
-          key: ValueKey(clips[i].id),
-          clip: clips[i],
-          active: i == _current,
-          muted: _muted,
-          volume: _volume,
-          autoScroll: autoScroll,
-          onToggleMute: _toggleMute,
-          onVolumeChanged: _setVolume,
-          onFinished: _next,
-          onPanel: (open) {
-            if (mounted) setState(() => _panelOpen = open);
-          },
-          onDeleted: () => setState(() => _deleted.add(clips[i].id)),
-          source:
-              widget.source ??
-              (widget.clips == null ? ViewSource.clips : ViewSource.other),
-        ),
+        // v0.18 Hyper Intelligence: a sensitive clip is blurred until
+        // "Tap to view" (it does not play or make sound before)
+        itemBuilder: (context, i) => HyperIntelligence.instance.blurs(clips[i])
+            ? HiBlur(
+                key: ValueKey('hi-clip-${clips[i].id}'),
+                imageUrl: clips[i].coverUrl,
+                onReveal: () =>
+                    setState(() => HyperIntelligence.instance.reveal(clips[i])),
+              )
+            : ClipPlayer(
+                key: ValueKey(clips[i].id),
+                clip: clips[i],
+                active: i == _current,
+                muted: _muted,
+                volume: _volume,
+                autoScroll: autoScroll,
+                onToggleMute: _toggleMute,
+                onVolumeChanged: _setVolume,
+                onFinished: _next,
+                onPanel: (open) {
+                  if (mounted) setState(() => _panelOpen = open);
+                },
+                onDeleted: () => setState(() => _deleted.add(clips[i].id)),
+                source:
+                    widget.source ??
+                    (widget.clips == null
+                        ? ViewSource.clips
+                        : ViewSource.other),
+              ),
       ),
     );
   }

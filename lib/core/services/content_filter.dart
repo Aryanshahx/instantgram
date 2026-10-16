@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../shared/models/post.dart';
+import 'hyper_intelligence.dart';
 
 /// Decides what the signed-in user may see:
 /// blocked users, private accounts and post audience.
@@ -41,6 +42,9 @@ class ContentFilter {
   bool isPrivate(String uid) => _private.contains(uid);
 
   void _bump() => version.value++;
+
+  /// v0.18: re-filter open lists (Hyper Intelligence settings changed).
+  void refresh() => _bump();
 
   /// Start listening for [uid] (called when the main screen opens).
   void start(String uid) {
@@ -116,8 +120,14 @@ class ContentFilter {
     return true;
   }
 
-  bool canSee(Post p) => canSeeFrom(p.authorId, p.audience);
-  bool canSeeStory(Story s) => canSeeFrom(s.authorId, s.audience);
+  // v0.18: + Hyper Intelligence (hidden content, sensitive for under 18 /
+  // "Hide" in Settings)
+  bool canSee(Post p) =>
+      canSeeFrom(p.authorId, p.audience) &&
+      !HyperIntelligence.instance.hides(p);
+  bool canSeeStory(Story s) =>
+      canSeeFrom(s.authorId, s.audience) &&
+      !HyperIntelligence.instance.hidesStory(s);
 
   List<Post> filter(List<Post> list) => list.where(canSee).toList();
 
@@ -171,7 +181,13 @@ class ContentFilter {
 
   /// v0.16: feeds, Explore, Clips and search leave out "profile only"
   /// posts (they are still on the profile grid).
-  bool canSeeInFeeds(Post p) => canSee(p) && !p.profileOnly;
+  /// v0.18: sensitive posts are only in feeds of people who follow the
+  /// author (blurred) - never recommended to others (Explore, Clips,
+  /// hashtags, search).
+  bool canSeeInFeeds(Post p) =>
+      canSee(p) &&
+      !p.profileOnly &&
+      (!p.sensitive || p.authorId == uid || _following.contains(p.authorId));
 
   Stream<List<Post>> feedPosts(Stream<List<Post>> source) =>
       watch<Post>(source, canSeeInFeeds);

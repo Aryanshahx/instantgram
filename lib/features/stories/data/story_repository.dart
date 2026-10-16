@@ -28,6 +28,8 @@ class StoryRepository {
     'authorUsername': me.username,
     'authorPhotoUrl': me.photoUrl,
     'audience': audience,
+    // v0.18: Hyper Intelligence checks it (the server sets the result)
+    'modState': 'pending',
     'createdAt': FieldValue.serverTimestamp(),
     'expiresAt': Timestamp.fromDate(
       DateTime.now().add(const Duration(hours: 24)),

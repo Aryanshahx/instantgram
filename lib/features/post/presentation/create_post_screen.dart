@@ -25,6 +25,7 @@ import '../data/post_repository.dart';
 import '../data/upload_queue.dart';
 import 'create_sheet.dart' show ComposeReply;
 import 'my_post_picker.dart' show ReplyStickerChip;
+import '../../../shared/widgets/hi_text_check.dart';
 
 export '../../editor/edit_models.dart' show ComposeMode, EditedMedia;
 export '../../../shared/widgets/media_view.dart' show PageDots;
@@ -168,6 +169,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   Future<void> _share() async {
     FocusScope.of(context).unfocus();
+    // v0.18 Hyper Intelligence: no strong abuse in the caption
+    if (!_isStory && !await hiTextOk(context, [_caption.text])) return;
+    if (!mounted) return;
     setState(() {
       _progress = 0;
       _error = null;

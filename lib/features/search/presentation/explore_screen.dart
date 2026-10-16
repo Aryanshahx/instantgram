@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
 import '../../../core/services/media_prefetch.dart';
+import '../../../core/services/hyper_intelligence.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/time_ago.dart';
@@ -343,7 +344,13 @@ class _ExploreTileState extends State<ExploreTile> {
   Widget build(BuildContext context) {
     final post = widget.post;
     final first = post.items.isEmpty ? null : post.items.first;
-    final video = first != null && first.isVideo ? first : null;
+    // v0.18: a blurred clip never plays in the tile
+    final video =
+        first != null &&
+            first.isVideo &&
+            !HyperIntelligence.instance.blurs(post)
+        ? first
+        : null;
     return VisibilityDetector(
       key: ValueKey('explore-vis-${post.id}'),
       onVisibilityChanged: (info) =>

@@ -107,7 +107,7 @@
 <section id="app" class="hide">
   <header>
     <div class="row" style="margin-bottom:8px">
-      <div class="logo grow">Instant<b>Gram</b> <span class="muted small">admin</span> <span id="ver" class="muted small" title="Admin page version">v0.15.0</span></div>
+      <div class="logo grow">Instant<b>Gram</b> <span class="muted small">admin</span> <span id="ver" class="muted small" title="Version (page · server)">v0.18.0</span></div>
       <span id="who" class="muted small"></span>
       <button class="ghost small" id="logout">Log out</button>
     </div>
@@ -116,6 +116,7 @@
       <button data-page="users">Users</button>
       <button data-page="posts">Posts &amp; clips</button>
       <button data-page="reports">Reports</button>
+      <button data-page="hi">Hyper Intelligence <span id="hiBadge" class="tag red hide"></span></button>
       <button data-page="notice">Send notice</button>
     </nav>
   </header>
@@ -180,6 +181,28 @@
       <div class="muted small hide" id="repInfo" style="margin-bottom:8px"></div>
       <div class="list" id="repList"></div>
       <button class="more hide" id="repMore">Load more</button>
+    </div>
+
+    <div id="page-hi" class="hide">
+      <div class="row"><h2 class="grow">Hyper Intelligence</h2><button id="hiSweep">Check now</button><button id="hiLimits">Limits</button><button id="hiRefresh">Refresh</button></div>
+      <div class="muted small" style="margin-bottom:10px">InstantGram's safety system. It checks every new post, clip, moment and comment with OpenAI (chats are never checked).
+        <b>Blurred</b> = people see "Sensitive content · Tap to view". <b>Hidden</b> = only the owner sees it. <b>Unchecked</b> = OpenAI did not answer (tried again every day and when this page opens).</div>
+      <div class="msg hide" id="hiKey">OPENAI_API_KEY is missing in Vercel: nothing can be checked.</div>
+      <div class="tabs" id="hiTabs">
+        <button data-state="" class="on">All <span class="muted" data-n="all"></span></button>
+        <button data-state="review">Blurred <span class="muted" data-n="review"></span></button>
+        <button data-state="hidden">Hidden <span class="muted" data-n="hidden"></span></button>
+        <button data-state="unchecked">Unchecked <span class="muted" data-n="unchecked"></span></button>
+        <select id="hiKind" style="width:auto">
+          <option value="">Everything</option><option value="post">Posts</option><option value="clip">Clips</option><option value="moment">Moments</option><option value="comment">Comments</option>
+        </select>
+        <select id="hiReason" style="width:auto">
+          <option value="">Any reason</option><option value="minors">Minors (urgent)</option><option value="sexual">Sexual</option><option value="violence">Violence</option>
+          <option value="selfHarm">Self-harm</option><option value="hate">Hate</option><option value="harassment">Harassment</option><option value="illicit">Illegal things</option>
+        </select>
+      </div>
+      <div class="muted small hide" id="hiInfo" style="margin-bottom:8px"></div>
+      <div class="list" id="hiList"></div>
     </div>
 
     <div id="page-notice" class="hide">
@@ -302,22 +325,22 @@
   const loaded = {};
   function go(page) {
     for (const b of $('nav').children) b.classList.toggle('on', b.dataset.page === page);
-    for (const p of ['dash', 'users', 'posts', 'reports', 'notice']) $(`page-${p}`).classList.toggle('hide', p !== page);
-    if (!loaded[page]) { loaded[page] = true; ({ dash: loadDash, users: () => loadUsers(true), posts: () => loadPosts(true), reports: () => loadReports(true), notice: () => {} })[page](); }
+    for (const p of ['dash', 'users', 'posts', 'reports', 'hi', 'notice']) $(`page-${p}`).classList.toggle('hide', p !== page);
+    if (!loaded[page]) { loaded[page] = true; ({ dash: loadDash, users: () => loadUsers(true), posts: () => loadPosts(true), reports: () => loadReports(true), hi: loadHi, notice: () => {} })[page](); }
   }
   $('nav').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) go(b.dataset.page); });
 
   // v0.15: shows if Vercel serves an old deployment
-  const PAGE_VERSION = '0.15.0';
+  // v0.18: the label always shows the server version (from /api/health)
+  const PAGE_VERSION = '0.18.0';
   async function checkVersion() {
     try {
       const r = await fetch('/api/health', { cache: 'no-store' });
       const j = await r.json();
       const v = String(j.version || '');
-      if (v && v !== PAGE_VERSION) {
-        $('ver').textContent = `v${PAGE_VERSION} · server v${v}`;
-        toast(`Server is v${v}, page is v${PAGE_VERSION}. In Vercel promote the newest deployment.`, 9000);
-      }
+      if (!v) return;
+      $('ver').textContent = v === PAGE_VERSION ? `v${v}` : `page v${PAGE_VERSION} · server v${v}`;
+      if (v !== PAGE_VERSION) toast(`Server is v${v}, page is v${PAGE_VERSION}. In Vercel promote the newest deployment.`, 9000);
     } catch { /* offline: keep the label */ }
   }
 
@@ -331,6 +354,8 @@
     } catch (e) { if (e.status !== 401) fail(e); return; }
     for (const k of Object.keys(loaded)) delete loaded[k];
     go('dash');
+    // v0.18: Hyper Intelligence tries again what is still unchecked
+    hiAutoSweep();
   }
 
   // ---------------- cards ----------------
@@ -370,8 +395,9 @@
         ['Users', s.users], ['New today', s.users24h], ['New this week', s.users7d],
         ['Online now', s.online], ['Active today', s.active24h],
         ['Posts + clips', s.posts], ['Clips', s.clips], ['Posts', s.photos], ['Live moments', s.moments],
-        ['Chats', s.chats], ['Open reports', s.reports], ['Blocked', s.banned], ['Verified', s.verified], ['Phones (push)', s.phones],
+        ['Chats', s.chats], ['Open reports', s.reports], ['Hyper Intelligence review', s.review], ['Blocked', s.banned], ['Verified', s.verified], ['Phones (push)', s.phones],
       ];
+      hiBadge(s.review);
       $('stats').innerHTML = items.map(([l, n]) => `<div class="stat"><div class="n">${fmt(n)}</div><div class="l">${l}</div></div>`).join('');
     } catch (e) { $('stats').innerHTML = `<div class="msg">${esc(e.message)}</div>`; }
     api('users', {}).then((r) => { $('dashUsers').innerHTML = r.users.slice(0, 6).map(userRow).join('') || '<div class="muted">No users</div>'; }).catch((e) => { $('dashUsers').innerHTML = `<div class="msg">${esc(e.message)}</div>`; });
@@ -468,13 +494,141 @@
   $('repMore').addEventListener('click', () => loadReports(false));
   document.addEventListener('click', async (e) => {
     const b = e.target.closest('button'); if (!b) return;
-    if (b.dataset.openPost) return openPost(b.dataset.openPost, 'post');
+    if (b.dataset.openPost) return openPost(b.dataset.openPost, b.dataset.openKind || 'post');
     if (b.dataset.openUser) return openUser(b.dataset.openUser);
     if (b.dataset.done) {
       b.disabled = true;
       try { await api('resolveReport', { id: b.dataset.done }); const el = document.getElementById(`rep-${b.dataset.done}`); if (el) el.remove(); toast('Report closed'); }
       catch (err) { fail(err); b.disabled = false; }
     }
+  });
+
+  // ---------------- v0.18: Hyper Intelligence ----------------
+  let hiState = '';
+  const HI_LABEL = { minors: 'Minors (urgent)', sexual: 'Sexual', violence: 'Violence', selfHarm: 'Self-harm', hate: 'Hate', harassment: 'Harassment', illicit: 'Illegal things' };
+  const HI_STATE = { review: ['Blurred', 'blue'], hidden: ['Hidden', 'red'], unchecked: ['Unchecked', ''] };
+  function hiBadge(n) {
+    const b = $('hiBadge'); if (!b) return;
+    b.textContent = n ? String(n) : ''; b.classList.toggle('hide', !n);
+  }
+  const pct = (v) => `${Math.round((Number(v) || 0) * 100)}%`;
+  const hiRow = (x) => {
+    const [stLabel, stColor] = HI_STATE[x.state] || [x.state, ''];
+    const bg = safeUrl(x.preview);
+    const reasons = x.reasons.map((g) => `<span class="tag red">${esc(HI_LABEL[g] || g)} ${esc(pct(x.scores[g]))}</span>`).join('');
+    const open = x.kind === 'comment' ? x.postId : x.targetId;
+    return `<div class="item" id="hi-${esc(x.id)}" style="align-items:flex-start">
+      <div class="tile" style="width:84px;flex:none;aspect-ratio:3/4;${bg ? `background-image:url('${esc(bg)}');filter:blur(${x.state === 'unchecked' ? 0 : 6}px)` : ''}" data-pid="${esc(open)}" data-kind="${x.kind === 'moment' ? 'moment' : 'post'}"></div>
+      <div class="grow" style="min-width:0">
+        <div>${x.urgent ? '<span class="tag red">URGENT</span>' : ''}<span class="tag ${stColor}">${esc(stLabel)}</span><span class="tag lime">${esc(x.kind)}</span> <b>@${esc(x.authorUsername || '?')}</b> <span class="muted small">${esc(when(x.at))}</span></div>
+        <div style="margin:6px 0">${reasons}</div>
+        ${x.text ? `<div class="small" style="white-space:pre-wrap;max-height:4.5em;overflow:hidden">${esc(x.text)}</div>` : ''}
+        ${x.error ? `<div class="small muted">OpenAI: ${esc(x.error)}</div>` : ''}
+        <div class="row" style="margin-top:8px">
+          <button class="lime small" data-hi="approve" data-id="${esc(x.id)}">Approve</button>
+          <button class="blue small" data-hi="blur" data-id="${esc(x.id)}">Keep blurred</button>
+          <button class="red small" data-hi="delete" data-id="${esc(x.id)}">Delete</button>
+          <button class="red small" data-hi="strike" data-id="${esc(x.id)}">Delete + strike</button>
+          <button class="red small" data-hi="ban" data-id="${esc(x.id)}">Ban</button>
+          ${x.state === 'unchecked' ? `<button class="small" data-hi="recheck" data-id="${esc(x.id)}">Check again</button>` : ''}
+          <button class="ghost small" data-open-post="${esc(open)}" data-open-kind="${x.kind === 'moment' ? 'moment' : 'post'}">Open</button>
+          ${x.authorId ? `<button class="ghost small" data-open-user="${esc(x.authorId)}">User</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+  };
+  async function loadHi() {
+    $('hiList').innerHTML = '<div class="muted">Loading…</div>';
+    try {
+      const kind = $('hiKind').value, reason = $('hiReason').value;
+      const r = await api('hiList', { state: hiState, kind, reason });
+      $('hiKey').classList.toggle('hide', r.openai !== false);
+      for (const el of $('hiTabs').querySelectorAll('[data-n]')) el.textContent = r.counts[el.dataset.n] ? `(${r.counts[el.dataset.n]})` : '';
+      hiBadge(r.counts.all);
+      $('hiInfo').classList.toggle('hide', !(kind || reason));
+      if (kind || reason) $('hiInfo').textContent = `${fmt(r.total)} found`;
+      $('hiList').innerHTML = r.items.map(hiRow).join('') || '<div class="muted">Nothing to check 🎉</div>';
+    } catch (e) { $('hiList').innerHTML = `<div class="msg">${esc(e.message)}</div>`; }
+  }
+  async function hiAutoSweep() {
+    try {
+      const r = await api('hiSweep');
+      if (r.checked) {
+        toast(`Hyper Intelligence checked ${r.checked} waiting item${r.checked === 1 ? '' : 's'}`);
+        if (loaded.hi) loadHi();
+      }
+    } catch { /* quiet */ }
+  }
+  $('hiRefresh').addEventListener('click', loadHi);
+  $('hiTabs').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    hiState = b.dataset.state;
+    for (const x of $('hiTabs').querySelectorAll('button')) x.classList.toggle('on', x === b);
+    loadHi();
+  });
+  $('hiKind').addEventListener('change', loadHi);
+  $('hiReason').addEventListener('change', loadHi);
+  $('hiSweep').addEventListener('click', async () => {
+    $('hiSweep').disabled = true;
+    try {
+      const r = await api('hiSweep');
+      toast(r.error ? r.error : `Checked ${r.checked}${r.left ? ` (${r.left} more waiting: press again)` : ''}`, 5000);
+      loadHi();
+    } catch (e) { fail(e); } finally { $('hiSweep').disabled = false; }
+  });
+  const HI_ASK = {
+    delete: 'Delete it for ever?',
+    strike: 'Delete it and give the account a strike? (3 strikes = blocked later)',
+    ban: 'Delete it and BLOCK the account? They are logged out and can not log in any more.',
+  };
+  document.addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-hi]'); if (!b) return;
+    const what = b.dataset.hi, mid = b.dataset.id;
+    if (HI_ASK[what] && !confirm(HI_ASK[what])) return;
+    const row = document.getElementById(`hi-${mid}`);
+    if (row) row.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+    try {
+      if (what === 'recheck') {
+        const r = await api('hiRecheck', { id: mid });
+        toast(r.state === 'ok' ? 'Checked: it is fine ✔' : r.state === 'gone' ? 'It was deleted already' : `Checked: ${r.state}`);
+        return loadHi();
+      }
+      const r = await api('hiDecide', { id: mid, decision: what });
+      if (row) row.remove();
+      toast({ approve: 'Approved: shown normally', blur: 'Stays blurred', delete: 'Deleted', strike: `Deleted + strike (${r.strikes || 1})`, ban: r.banned ? 'Deleted + account blocked' : 'Deleted (block failed)' }[what]);
+      if (['delete', 'strike', 'ban'].includes(what) && r.authorId) {
+        try {
+          const u = (await api('user', { uid: r.authorId })).user;
+          mail(u, what === 'ban' ? 'block' : what === 'strike' ? 'hiStrike' : 'hiDelete');
+        } catch { /* user gone */ }
+      }
+      const left = Math.max(0, (Number($('hiBadge').textContent) || 1) - 1);
+      hiBadge(left);
+    } catch (err) {
+      fail(err);
+      if (row) row.querySelectorAll('button').forEach((x) => { x.disabled = false; });
+    }
+  });
+  $('hiLimits').addEventListener('click', async () => {
+    openDrawer(drawerHead('Hyper Intelligence limits') + '<div class="muted">Loading…</div>');
+    try {
+      const r = await api('hiConfig');
+      const rows = Object.keys(r.defaults).map((g) => `<div>${esc(r.labels[g] || g)}</div>
+        <div class="row"><label class="small muted">Blur from</label><input type="number" min="5" max="100" step="5" data-g="${esc(g)}" data-k="blur" value="${Math.round(r.limits[g].blur * 100)}" style="width:80px">
+        <label class="small muted">Hide from</label><input type="number" min="5" max="100" step="5" data-g="${esc(g)}" data-k="hide" value="${Math.round(r.limits[g].hide * 100)}" style="width:80px"> %</div>`).join('');
+      openDrawer(`${drawerHead('Hyper Intelligence limits')}
+        <div class="muted small" style="margin-bottom:10px">OpenAI gives each picture / text a score from 0 to 100 %. From the <b>Blur</b> score people see it blurred; from the <b>Hide</b> score only the owner sees it. Lower = stricter. Minors content is always hidden.</div>
+        <div class="kv" id="hiLim">${rows}</div>
+        <div class="row" style="margin-top:14px"><button class="lime" id="hiLimSave">Save</button><button class="ghost" id="hiLimReset">Back to default</button></div>`);
+      $('hiLimReset').onclick = () => {
+        for (const i of $('hiLim').querySelectorAll('input')) i.value = Math.round(r.defaults[i.dataset.g][i.dataset.k] * 100);
+      };
+      $('hiLimSave').onclick = async () => {
+        const limits = {};
+        for (const i of $('hiLim').querySelectorAll('input')) (limits[i.dataset.g] ||= {})[i.dataset.k] = Number(i.value) / 100;
+        try { await api('hiConfig', { limits }); toast('Limits saved ✔'); closeDrawer(); } catch (e) { fail(e); }
+      };
+    } catch (e) { openDrawer(drawerHead('Hyper Intelligence limits') + `<div class="msg">${esc(e.message)}</div>`); }
   });
 
   // ---------------- drawer ----------------
@@ -547,6 +701,9 @@
     unblock: ['Your InstantGram account is active again', 'Your account is not blocked any more. You can log in again.'],
     delete: ['Your InstantGram account was deleted', 'Your account and everything you shared (posts, clips, moments) were deleted because it broke the InstantGram community rules.'],
     plain: ['InstantGram', ''],
+    // v0.18: Hyper Intelligence decisions
+    hiDelete: ['We removed something you shared on InstantGram', 'Hyper Intelligence and our team removed one of your posts / clips / moments / comments because it broke the InstantGram community rules.'],
+    hiStrike: ['Warning: you got a strike on InstantGram', 'We removed something you shared because it broke the InstantGram community rules, and your account got a strike. After 3 strikes the account is blocked.'],
   };
   const openMail = (url) => (typeof window.igOpenMail === 'function' ? window.igOpenMail(url) : (window.location.href = url));
   function mail(u, kind) {

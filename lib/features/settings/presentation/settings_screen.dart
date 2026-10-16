@@ -17,6 +17,7 @@ import 'accounts_screen.dart';
 import 'app_icon_screen.dart';
 import 'call_check_screen.dart';
 import 'history_screen.dart';
+import 'hyper_intelligence_screen.dart';
 import 'notification_settings_screen.dart';
 import 'privacy_screens.dart';
 import 'settings_pages.dart';
@@ -136,6 +137,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         subtitle: 'People you blocked',
         keywords: 'block unblock blocked accounts',
         onTap: (c) => _push(c, const BlockedScreen()),
+      ),
+      // v0.18
+      _Item(
+        section: 'Who can see your content',
+        icon: Icons.shield_outlined,
+        title: 'Hyper Intelligence',
+        subtitle: 'Sensitive content and safety',
+        keywords:
+            'sensitive content blur hide safety moderation nudity violence '
+            'abuse bad words hyper intelligence',
+        onTap: (c) => _push(c, const HyperIntelligenceScreen()),
       ),
       _Item(
         section: 'Your app',

@@ -6,6 +6,13 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // v0.18: Hyper Intelligence decides 'sensitive' / 'modState' (the server).
+    // A new post / moment can only say "pending" (= please check me).
+    function hiStartOk(d) {
+      return !('sensitive' in d) && !('modReasons' in d) && !('modAt' in d)
+        && d.get('modState', 'pending') == 'pending';
+    }
+
     function signedIn() { return request.auth != null; }
     function me() { return request.auth.uid; }
     function changed() {
@@ -213,7 +220,7 @@ service cloud.firestore {
         && request.resource.data.get('uniqueViews', 0) == 0
         && request.resource.data.get('savesCount', 0) == 0
         && request.resource.data.get('sharesCount', 0) == 0
-        && tagsOk() && optionsOk();
+        && tagsOk() && optionsOk() && hiStartOk(request.resource.data);
       allow update: if signedIn() && (
         (resource.data.authorId == me()
           && changed().hasOnly(['caption', 'tags', 'pinned', 'authorPhotoUrl',
@@ -415,6 +422,7 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.authorId == me()
         && request.resource.data.mediaUrl is string
+        && hiStartOk(request.resource.data)
         && request.resource.data.get('type', 'photo') in ['photo', 'video']
         && request.resource.data.get('audience', 'everyone') in ['everyone', 'followers', 'only_me'];
       allow delete: if signedIn() && resource.data.authorId == me();
@@ -563,6 +571,16 @@ service cloud.firestore {
     match /config/{doc} {
       allow read: if signedIn();
       allow write: if false;
+    }
+
+    // v0.18: Hyper Intelligence. Scores: only the server (admin website).
+    match /moderation/{mid} {
+      allow read, write: if false;
+    }
+    // v0.18: strikes (set by the admin website); you can read your own
+    match /strikes/{uid} {
+      allow get: if signedIn() && me() == uid;
+      allow list, write: if false;
     }
 
     // v0.13: reports for the admin website (users can only add)

@@ -1,5 +1,11 @@
 {
   "rewrites": [
-    { "source": "/u/:name", "destination": "/api/u?name=:name" }
+    { "source": "/u/:name", "destination": "/api/u?name=:name" },
+    { "source": "/api/upload-url", "destination": "/api/media?op=upload" },
+    { "source": "/api/delete-media", "destination": "/api/media?op=delete" },
+    { "source": "/api/multipart", "destination": "/api/media?op=multipart" }
+  ],
+  "crons": [
+    { "path": "/api/hi?job=sweep", "schedule": "30 3 * * *" }
   ]
 }

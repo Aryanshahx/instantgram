@@ -7,11 +7,14 @@ import 'package:visibility_detector/visibility_detector.dart';
 import '../../core/navigation/page_cover.dart';
 import '../../core/services/media_prefetch.dart';
 import '../../core/services/app_settings.dart';
+import '../../core/services/content_filter.dart';
+import '../../core/services/hyper_intelligence.dart';
 import '../../core/services/music_player.dart';
 import '../../core/services/net_quality.dart';
 import '../../core/theme/app_colors.dart';
 import '../../features/editor/filters.dart';
 import '../models/post.dart';
+import 'hi_blur.dart';
 import 'net_image.dart';
 import 'video_extras.dart';
 import '../../core/services/video_cache.dart';
@@ -341,11 +344,7 @@ class _MediaVideoState extends State<MediaVideo> {
     _voice?.detach();
     if (wasReady) {
       // v0.8: keep it ready, scrolling back starts at once
-      VideoPool.instance.keep(
-        _openUrl,
-        c,
-        mixWithOthers: widget.mixWithOthers,
-      );
+      VideoPool.instance.keep(_openUrl, c, mixWithOthers: widget.mixWithOthers);
     } else {
       c.dispose();
     }
@@ -538,9 +537,22 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
 
   @override
   Widget build(BuildContext context) {
+    // v0.18 Hyper Intelligence: blurred until "Tap to view" (no video,
+    // no music behind the blur)
+    if (HyperIntelligence.instance.blurs(p)) {
+      return AspectRatio(
+        aspectRatio: cardAspectFor(p),
+        child: HiBlur(
+          key: ValueKey('hi-blur-${p.id}'),
+          imageUrl: p.coverUrl,
+          onReveal: () => setState(() => HyperIntelligence.instance.reveal(p)),
+        ),
+      );
+    }
     final items = p.items;
     final muted = AppSettings.instance.feedMuted.value;
     final screenH = MediaQuery.sizeOf(context).height;
+    final mine = p.authorId == ContentFilter.instance.uid;
     return VisibilityDetector(
       key: ValueKey('media-${p.id}'),
       // 60% of the card on screen, or it fills half the screen (tall cards)
@@ -615,6 +627,12 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
                         ),
                       ),
                     ),
+                  ),
+                if (mine && p.sensitive)
+                  Positioned(
+                    left: 10,
+                    top: 10,
+                    child: HiOwnerPill(hidden: p.modHidden),
                   ),
                 if (widget.overlay != null) widget.overlay!,
               ],

@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/services/api_client.dart';
 import '../../../core/services/background_upload.dart';
+import '../../../core/services/hyper_intelligence.dart';
 import '../../../core/services/media_service.dart';
 import '../../../core/services/uploader.dart';
 import '../../../core/services/video_prep.dart';
@@ -644,6 +645,9 @@ class UploadQueue extends ChangeNotifier {
       ticker.cancel();
     }
 
+    // ---- v0.18: 3 small pictures of each video for Hyper Intelligence
+    final hiFrames = await _hiFrames(t);
+
     // ---- write the post / moments
     _set(t, UploadStatus.saving, 0.99);
     for (final m in t.items) {
@@ -693,6 +697,12 @@ class UploadQueue extends ChangeNotifier {
         );
         m.published = true;
         _save(now: true);
+        unawaited(
+          HyperIntelligence.instance.checkMoment(
+            m.momentId,
+            frames: hiFrames[t.items.indexOf(m)] ?? const [],
+          ),
+        );
       }
     } else {
       await PostRepository.instance.publishPost(
@@ -720,6 +730,13 @@ class UploadQueue extends ChangeNotifier {
             ),
         ],
       );
+      // v0.18: Hyper Intelligence checks it now (in the background)
+      unawaited(
+        HyperIntelligence.instance.checkPost(
+          t.postId,
+          frames: [for (final f in hiFrames.values) ...f],
+        ),
+      );
       // v0.9: answer to a comment -> reply comment that links to it
       final r = t.replyTo;
       if (r != null && !t.replyDone) {
@@ -732,6 +749,30 @@ class UploadQueue extends ChangeNotifier {
         _save(now: true);
       }
     }
+  }
+
+  /// v0.18: video pictures for Hyper Intelligence (item index -> frames).
+  /// Posts / clips: the first 2 videos; moments: every video. Never fails.
+  Future<Map<int, List<String>>> _hiFrames(UploadTask t) async {
+    final out = <int, List<String>>{};
+    if (t.isMoment && t.options.highlightOnly) return out;
+    for (var k = 0; k < t.items.length; k++) {
+      final m = t.items[k];
+      if (!m.isVideo || (!t.isMoment && out.length >= 2)) continue;
+      if (t.isMoment && m.published) continue;
+      try {
+        if (!await File(m.path).exists()) continue;
+        final f = await HyperIntelligence.instance.framesOf(
+          m.path,
+          durationMs: m.durationMs,
+          edits: m.edits,
+        );
+        if (f.isNotEmpty) out[k] = f;
+      } catch (_) {
+        // the server checks the cover then
+      }
+    }
+    return out;
   }
 
   Future<File> _hdFor(QueuedMedia m, ValueChanged<double> onProgress) async {

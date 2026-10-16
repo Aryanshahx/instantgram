@@ -30,6 +30,18 @@ import {
 } from '../lib/google.js';
 import { deleteKeys, publicUrl, putNoticeImage } from '../lib/tigris.js';
 import { tokensOf } from './call-push.js';
+import { VERSION } from '../lib/version.js';
+import {
+  DEFAULT_LIMITS,
+  GROUP_LABEL,
+  KINDS as HI_KINDS,
+  checkItem,
+  cleanLimits,
+  loadLimits,
+  pathOf,
+  sweep,
+  targetFields,
+} from '../lib/hi.js';
 
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const PAGE = 30;
@@ -227,7 +239,7 @@ async function deleteUserStep(step, uid, { sa, fetchFn, deleteFiles }) {
 export const actions = {
   async stats({ sa, fetchFn, now }) {
     const c = (coll, where, opts) => safeCount(sa, coll, where, opts, fetchFn);
-    const [users, users24h, users7d, posts, clips, moments, chats, online, active24h, banned, reports, phones] =
+    const [users, users24h, users7d, posts, clips, moments, chats, online, active24h, banned, reports, phones, review] =
       await Promise.all([
         c('users'),
         c('users', F.ge('createdAt', F.ts(now - DAY))),
@@ -241,6 +253,8 @@ export const actions = {
         c('users', F.eq('banned', F.b(true))),
         c('reports'),
         c('pushTokens'),
+        // v0.18: Hyper Intelligence list
+        c('moderation', F.eq('open', F.b(true))),
       ]);
     const verified = (await verifiedSet(sa, fetchFn)).size;
     return {
@@ -258,6 +272,8 @@ export const actions = {
       verified,
       reports,
       phones,
+      review,
+      version: VERSION,
       at: new Date(now).toISOString(),
     };
   },
@@ -538,6 +554,139 @@ export const actions = {
     return { people: 1, sent: ok.filter(Boolean).length, failed: ok.filter((x) => !x).length, id: nid, done: true };
   },
 };
+
+// ------------------------------------------- v0.18: Hyper Intelligence
+
+const HI_STATES = ['review', 'hidden', 'unchecked'];
+export const HI_DECISIONS = ['approve', 'blur', 'delete', 'strike', 'ban'];
+
+function hiCard(r) {
+  const d = r.data;
+  return {
+    id: r.id,
+    kind: str(d.kind, 10),
+    targetId: str(d.targetId, 128),
+    postId: str(d.postId, 128),
+    authorId: str(d.authorId, 128),
+    authorUsername: str(d.authorUsername, 40),
+    state: str(d.state, 12),
+    reasons: Array.isArray(d.reasons) ? d.reasons.filter((x) => typeof x === 'string') : [],
+    scores: d.scores && typeof d.scores === 'object' ? d.scores : {},
+    urgent: d.urgent === true,
+    text: str(d.text, 400),
+    preview: str(d.preview, 600),
+    images: Number(d.images) || 0,
+    error: str(d.error, 300),
+    source: str(d.source, 10),
+    at: d.at || null,
+  };
+}
+
+/** moderation doc -> what it points to */
+function hiTarget(m) {
+  const kind = m.kind === 'clip' ? 'post' : m.kind;
+  if (!HI_KINDS.includes(kind)) throw new HttpError(400, 'Bad item');
+  const targetId = id(m.targetId, 'item');
+  const postId = kind === 'comment' ? id(m.postId, 'post') : '';
+  return { kind, targetId, postId };
+}
+
+Object.assign(actions, {
+  // newest 200 open items, filters: state, kind, reason
+  async hiList({ sa, fetchFn, body }) {
+    const state = HI_STATES.includes(body.state) ? body.state : '';
+    const kind = ['post', 'clip', 'moment', 'comment'].includes(body.kind) ? body.kind : '';
+    const reason = Object.hasOwn(GROUP_LABEL, body.reason) ? body.reason : '';
+    const rows = await runQuery(sa, { from: [{ collectionId: 'moderation' }], where: F.eq('open', F.b(true)), limit: 200 }, '', fetchFn);
+    const all = rows.map(hiCard).sort((a, b) => (b.urgent - a.urgent) || String(b.at || '').localeCompare(String(a.at || '')));
+    const hits = all.filter((x) => (!state || x.state === state) && (!kind || x.kind === kind) && (!reason || x.reasons.includes(reason)));
+    const count = (st) => all.filter((x) => x.state === st).length;
+    return {
+      items: hits.slice(0, 100),
+      total: hits.length,
+      counts: { all: all.length, review: count('review'), hidden: count('hidden'), unchecked: count('unchecked'), urgent: all.filter((x) => x.urgent).length },
+      labels: GROUP_LABEL,
+      openai: !!process.env.OPENAI_API_KEY,
+    };
+  },
+
+  // approve = show normally, blur = stays blurred for good,
+  // delete, strike = delete + 1 strike, ban = delete + block the account
+  async hiDecide({ sa, fetchFn, body, admin, now, deleteFiles, saveImage }) {
+    const mid = id(body.id, 'item');
+    const decision = HI_DECISIONS.includes(body.decision) ? body.decision : '';
+    if (!decision) throw new HttpError(400, 'Bad decision');
+    const m = await getDoc(sa, `moderation/${mid}`, fetchFn);
+    if (!m) throw new HttpError(404, 'Already done');
+    const { kind, targetId, postId } = hiTarget(m);
+    const done = { open: false, decision, decidedAt: new Date(now) };
+    const out = { id: mid, decision, authorId: str(m.authorId, 128), authorUsername: str(m.authorUsername, 40) };
+    if (decision === 'approve' || decision === 'blur') {
+      const st = decision === 'approve' ? 'ok' : 'blurred';
+      const fields = targetFields(kind, st, decision === 'approve' ? [] : Array.isArray(m.reasons) ? m.reasons : [], now);
+      try {
+        await commitWrites(sa, [{ update: pathOf(kind, targetId, postId), fields, mustExist: true }], fetchFn);
+      } catch {
+        out.gone = true; // deleted in the meantime
+      }
+      await commitWrites(sa, [{ update: `moderation/${mid}`, fields: done }], fetchFn);
+      return out;
+    }
+    const ctx = { sa, fetchFn, admin, now, deleteFiles, saveImage };
+    out.deleted = kind === 'comment'
+      ? (await actions.deleteComment({ ...ctx, body: { postId, id: targetId } })).deleted
+      : (await actions.deletePost({ ...ctx, body: { id: targetId, kind: kind === 'moment' ? 'moment' : 'post' } })).deleted;
+    const uid = m.authorId;
+    if (decision === 'strike' && typeof uid === 'string' && ID.test(uid)) {
+      const prev = await getDoc(sa, `strikes/${uid}`, fetchFn).catch(() => null);
+      const count = (Number(prev?.count) || 0) + 1;
+      await commitWrites(sa, [{ update: `strikes/${uid}`, fields: { count, lastAt: new Date(now), lastReason: (m.reasons || [])[0] || '' } }], fetchFn);
+      out.strikes = count;
+    }
+    if (decision === 'ban' && typeof uid === 'string' && ID.test(uid)) {
+      try {
+        await actions.ban({ ...ctx, body: { uid, on: true } });
+        out.banned = true;
+      } catch (e) {
+        out.banned = false;
+        out.banError = String(e?.message || e);
+      }
+    }
+    await commitWrites(sa, [{ update: `moderation/${mid}`, fields: done }], fetchFn);
+    return out;
+  },
+
+  // check one item again now
+  async hiRecheck({ sa, fetchFn, body, now }) {
+    const mid = id(body.id, 'item');
+    const m = await getDoc(sa, `moderation/${mid}`, fetchFn);
+    if (!m) throw new HttpError(404, 'Already done');
+    const t = hiTarget(m);
+    const d = await getDoc(sa, pathOf(t.kind, t.targetId, t.postId), fetchFn);
+    if (!d) {
+      await commitWrites(sa, [{ update: `moderation/${mid}`, fields: { open: false, decision: 'gone', decidedAt: new Date(now) } }], fetchFn);
+      return { state: 'gone' };
+    }
+    const r = await checkItem(sa, { kind: t.kind, id: t.targetId, postId: t.postId, doc: { ...d, modState: 'unchecked' }, source: 'admin', now }, { fetchFn });
+    if (r.state === 'ok') await commitWrites(sa, [{ update: `moderation/${mid}`, fields: { open: false, state: 'ok', decision: 'ok', decidedAt: new Date(now) } }], fetchFn);
+    return r;
+  },
+
+  // runs when the admin website opens + "Check now"
+  async hiSweep({ sa, fetchFn, now }) {
+    return sweep(sa, { limit: 12, now, fetchFn });
+  },
+
+  // limits: get, or save { limits: { sexual: { blur, hide }, ... } }
+  async hiConfig({ sa, fetchFn, body, now }) {
+    if (body.limits && typeof body.limits === 'object') {
+      const limits = cleanLimits(body.limits);
+      await commitWrites(sa, [{ update: 'config/moderation', fields: { limits, updatedAt: new Date(now) } }], fetchFn);
+      return { limits, defaults: DEFAULT_LIMITS, labels: GROUP_LABEL, saved: true };
+    }
+    return { limits: await loadLimits(sa, fetchFn), defaults: DEFAULT_LIMITS, labels: GROUP_LABEL };
+  },
+});
 
 export async function handle(
   req,

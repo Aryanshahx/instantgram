@@ -482,6 +482,8 @@ class Post {
     this.hideReposts = false,
     this.hideShares = false,
     this.profileOnly = false,
+    this.sensitive = false,
+    this.modState = '',
     this.durationMs = 0,
     this.audioUrl = '',
     this.audioKey = '',
@@ -534,6 +536,18 @@ class Post {
 
   /// v0.16: shown only on the profile grid (not in feeds / Explore / Clips).
   final bool profileOnly;
+
+  /// v0.18 Hyper Intelligence (set by the server only):
+  /// sensitive = blurred ("Sensitive content · Tap to view"),
+  /// modState = pending / ok / review / hidden / unchecked / blurred.
+  final bool sensitive;
+  final String modState;
+
+  /// Only the owner sees it (Hyper Intelligence + admin review).
+  bool get modHidden => modState == 'hidden';
+
+  /// Waiting for the admin (blurred or hidden).
+  bool get underReview => modState == 'review' || modState == 'hidden';
 
   /// Video length (old single-video clips).
   final int durationMs;
@@ -640,6 +654,8 @@ class Post {
       hideReposts: _bool(m['hideReposts']),
       hideShares: _bool(m['hideShares']),
       profileOnly: _bool(m['profileOnly']),
+      sensitive: _bool(m['sensitive']),
+      modState: _str(m['modState']),
       durationMs: _int(m['durationMs']),
       audioUrl: _str(m['audioUrl']),
       audioKey: _str(m['audioKey']),
@@ -749,6 +765,8 @@ class Comment {
     this.refPostType = '',
     this.refThumb = '',
     this.refAuthor = '',
+    this.sensitive = false,
+    this.hidden = false,
   });
 
   final String id;
@@ -783,6 +801,10 @@ class Comment {
   final String refPostType;
   final String refThumb;
   final String refAuthor;
+
+  /// v0.18 Hyper Intelligence (server only): blurred / only the author sees it.
+  final bool sensitive;
+  final bool hidden;
 
   bool get isReply => parentId.isNotEmpty;
   bool get hasRef => refPostId.isNotEmpty;
@@ -823,6 +845,8 @@ class Comment {
     refPostType: _str(m['refPostType']),
     refThumb: _str(m['refThumb']),
     refAuthor: _str(m['refAuthor']),
+    sensitive: _bool(m['sensitive']),
+    hidden: _bool(m['hidden']),
   );
 }
 
@@ -862,10 +886,17 @@ class Story {
     this.audioUrl = '',
     this.audioKey = '',
     this.audioName = '',
+    this.sensitive = false,
+    this.modState = '',
   });
 
   static const String photo = 'photo';
   static const String video = 'video';
+
+  /// v0.18 Hyper Intelligence (server only), like [Post.sensitive].
+  final bool sensitive;
+  final String modState;
+  bool get modHidden => modState == 'hidden';
 
   /// v0.16: a photo moment with music stays this long.
   static const int musicPhotoMs = 15000;
@@ -901,6 +932,8 @@ class Story {
     'createdAt': Timestamp.fromDate(createdAt),
     if (isVideo) ...edits.toMap(),
     if (hasMusic) ...{'audioUrl': audioUrl, 'audioName': audioName},
+    // v0.18: a blurred moment stays blurred in the highlight
+    if (sensitive) 'sensitive': true,
   };
 
   factory Story.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
@@ -922,6 +955,8 @@ class Story {
       audioUrl: _str(m['audioUrl']),
       audioKey: _str(m['audioKey']),
       audioName: _str(m['audioName']),
+      sensitive: _bool(m['sensitive']),
+      modState: _str(m['modState']),
     );
   }
 }

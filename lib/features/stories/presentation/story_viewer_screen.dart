@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../core/services/app_settings.dart';
+import '../../../core/services/hyper_intelligence.dart';
 import '../../../core/services/music_player.dart';
 import '../../../core/services/media_prefetch.dart';
 import '../../../core/theme/app_colors.dart';
@@ -10,6 +11,7 @@ import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/avatar.dart';
+import '../../../shared/widgets/hi_blur.dart';
 import '../../../shared/widgets/media_view.dart' show CutSkipper, MusicChip;
 import '../../../shared/widgets/net_image.dart';
 import '../../../shared/widgets/video_extras.dart';
@@ -73,6 +75,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
   bool _videoReady = false;
   bool _videoError = false;
   bool _paused = false;
+
+  /// v0.18: Hyper Intelligence blurred this moment (waits for "Tap to view").
+  bool _hiBlocked = false;
   int _loadId = 0;
 
   StoryGroup get _group => widget.groups[_g];
@@ -173,6 +178,13 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
 
     _photoReady = false;
     _prefetchNext();
+    // v0.18 Hyper Intelligence: blurred until "Tap to view" (no timer,
+    // no video, no music before)
+    _hiBlocked = HyperIntelligence.instance.blursStory(st);
+    if (_hiBlocked) {
+      if (mounted) setState(() {});
+      return;
+    }
     if (!st.isVideo) {
       // v0.16: with music a photo stays 15 s
       _timer.duration = st.hasMusic
@@ -431,7 +443,17 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
         child: Stack(
           fit: StackFit.expand,
           children: [
-            _media(),
+            if (_hiBlocked)
+              HiBlur(
+                key: const ValueKey('hi-moment'),
+                imageUrl: _story.isVideo ? '' : _story.mediaUrl,
+                onReveal: () {
+                  HyperIntelligence.instance.revealStory(_story);
+                  _show();
+                },
+              )
+            else
+              _media(),
             const Positioned(
               top: 0,
               left: 0,

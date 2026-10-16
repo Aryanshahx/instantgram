@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import '../../../core/services/api_client.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
+import '../../../core/services/hyper_intelligence.dart';
 import '../../../core/services/media_service.dart';
 import '../../../core/utils/merge_streams.dart';
 import '../../../shared/models/post.dart';
@@ -82,6 +83,8 @@ class PostRepository {
     'hideReposts': o.hideReposts,
     'hideShares': o.hideShares,
     if (o.profileOnly) 'profileOnly': true,
+    // v0.18: Hyper Intelligence checks it (the server sets the result)
+    'modState': 'pending',
     'createdAt': FieldValue.serverTimestamp(),
   };
 
@@ -475,7 +478,12 @@ class PostRepository {
       .map(
         (s) => s.docs
             .map(Comment.fromDoc)
-            .where((c) => !_filter.isBlocked(c.authorId))
+            .where(
+              (c) =>
+                  !_filter.isBlocked(c.authorId) &&
+                  // v0.18: hidden by Hyper Intelligence (author still sees it)
+                  !HyperIntelligence.instance.hidesComment(c),
+            )
             .toList(),
       );
 
@@ -496,7 +504,8 @@ class PostRepository {
     final parentId = replyTo == null
         ? ''
         : (replyTo.isReply ? replyTo.parentId : replyTo.id);
-    batch.set(ref.collection('comments').doc(), {
+    final cref = ref.collection('comments').doc();
+    batch.set(cref, {
       'authorId': me.uid,
       'authorUsername': me.username,
       'authorPhotoUrl': me.photoUrl,
@@ -544,6 +553,11 @@ class PostRepository {
     await batch.commit();
     for (final p in pendings) {
       p.send();
+    }
+    // v0.18: Hyper Intelligence checks the text / photo (GIFs are rated
+    // by GIPHY already)
+    if (t.isNotEmpty || (picture != null && !picture.isGif)) {
+      unawaited(HyperIntelligence.instance.checkComment(post.id, cref.id));
     }
   }
 
