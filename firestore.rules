@@ -163,13 +163,19 @@ service cloud.firestore {
         allow update: if false;
       }
       // private info (date of birth) - only you
+      // v0.19: + 'interests' = what Hyper Intelligence learned for your feed
       match /private/{doc} {
         allow read, delete: if signedIn() && me() == uid;
         allow create, update: if signedIn() && me() == uid
-          && request.resource.data.keys().hasOnly(['birthDate', 'updatedAt'])
-          && (!('birthDate' in request.resource.data)
-              || (request.resource.data.birthDate is string
-                  && request.resource.data.birthDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')));
+          && ((doc == 'interests'
+               && request.resource.data.keys().hasOnly(['data', 'updatedAt'])
+               && request.resource.data.data is string
+               && request.resource.data.data.size() < 60000)
+            || (doc != 'interests'
+               && request.resource.data.keys().hasOnly(['birthDate', 'updatedAt'])
+               && (!('birthDate' in request.resource.data)
+                   || (request.resource.data.birthDate is string
+                       && request.resource.data.birthDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')))));
       }
       match /reposts/{pid} {
         allow read: if signedIn();

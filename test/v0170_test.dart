@@ -262,7 +262,8 @@ void main() {
       );
       await t.tap(find.text('open'));
       await _frames(t, 10);
-      expect(find.byType(Slider), findsNothing);
+      // v0.19: frames + a slider
+      expect(find.byType(Slider), findsOneWidget);
       expect(find.byKey(const ValueKey('cover-frames')), findsOneWidget);
       final times = CoverPickerScreen.frameTimes(1000, 5000);
       expect(asked, times, reason: 'one frame each, in order');

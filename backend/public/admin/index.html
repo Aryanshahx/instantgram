@@ -107,7 +107,7 @@
 <section id="app" class="hide">
   <header>
     <div class="row" style="margin-bottom:8px">
-      <div class="logo grow">Instant<b>Gram</b> <span class="muted small">admin</span> <span id="ver" class="muted small" title="Version (page · server)">v0.18.0</span></div>
+      <div class="logo grow">Instant<b>Gram</b> <span class="muted small">admin</span> <span id="ver" class="muted small" title="Version (page · server)">v0.19.0</span></div>
       <span id="who" class="muted small"></span>
       <button class="ghost small" id="logout">Log out</button>
     </div>
@@ -332,7 +332,7 @@
 
   // v0.15: shows if Vercel serves an old deployment
   // v0.18: the label always shows the server version (from /api/health)
-  const PAGE_VERSION = '0.18.0';
+  const PAGE_VERSION = '0.19.0';
   async function checkVersion() {
     try {
       const r = await fetch('/api/health', { cache: 'no-store' });

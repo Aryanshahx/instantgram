@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../../../core/services/hyper_feed.dart';
 import '../../../core/services/media_prefetch.dart';
 import '../../../shared/models/post.dart';
 import '../../post/data/post_repository.dart';
@@ -27,7 +28,14 @@ class ClipsWarmup {
         .listen(_onClips, onError: (Object _) {});
   }
 
-  void _onClips(List<Post> list) {
+  void _onClips(List<Post> fresh) {
+    // v0.19 Hyper Intelligence: ranked (same order as the Clips screen,
+    // so the clip made ready here is the first one shown)
+    final list = HyperFeed.instance.ordered(
+      'clips',
+      fresh,
+      mode: FeedMode.clips,
+    );
     _latest = list;
     if (_warmed || list.isEmpty) return;
     _warmed = true;

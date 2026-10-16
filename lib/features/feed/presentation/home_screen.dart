@@ -3,6 +3,7 @@ import '../../../shared/widgets/refresh_note.dart';
 
 import 'package:flutter/material.dart';
 
+import '../../../core/services/hyper_feed.dart';
 import '../../../core/services/media_prefetch.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/models/post.dart';
@@ -17,6 +18,7 @@ import '../../post/presentation/create_sheet.dart';
 import '../../post/presentation/upload_banner.dart';
 import '../../profile/data/famous_index.dart';
 import '../../profile/data/user_repository.dart';
+import '../../reels/data/clips_warmup.dart';
 import '../../search/presentation/find_people_screen.dart';
 import '../../stories/data/moments_index.dart';
 import 'widgets/post_card.dart';
@@ -67,6 +69,22 @@ class _HomeFeed extends StatefulWidget {
 }
 
 class _HomeFeedState extends State<_HomeFeed> {
+  @override
+  void initState() {
+    super.initState();
+    HyperFeed.instance.version.addListener(_onHidden);
+  }
+
+  @override
+  void dispose() {
+    HyperFeed.instance.version.removeListener(_onHidden);
+    super.dispose();
+  }
+
+  void _onHidden() {
+    if (mounted) setState(() {});
+  }
+
   Stream<List<Post>>? _stream;
   String _streamKey = '';
   int _refresh = 0;
@@ -85,10 +103,28 @@ class _HomeFeedState extends State<_HomeFeed> {
     final sorted = [...authors]..sort();
     final key = '${sorted.join(',')}#$_refresh';
     if (key != _streamKey || _stream == null) {
+      final refreshed = !key.endsWith('#$_lastRefresh');
+      _lastRefresh = _refresh;
       _streamKey = key;
-      _stream = PostRepository.instance.feedFor(authors);
+      // v0.19 Hyper Intelligence: ranked (pull to refresh = ranked again)
+      if (refreshed) HyperFeed.instance.reset('discover');
+      _stream = HyperFeed.instance.discover(
+        PostRepository.instance.feedFor(authors),
+        extras: _extras,
+      );
     }
     return _stream;
+  }
+
+  int _lastRefresh = -1;
+
+  /// More than people you follow: posts with your top hashtags + the
+  /// newest clips (so new creators get a chance).
+  static Future<List<Post>> _extras() async {
+    final tags = HyperFeed.instance.topTags(3);
+    final byTag = await PostRepository.instance.interestCandidates(tags);
+    final clips = ClipsWarmup.instance.latest ?? const <Post>[];
+    return [...byTag, ...clips.take(30)];
   }
 
   /// v0.13: waits for the server (background downloads pause meanwhile).
@@ -177,7 +213,10 @@ class _HomeFeedState extends State<_HomeFeed> {
                 if (!snap.hasData) {
                   return const SliverToBoxAdapter(child: LoadingView());
                 }
-                final posts = snap.data!;
+                // v0.19: "Not interested" hides at once
+                final posts = snap.data!
+                    .where((p) => !HyperFeed.instance.isHidden(p.id))
+                    .toList();
                 if (posts.isEmpty) {
                   return SliverToBoxAdapter(
                     child: Column(

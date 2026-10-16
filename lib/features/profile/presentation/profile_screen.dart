@@ -1,5 +1,6 @@
 import '../../stories/presentation/highlights.dart';
 import '../../../shared/widgets/bio_font.dart';
+import '../../../shared/widgets/see_translation.dart';
 
 import 'dart:async';
 
@@ -12,6 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/services/content_filter.dart';
+import '../../../core/services/hyper_feed.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/email.dart';
 import '../../../core/utils/errors.dart';
@@ -114,6 +116,8 @@ class _ProfileViewState extends State<ProfileView>
   void initState() {
     super.initState();
     _initStreams();
+    // v0.19 Hyper Intelligence: profile visits count a little
+    HyperFeed.instance.visitedProfile(widget.profile.uid);
   }
 
   void _initStreams() {
@@ -770,15 +774,25 @@ class _Header extends StatelessWidget {
               if (p.bio.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 // v0.16: many fonts in one bio
-                Text.rich(
-                  TextSpan(
-                    children: FontRuns.spans(
-                      p.bio,
-                      p.bioFontRuns,
-                      const TextStyle(fontSize: 14.5, height: 1.35),
-                    ),
-                  ),
-                  key: const ValueKey('profile-bio'),
+                // v0.19: + See translation
+                SeeTranslation(
+                  text: p.bio,
+                  builder: (text, translated) => translated
+                      ? Text(
+                          text,
+                          key: const ValueKey('profile-bio-translated'),
+                          style: const TextStyle(fontSize: 14.5, height: 1.35),
+                        )
+                      : Text.rich(
+                          TextSpan(
+                            children: FontRuns.spans(
+                              p.bio,
+                              p.bioFontRuns,
+                              const TextStyle(fontSize: 14.5, height: 1.35),
+                            ),
+                          ),
+                          key: const ValueKey('profile-bio'),
+                        ),
                 ),
               ],
               if (p.allLinks.isNotEmpty) ...[

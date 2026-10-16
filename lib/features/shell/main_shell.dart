@@ -15,6 +15,7 @@ import '../reels/data/clips_warmup.dart';
 
 import '../../core/services/app_settings.dart';
 import '../../core/services/content_filter.dart';
+import '../../core/services/hyper_feed.dart';
 import '../../core/services/hyper_intelligence.dart';
 import '../../core/services/usage_tracker.dart';
 import '../stories/data/moments_index.dart';
@@ -64,6 +65,11 @@ class _MainShellState extends State<MainShell> {
     ContentFilter.instance.start(widget.uid);
     // v0.18: Hyper Intelligence (sensitive setting + under 18)
     HyperIntelligence.instance.start();
+    // v0.19: Hyper Intelligence feed (learns on the phone)
+    HyperFeed.instance
+      ..uploader = UserRepository.instance.saveInterests
+      ..downloader = UserRepository.instance.loadInterests;
+    HyperFeed.instance.start(widget.uid);
     MomentsIndex.instance.start();
     FamousIndex.instance.start();
     ClipsWarmup.instance.start();

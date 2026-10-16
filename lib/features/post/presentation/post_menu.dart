@@ -6,6 +6,7 @@ import '../../../core/utils/errors.dart';
 import '../../../shared/models/post.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
+import '../../../core/services/hyper_feed.dart';
 import '../data/post_repository.dart';
 import '../../insights/post_insights_screen.dart';
 import 'report_sheet.dart';
@@ -93,6 +94,20 @@ Future<void> showPostMenu(
                 onTap: () {
                   Navigator.pop(ctx);
                   showPostOptionsSheet(context, post);
+                },
+              ),
+            // v0.19 Hyper Intelligence: teaches the feed
+            if (!mine)
+              ListTile(
+                key: const ValueKey('menu-not-interested'),
+                leading: const Icon(Icons.visibility_off_outlined),
+                title: const Text('Not interested'),
+                subtitle: const Text('Show fewer posts like this'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  HyperFeed.instance.notInterested(post);
+                  // Clips: skips to the next clip
+                  if (showAutoScroll) onDeleted?.call();
                 },
               ),
             if (!mine)

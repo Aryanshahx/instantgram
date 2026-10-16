@@ -30,6 +30,7 @@ import 'my_post_picker.dart';
 import '../../../shared/widgets/tagged_text.dart';
 import '../../../shared/widgets/verified_badge.dart';
 import '../../../shared/widgets/hi_text_check.dart';
+import '../../../shared/widgets/see_translation.dart';
 
 /// v0.11: text for "Share" on a comment.
 String commentShareText(Post post, Comment c) {
@@ -1355,10 +1356,14 @@ class _CommentText extends StatelessWidget {
   const _CommentText({required this.text});
   final String text;
 
+  // v0.19: + See translation
   @override
-  Widget build(BuildContext context) => TaggedText(
-    text,
-    mentionAtStart: true,
-    style: const TextStyle(color: AppColors.textPrimary, fontSize: 14.5),
+  Widget build(BuildContext context) => SeeTranslation(
+    text: text,
+    builder: (t, translated) => TaggedText(
+      t,
+      mentionAtStart: true,
+      style: const TextStyle(color: AppColors.textPrimary, fontSize: 14.5),
+    ),
   );
 }

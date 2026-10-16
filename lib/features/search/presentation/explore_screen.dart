@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
 import '../../../core/services/media_prefetch.dart';
+import '../../../core/services/hyper_feed.dart';
 import '../../../core/services/hyper_intelligence.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -66,6 +67,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
       () => PostRepository.instance.refreshRecent(type: Post.clip, limit: 100),
     );
     if (!mounted) return;
+    HyperFeed.instance.reset('explore');
     setState(() => _recentClips = _newStream());
     if (_word.isNotEmpty) _onChanged(_searchCtrl.text);
     if (!ok) refreshFailed(context);
@@ -199,7 +201,17 @@ class _ExploreScreenState extends State<ExploreScreen> {
                       ),
                     ),
                   ]
-                : [_grid(posts)];
+                // v0.19 Hyper Intelligence: your interests + quality +
+                // new creators (steady order until you pull to refresh)
+                : [
+                    _grid(
+                      HyperFeed.instance.ordered(
+                        'explore',
+                        posts,
+                        mode: FeedMode.explore,
+                      ),
+                    ),
+                  ];
           } else {
             final clips = _matchClips(snap.data!);
             body = [

@@ -6,14 +6,21 @@
 //   once (a decided item just returns its state). frames = 3 pictures of
 //   each video (25 / 50 / 75 %), made on the phone.
 // GET /api/hi?job=sweep  (Vercel cron, once a day): checks what is left.
+// v0.19: POST /api/hi { action: 'translate', text, to } -> { text, from, to }
+//   "See translation" for captions, comments and bios (any signed-in user).
 import { requireUser } from '../lib/firebase-auth.js';
 import { HttpError, env, postHandler, send } from '../lib/http.js';
 import { getDoc, notSetUp, serviceAccount } from '../lib/google.js';
 import { KINDS, checkItem, decided, pathOf, sweep } from '../lib/hi.js';
+import { allowTranslate, translate } from '../lib/translate.js';
 
 const ID = /^[A-Za-z0-9_-]{6,64}$/;
 
 export async function handle(uid, body, { sa = serviceAccount(), fetchFn = fetch, key = env('OPENAI_API_KEY'), now = Date.now() } = {}) {
+  if (body.action === 'translate') {
+    if (!allowTranslate(uid, now)) throw new HttpError(429, 'Too many translations, try again in a few minutes');
+    return translate(body, { fetchFn });
+  }
   if (body.action !== 'check') throw new HttpError(400, 'Bad action');
   const kind = KINDS.includes(body.kind) ? body.kind : '';
   const id = typeof body.id === 'string' ? body.id : '';

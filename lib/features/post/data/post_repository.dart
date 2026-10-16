@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import '../../../core/services/api_client.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
+import '../../../core/services/hyper_feed.dart';
 import '../../../core/services/hyper_intelligence.dart';
 import '../../../core/services/media_service.dart';
 import '../../../core/utils/merge_streams.dart';
@@ -56,6 +57,27 @@ class PostRepository {
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return list;
   }
+
+  /// v0.19 Hyper Intelligence: posts with your top hashtags (20 each).
+  /// Asks the server at most every 30 minutes (else the saved answer).
+  Future<List<Post>> interestCandidates(List<String> tags) async {
+    if (tags.isEmpty) return const [];
+    final key = tags.join(',');
+    final now = DateTime.now();
+    final c = _interestCache;
+    if (c != null && c.$1 == key && now.difference(c.$2).inMinutes < 30) {
+      return c.$3.where(_filter.canSeeInFeeds).toList();
+    }
+    final lists = await Future.wait([
+      for (final t in tags)
+        postsByTag(t, limit: 20).catchError((Object _) => <Post>[]),
+    ]);
+    final out = [for (final l in lists) ...l];
+    _interestCache = (key, now, out);
+    return out;
+  }
+
+  (String, DateTime, List<Post>)? _interestCache;
 
   /// "#Goa " -> "goa" (how tags are saved).
   static String normalizeTag(String tag) =>
@@ -365,6 +387,7 @@ class PostRepository {
       .map((s) => s.exists);
 
   Future<void> setLiked(Post post, bool like) async {
+    HyperFeed.instance.liked(post, like); // v0.19: learns what you like
     final ref = _posts.doc(post.id);
     final batch = _db.batch();
     var pending = const Pending.none();
@@ -401,6 +424,7 @@ class PostRepository {
 
   /// Save / unsave (+ keeps savesCount in step for Analytics).
   Future<void> setSaved(Post post, bool save) async {
+    HyperFeed.instance.saved(post, save);
     final ref = _db
         .collection('users')
         .doc(_me)
@@ -437,6 +461,7 @@ class PostRepository {
       .map((s) => s.exists);
 
   Future<void> setReposted(Post post, bool repost) async {
+    HyperFeed.instance.reposted(post, repost);
     final ref = _db
         .collection('users')
         .doc(_me)
@@ -497,6 +522,7 @@ class PostRepository {
   }) async {
     final t = text.trim();
     if (t.isEmpty && picture == null && linked == null) return;
+    HyperFeed.instance.commented(post);
     final me = await UserRepository.instance.meCached();
     final ref = _posts.doc(post.id);
     final batch = _db.batch();
@@ -693,6 +719,7 @@ class PostRepository {
   Future<void> addView(Post post, {String source = ViewSource.other}) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
+    HyperFeed.instance.markSeen(post); // v0.19: seen list
     if (!_sessionViewed.add(post.id)) return; // once per app run
     AppSettings.instance.addHistory(post.id, isClip: post.isClip);
     if (post.authorId == uid) return; // your own views don't count
@@ -749,6 +776,10 @@ class PostRepository {
     required bool completed,
   }) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null && post.authorId != uid) {
+      // v0.19: to the end = interested, gone in under 2 s = not
+      HyperFeed.instance.watched(post, watchMs: watchMs, completed: completed);
+    }
     if (uid == null || post.authorId == uid || watchMs <= 0) return;
     final ms = watchMs.clamp(0, 6 * 60 * 60 * 1000);
     final prev = _sentWatch[post.id] ?? 0;
@@ -799,6 +830,7 @@ class PostRepository {
 
   /// +1 share (anyone can add one).
   Future<void> addShare(Post post) async {
+    HyperFeed.instance.shared(post);
     try {
       await _posts.doc(post.id).update({
         'sharesCount': FieldValue.increment(1),

@@ -8,6 +8,7 @@ import 'package:video_player/video_player.dart';
 import '../../../core/navigation/page_cover.dart';
 import '../../../core/services/app_settings.dart';
 import '../../../core/services/content_filter.dart';
+import '../../../core/services/hyper_feed.dart';
 import '../../../core/services/hyper_intelligence.dart';
 import '../../../core/services/media_prefetch.dart';
 import '../../../core/services/music_player.dart';
@@ -20,6 +21,7 @@ import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/async_views.dart';
+import '../../../shared/widgets/see_translation.dart';
 import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/follow_chip.dart';
@@ -83,7 +85,12 @@ class _ClipsScreenState extends State<ClipsScreen> {
   void initState() {
     super.initState();
     if (widget.clips == null) {
-      _stream = PostRepository.instance.recent(type: Post.clip, limit: 50);
+      // v0.19 Hyper Intelligence: ranked, steady order
+      _stream = PostRepository.instance
+          .recent(type: Post.clip, limit: ClipsWarmup.limit)
+          .map(
+            (l) => HyperFeed.instance.ordered('clips', l, mode: FeedMode.clips),
+          );
     }
     AppSettings.instance.load();
     SystemVolume.instance.get().then((v) {
@@ -150,7 +157,11 @@ class _ClipsScreenState extends State<ClipsScreen> {
   final List<Post> _order = [];
 
   Widget _pager(List<Post> all) {
-    final fresh = all.where((c) => !_deleted.contains(c.id)).toList();
+    final fresh = all
+        .where(
+          (c) => !_deleted.contains(c.id) && !HyperFeed.instance.isHidden(c.id),
+        )
+        .toList();
     final List<Post> clips;
     if (widget.clips != null) {
       clips = fresh;
@@ -1582,10 +1593,22 @@ class _CaptionBar extends StatelessWidget {
                         ),
                         if (hasCaption) ...[
                           const SizedBox(height: 6),
-                          TaggedText(
-                            post.caption,
-                            key: const ValueKey('clip-caption-open'),
-                            style: const TextStyle(fontSize: 14.5, height: 1.4),
+                          // v0.19: + See translation
+                          SeeTranslation(
+                            text: post.caption,
+                            light: true,
+                            builder: (text, translated) => TaggedText(
+                              text,
+                              key: ValueKey(
+                                translated
+                                    ? 'clip-caption-translated'
+                                    : 'clip-caption-open',
+                              ),
+                              style: const TextStyle(
+                                fontSize: 14.5,
+                                height: 1.4,
+                              ),
+                            ),
                           ),
                         ],
                         const SizedBox(height: 10),

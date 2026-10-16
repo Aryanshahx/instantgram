@@ -10,6 +10,7 @@ import '../../../../core/utils/time_ago.dart';
 import '../../../../shared/models/post.dart';
 import '../../../../shared/navigation.dart';
 import '../../../../shared/widgets/avatar.dart';
+import '../../../../shared/widgets/see_translation.dart';
 import '../../../../shared/widgets/media_view.dart';
 import '../../../post/data/post_repository.dart';
 import '../../../post/presentation/comments_sheet.dart';
@@ -308,15 +309,23 @@ class _PostCardState extends State<PostCard>
                       ),
                     ),
                   if (p.caption.isNotEmpty) ...[
-                    TaggedText(
-                      p.caption,
-                      key: const ValueKey('post-caption'),
-                      prefix: [
-                        TextSpan(
-                          text: '${p.authorUsername} ',
-                          style: const TextStyle(fontWeight: FontWeight.w700),
+                    // v0.19: + See translation
+                    SeeTranslation(
+                      text: p.caption,
+                      builder: (text, translated) => TaggedText(
+                        text,
+                        key: ValueKey(
+                          translated
+                              ? 'post-caption-translated'
+                              : 'post-caption',
                         ),
-                      ],
+                        prefix: [
+                          TextSpan(
+                            text: '${p.authorUsername} ',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                   const SizedBox(height: 4),

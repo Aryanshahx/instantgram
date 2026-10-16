@@ -91,8 +91,8 @@ void main() {
     HyperIntelligence.debugFrame = null;
   });
 
-  test('version is 0.18.0', () {
-    expect(AppInfo.version, '0.18.0');
+  test('version is set (exact version: newest test file)', () {
+    expect(AppInfo.version, matches(RegExp(r'^\d+\.\d+\.\d+$')));
   });
 
   group('BadWords', () {

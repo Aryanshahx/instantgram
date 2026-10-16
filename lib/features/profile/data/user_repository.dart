@@ -527,6 +527,28 @@ class UserRepository {
     }
   }
 
+  /// v0.19 Hyper Intelligence: what the feed learned (only you can read
+  /// it) - so a new phone starts with your interests.
+  Future<String?> loadInterests() async {
+    try {
+      final s = await _users
+          .doc(myUid)
+          .collection('private')
+          .doc('interests')
+          .get();
+      final v = s.data()?['data'];
+      return v is String ? v : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveInterests(String json) => _users
+      .doc(myUid)
+      .collection('private')
+      .doc('interests')
+      .set({'data': json, 'updatedAt': FieldValue.serverTimestamp()});
+
   Future<void> setBirthDate(DateTime d) =>
       _users.doc(myUid).collection('private').doc('info').set({
         'birthDate': formatBirthDate(d),

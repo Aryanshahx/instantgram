@@ -8,6 +8,7 @@ import 'package:flutter/painting.dart' show decodeImageFromList;
 
 import '../../../core/services/api_client.dart';
 import '../../../core/services/gif_search.dart';
+import '../../../core/services/hyper_feed.dart';
 import '../../../core/services/server_clock.dart';
 import '../../../core/services/media_service.dart';
 
@@ -411,6 +412,9 @@ class ChatRepository {
     Map<String, dynamic> chat = const {},
     bool push = true,
   }) async {
+    // v0.19 Hyper Intelligence: people you chat with come first in the
+    // feed (only WHO, never what - chats are not read)
+    if (push) HyperFeed.instance.chatted(other.uid);
     final me = await UserRepository.instance.me();
     final chatId = chatIdWith(other.uid);
     final chatRef = _chats.doc(chatId);

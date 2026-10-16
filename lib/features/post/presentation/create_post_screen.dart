@@ -841,13 +841,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 }
 
 /// Pick a cover frame from the video (returns the time in ms).
-/// v0.17: a row of frames from the video - tap one (no slider).
+/// v0.17: a row of frames from the video - tap one.
+/// v0.19: more frames (30) + a slider for any exact moment.
 class CoverPickerScreen extends StatefulWidget {
   const CoverPickerScreen({super.key, required this.item});
   final EditedMedia item;
 
   /// How many frames are shown.
-  static const int frameCount = 12;
+  static const int frameCount = 30;
 
   /// Tests: makes a frame picture without the video plugin.
   static Future<Uint8List?> Function(String path, int ms)? debugFrame;
@@ -877,8 +878,59 @@ class _CoverPickerScreenState extends State<CoverPickerScreen> {
   final Map<int, Uint8List?> _thumbs = {};
   int _selected = 0;
   bool _disposed = false;
+  final ScrollController _strip = ScrollController();
 
-  int get _ms => _times.isEmpty ? 0 : _times[_selected];
+  /// v0.19: the cover time (any ms from the slider, or a frame's time).
+  int _coverMs = 0;
+
+  int get _ms => _times.isEmpty ? 0 : _coverMs;
+
+  double get _tileW {
+    final ar = widget.item.aspectRatio.clamp(0.5, 1.2).toDouble();
+    // 104 high row: 2.5 border + 2 padding on each side, 3 margin
+    return (104 - 9) * ar + 9 + 6;
+  }
+
+  /// Frame closest to [ms].
+  int _nearest(int ms) {
+    var best = 0;
+    for (var i = 1; i < _times.length; i++) {
+      if ((_times[i] - ms).abs() < (_times[best] - ms).abs()) best = i;
+    }
+    return best;
+  }
+
+  /// Keeps the chosen frame in the middle of the row.
+  void _centerStrip() {
+    if (!_strip.hasClients) return;
+    final pos = _strip.position;
+    final x = (_selected * _tileW - (pos.viewportDimension - _tileW) / 2).clamp(
+      0.0,
+      pos.maxScrollExtent,
+    );
+    _strip.jumpTo(x);
+  }
+
+  int _lastSeek = 0;
+
+  void _slide(double v) {
+    setState(() {
+      _coverMs = v.round();
+      _selected = _nearest(_coverMs);
+    });
+    _centerStrip();
+    // not every pixel: phones get slow with too many seeks
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastSeek > 80) {
+      _lastSeek = now;
+      _seek();
+    }
+  }
+
+  void _seek() {
+    final c = _c;
+    if (c != null && _videoReady) c.seekTo(Duration(milliseconds: _ms));
+  }
 
   @override
   void initState() {
@@ -908,7 +960,11 @@ class _CoverPickerScreenState extends State<CoverPickerScreen> {
     final e = widget.item.edits;
     final start = e.trimStartMs.clamp(0, total);
     final end = (e.trimEndMs > 0 ? e.trimEndMs : total).clamp(start, total);
-    setState(() => _times = CoverPickerScreen.frameTimes(start, end));
+    setState(() {
+      _times = CoverPickerScreen.frameTimes(start, end);
+      _selected = 0;
+      _coverMs = _times.first;
+    });
     unawaited(_loadThumbs());
   }
 
@@ -931,14 +987,17 @@ class _CoverPickerScreenState extends State<CoverPickerScreen> {
       VideoFrames.bytes(path, ms, maxHeight: 260, quality: 70);
 
   void _pick(int i) {
-    setState(() => _selected = i);
-    final c = _c;
-    if (c != null && _videoReady) c.seekTo(Duration(milliseconds: _ms));
+    setState(() {
+      _selected = i;
+      _coverMs = _times[i];
+    });
+    _seek();
   }
 
   @override
   void dispose() {
     _disposed = true;
+    _strip.dispose();
     _c?.dispose();
     super.dispose();
   }
@@ -1047,17 +1106,40 @@ class _CoverPickerScreenState extends State<CoverPickerScreen> {
                     height: 104,
                     child: ListView.builder(
                       key: const ValueKey('cover-frames'),
+                      controller: _strip,
                       scrollDirection: Axis.horizontal,
+                      itemExtent: _tileW,
                       itemCount: _times.length,
                       itemBuilder: (_, i) => _frameTile(i),
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  // v0.19: slide to any moment
+                  if (_times.length > 1)
+                    SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        activeTrackColor: AppColors.lime,
+                        inactiveTrackColor: AppColors.surfaceHigh,
+                        thumbColor: AppColors.lime,
+                        overlayColor: AppColors.lime.withValues(alpha: 0.15),
+                        trackHeight: 3,
+                      ),
+                      child: Slider(
+                        key: const ValueKey('cover-slider'),
+                        min: _times.first.toDouble(),
+                        max: _times.last.toDouble(),
+                        value: _ms.clamp(_times.first, _times.last).toDouble(),
+                        onChanged: _slide,
+                        onChangeEnd: (_) => _seek(),
+                      ),
+                    )
+                  else
+                    const SizedBox(height: 10),
                   Text(
                     _times.isEmpty
                         ? 'Loading frames…'
-                        : 'Tap a frame to make it the cover · '
+                        : 'Slide or tap a frame · '
                               '${durationLabel(_ms - _times.first)}',
+                    key: const ValueKey('cover-time'),
                     style: const TextStyle(color: AppColors.textSecondary),
                   ),
                 ],
@@ -1090,7 +1172,9 @@ class _HighlightChooserState extends State<_HighlightChooser> {
     super.dispose();
   }
 
-  void _createNew() {
+  Future<void> _createNew() async {
+    // v0.19 Hyper Intelligence: no strong abuse in the name
+    if (!await hiTextOk(context, [_name.text]) || !mounted) return;
     final title = Highlight.cleanTitle(_name.text);
     Navigator.pop(context, (HighlightRepository.instance.newIdSafe(), title));
   }

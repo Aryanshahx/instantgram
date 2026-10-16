@@ -27,6 +27,7 @@ import 'filters.dart';
 import 'photo_render.dart';
 import 'video_frames.dart';
 import '../../shared/widgets/bio_font.dart';
+import '../../shared/widgets/hi_text_check.dart';
 
 /// Opens the editor for picked media, then the share screen.
 Future<void> openEditor(
@@ -1154,6 +1155,9 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
       ),
     );
     if (res == null || !mounted) return;
+    // v0.19 Hyper Intelligence: no strong abuse in texts on the picture
+    if (!res.delete && !await hiTextOk(context, [res.text])) return;
+    if (!mounted) return;
     setState(() {
       if (res.delete) {
         if (layer != null) item.texts.remove(layer);
