@@ -79,6 +79,82 @@ class PostRepository {
 
   (String, DateTime, List<Post>)? _interestCache;
 
+  // ---------------- v0.20: strikes ----------------
+
+  /// Tests: fake "blocked until".
+  @visibleForTesting
+  static Future<DateTime?> Function()? debugBlockedUntil;
+
+  /// 2 strikes = no new posts, clips or moments for 7 days.
+  /// Returns the end of the block (null = you can post).
+  Future<DateTime?> postingBlockedUntil() async {
+    final fake = debugBlockedUntil;
+    if (fake != null) return fake();
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return null;
+      final d = await _db
+          .collection('strikes')
+          .doc(uid)
+          .get()
+          .timeout(const Duration(seconds: 8));
+      final v = d.data()?['blockUntil'];
+      final until = v is Timestamp ? v.toDate() : null;
+      if (until == null || !until.isAfter(DateTime.now())) return null;
+      return until;
+    } catch (_) {
+      return null; // offline: the database rules still stop it
+    }
+  }
+
+  // ---------------- v0.20: trending ----------------
+
+  /// Best posts and clips of the last 48 hours (made by our server:
+  /// config/trending). Loaded at most every 30 minutes.
+  final ValueNotifier<List<Post>> trending = ValueNotifier(const []);
+  DateTime? _trendingAt;
+
+  Future<List<Post>> loadTrending({bool force = false}) async {
+    final at = _trendingAt;
+    if (force ||
+        at == null ||
+        DateTime.now().difference(at) > const Duration(minutes: 30)) {
+      _trendingAt = DateTime.now();
+      try {
+        final d = await _db.collection('config').doc('trending').get();
+        final ids = ((d.data()?['ids'] as List?) ?? const [])
+            .whereType<String>()
+            .take(100)
+            .toList();
+        final lists = await Future.wait([
+          for (var i = 0; i < ids.length; i += 30)
+            _posts
+                .where(
+                  FieldPath.documentId,
+                  whereIn: ids.sublist(
+                    i,
+                    i + 30 > ids.length ? ids.length : i + 30,
+                  ),
+                )
+                .get()
+                .then(_map),
+        ]);
+        final byId = {
+          for (final l in lists)
+            for (final p in l) p.id: p,
+        };
+        trending.value = [
+          for (final id in ids)
+            if (byId[id] != null) byId[id]!,
+        ];
+      } catch (e) {
+        _trendingAt = null;
+        debugPrint('trending: $e');
+      }
+    }
+    return trending.value.where(_filter.canSeeInFeeds).toList();
+  }
+
   /// "#Goa " -> "goa" (how tags are saved).
   static String normalizeTag(String tag) =>
       tag.trim().replaceFirst(RegExp(r'^#+'), '').trim().toLowerCase();
@@ -188,6 +264,10 @@ class PostRepository {
       if (!done) rethrow;
     }
   }
+
+  /// Tests replace deleting.
+  // (test hook, also used by the delete pop-up)
+  static Future<void> Function(Post post)? debugDelete;
 
   Future<void> delete(Post post) async {
     final batch = _db.batch();
@@ -715,14 +795,28 @@ class PostRepository {
   final Map<String, int> _sentWatch = {};
   String? _ageGroup;
 
+  /// v0.20: views still being saved (watch time waits for them, else the
+  /// watch time was lost when you swiped on fast).
+  final Map<String, Future<void>> _pendingViews = {};
+
   /// Counts a view (once per account) + adds it to History.
-  Future<void> addView(Post post, {String source = ViewSource.other}) async {
+  Future<void> addView(Post post, {String source = ViewSource.other}) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
+    if (uid == null) return Future.value();
     HyperFeed.instance.markSeen(post); // v0.19: seen list
-    if (!_sessionViewed.add(post.id)) return; // once per app run
+    if (!_sessionViewed.add(post.id)) {
+      return _pendingViews[post.id] ?? Future.value(); // once per app run
+    }
     AppSettings.instance.addHistory(post.id, isClip: post.isClip);
-    if (post.authorId == uid) return; // your own views don't count
+    if (post.authorId == uid) return Future.value(); // yours don't count
+    final f = _saveView(post, uid, source).whenComplete(
+      () => _pendingViews.remove(post.id),
+    );
+    _pendingViews[post.id] = f;
+    return f;
+  }
+
+  Future<void> _saveView(Post post, String uid, String source) async {
     final ref = _posts.doc(post.id).collection('views').doc(uid);
     try {
       var known = AppSettings.instance.hasViewed(post.id);
@@ -751,6 +845,8 @@ class PostRepository {
       AppSettings.instance.markViewed(post.id);
       unawaited(_checkMilestone(post.id));
     } catch (e) {
+      // v0.20: try again next time it is on screen (was lost before)
+      _sessionViewed.remove(post.id);
       debugPrint('addView failed: $e');
     }
   }
@@ -783,18 +879,28 @@ class PostRepository {
     if (uid == null || post.authorId == uid || watchMs <= 0) return;
     final ms = watchMs.clamp(0, 6 * 60 * 60 * 1000);
     final prev = _sentWatch[post.id] ?? 0;
-    if (ms <= prev && !completed) return;
-    _sentWatch[post.id] = ms > prev ? ms : prev;
+    final wasDone = _sentDone.contains(post.id);
+    if (ms <= prev && (!completed || wasDone)) return;
+    final best = ms > prev ? ms : prev;
+    _sentWatch[post.id] = best;
+    if (completed) _sentDone.add(post.id);
+    // the view doc must exist first
+    final pending = _pendingViews[post.id];
+    if (pending != null) await pending;
     try {
       await _posts.doc(post.id).collection('views').doc(uid).update({
-        'watchMs': ms > prev ? ms : prev,
+        'watchMs': best,
         if (completed) 'completed': true,
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (_) {
-      // no view doc yet (offline) -> skip
+      // no view doc (offline / failed): send again next time
+      _sentWatch[post.id] = prev;
+      if (!wasDone) _sentDone.remove(post.id);
     }
   }
+
+  final Set<String> _sentDone = {};
 
   Future<Map<String, dynamic>> _viewerInfo(String authorId) async {
     var country = '', language = '';

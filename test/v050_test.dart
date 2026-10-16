@@ -328,7 +328,9 @@ void main() {
     expect(d.interactions, 4);
     expect(d.engagementRate, 1.0);
     expect(d.avgWatchMs, 3000);
-    expect(d.completionRate, closeTo(1 / 3, 0.001));
+    // v0.20: the view without watch data is not counted
+    expect(d.completionRate, 0.5);
+    expect(d.watchDocs, 2);
     expect(d.hourly, isTrue);
     expect(d.timeline.length, 5); // 8:00 .. 12:00
     expect(d.timeline[1].$2, 2); // two views in the 9:00 hour

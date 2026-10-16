@@ -44,10 +44,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (widget.loader != null) return widget.loader!();
     final me = await UserRepository.instance.me();
     final posts = await PostRepository.instance.allByUser(me.uid);
-    final latest =
-        ([...posts]..sort((a, b) => b.createdAt.compareTo(a.createdAt)))
-            .take(DashboardScreen.detailPosts)
-            .toList();
+    // v0.20: totals (views, likes, comments ...) from ALL your posts;
+    // audience details from the newest 30 (their view docs).
+    final all = [...posts]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final latest = all.take(DashboardScreen.detailPosts).toList();
     // all view docs at the same time (fast)
     final docs = await Future.wait(
       latest.map(
@@ -56,7 +56,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             .catchError((Object _) => <Map<String, dynamic>>[]),
       ),
     );
-    return DashboardData(me, posts, PostInsights.fromMany(latest, docs));
+    return DashboardData(me, posts, PostInsights.fromMany(all, docs));
   }
 
   @override

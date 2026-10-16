@@ -14,6 +14,7 @@ import '../profile/data/famous_index.dart';
 import '../reels/data/clips_warmup.dart';
 
 import '../../core/services/app_settings.dart';
+import '../../core/services/spam_guard.dart';
 import '../../core/services/content_filter.dart';
 import '../../core/services/hyper_feed.dart';
 import '../../core/services/hyper_intelligence.dart';
@@ -70,6 +71,8 @@ class _MainShellState extends State<MainShell> {
       ..uploader = UserRepository.instance.saveInterests
       ..downloader = UserRepository.instance.loadInterests;
     HyperFeed.instance.start(widget.uid);
+    unawaited(_syncLanguage());
+    unawaited(SpamGuard.instance.load());
     MomentsIndex.instance.start();
     FamousIndex.instance.start();
     ClipsWarmup.instance.start();
@@ -90,6 +93,17 @@ class _MainShellState extends State<MainShell> {
 
   /// Voice + video calls (receive calls, open an accepted one), plus
   /// v0.10 "Active now" and message ticks (delivered).
+  /// v0.20: new phone -> "See translation" uses your profile language.
+  Future<void> _syncLanguage() async {
+    try {
+      final me = await UserRepository.instance.meCached();
+      final s = AppSettings.instance;
+      if (!s.languageSaved && me.language.isNotEmpty) {
+        await s.setLanguage(me.language);
+      }
+    } catch (_) {}
+  }
+
   Future<void> _startCalls() async {
     unawaited(Presence.instance.start(widget.uid));
     ChatReceipts.instance.start(widget.uid);

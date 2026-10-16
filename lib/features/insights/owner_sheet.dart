@@ -6,10 +6,16 @@ import '../../core/utils/errors.dart';
 import '../../core/utils/time_ago.dart';
 import '../../shared/models/post.dart';
 import '../post/data/post_repository.dart';
+import '../post/presentation/post_menu.dart' show confirmDeletePost;
 import 'post_insights_screen.dart';
 
-/// Hold on your own post / clip (in a grid): Analytics and Pin.
-Future<void> showOwnerQuickSheet(BuildContext context, Post post) {
+/// Hold on your own post / clip (grid or feed): Analytics, Pin and
+/// (v0.20) Delete.
+Future<void> showOwnerQuickSheet(
+  BuildContext context,
+  Post post, {
+  VoidCallback? onDeleted,
+}) {
   final messenger = ScaffoldMessenger.of(context);
   const style = TextStyle(
     fontFamily: AppTheme.fontFamily,
@@ -82,6 +88,18 @@ Future<void> showOwnerQuickSheet(BuildContext context, Post post) {
                   SnackBar(content: Text(friendlyError(e))),
                 );
               }
+            },
+          ),
+          ListTile(
+            key: const ValueKey('owner-delete'),
+            leading: const Icon(Icons.delete_outline, color: AppColors.like),
+            title: Text(
+              'Delete',
+              style: style.copyWith(color: AppColors.like),
+            ),
+            onTap: () {
+              Navigator.pop(ctx);
+              confirmDeletePost(context, post, onDeleted: onDeleted);
             },
           ),
           const SizedBox(height: 6),

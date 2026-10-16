@@ -238,7 +238,7 @@ List<Widget> insightsSections(PostInsights d) {
           const SizedBox(width: 8),
           _Stat(
             'Watched to the end',
-            d.detailed == 0 ? '–' : '${(d.completionRate * 100).round()}%',
+            d.watchDocs == 0 ? '–' : '${(d.completionRate * 100).round()}%',
             Icons.check_circle_outline,
           ),
         ],

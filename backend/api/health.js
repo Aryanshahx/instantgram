@@ -5,6 +5,7 @@ import { turnProviders } from './turn.js';
 import { adminPassword } from '../lib/admin.js';
 import { VERSION } from '../lib/version.js';
 import { moderate } from '../lib/hi.js';
+import { translate } from '../lib/translate.js';
 
 const NEED = ['TIGRIS_ACCESS_KEY_ID', 'TIGRIS_SECRET_ACCESS_KEY', 'TIGRIS_BUCKET', 'FIREBASE_PROJECT_ID'];
 
@@ -32,6 +33,16 @@ export default async function handler(req, res) {
       hyperIntelligence = 'ok (OpenAI accepted the key)';
     } catch (e) {
       hyperIntelligence = `OpenAI did not accept the key: ${e.message}`;
+    }
+  }
+  // v0.20: ?translate=1 -> asks Google from this server ("See translation")
+  let translation = 'ok';
+  if (String(req.url || '').includes('translate=1')) {
+    try {
+      const r = await translate({ text: 'kya baat hai', to: 'en' });
+      translation = `ok (${r.from} -> en: ${r.text})`;
+    } catch (e) {
+      translation = `server can't reach Google (the phone tries itself): ${e.message}`;
     }
   }
   const missing = NEED.filter((n) => !env(n));
@@ -70,6 +81,7 @@ export default async function handler(req, res) {
         // v0.14: admin website login (ADMIN_PASSWORD, 16+ letters)
         // v0.18: Hyper Intelligence = safety checks of posts, clips, moments, comments
         hyperIntelligence,
+        translation,
         adminLogin: adminPassword() ? 'ok' : process.env.ADMIN_PASSWORD ? 'ADMIN_PASSWORD too short (16+)' : 'add ADMIN_PASSWORD',
       },
     }),

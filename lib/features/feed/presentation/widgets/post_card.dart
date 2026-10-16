@@ -175,7 +175,11 @@ class _PostCardState extends State<PostCard>
                 _setLiked(serverLiked, true);
               },
               onLongPress: p.authorId == ContentFilter.instance.uid
-                  ? () => showOwnerQuickSheet(context, p)
+                  ? () => showOwnerQuickSheet(
+                      context,
+                      p,
+                      onDeleted: widget.onDeleted,
+                    )
                   : null,
               onSeen: () => _repo.addView(p, source: widget.source),
               onWatched: (ms, done) =>

@@ -66,15 +66,19 @@ class _SeeTranslationState extends State<SeeTranslation> {
           return;
         }
         setState(() => _st = _St.loading);
+        final asked = widget.text;
         try {
-          final r = await Translator.instance.translate(widget.text);
-          if (!mounted) return;
+          final r = await Translator.instance.translate(asked);
+          // v0.20: the list reused this widget for other text meanwhile
+          if (!mounted || widget.text != asked) return;
           setState(() {
             _t = r;
             _st = _St.shown;
           });
         } catch (_) {
-          if (mounted) setState(() => _st = _St.failed);
+          if (mounted && widget.text == asked) {
+            setState(() => _st = _St.failed);
+          }
         }
     }
   }

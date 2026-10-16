@@ -118,13 +118,18 @@ class _HomeFeedState extends State<_HomeFeed> {
 
   int _lastRefresh = -1;
 
-  /// More than people you follow: posts with your top hashtags + the
-  /// newest clips (so new creators get a chance).
+  /// More than people you follow: posts with your top hashtags, trending
+  /// posts + the newest clips (so new creators get a chance).
   static Future<List<Post>> _extras() async {
     final tags = HyperFeed.instance.topTags(3);
-    final byTag = await PostRepository.instance.interestCandidates(tags);
+    final repo = PostRepository.instance;
+    final r = await Future.wait([
+      repo.interestCandidates(tags),
+      // v0.20: trending (best of the last 48 hours, 1 read)
+      repo.loadTrending().catchError((Object _) => <Post>[]),
+    ]);
     final clips = ClipsWarmup.instance.latest ?? const <Post>[];
-    return [...byTag, ...clips.take(30)];
+    return [...r[0], ...r[1], ...clips.take(30)];
   }
 
   /// v0.13: waits for the server (background downloads pause meanwhile).

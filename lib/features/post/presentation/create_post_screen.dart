@@ -8,6 +8,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../../core/services/media_service.dart';
 import '../../../core/services/music_player.dart';
+import '../../../core/services/spam_guard.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/errors.dart';
@@ -172,6 +173,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     // v0.18 Hyper Intelligence: no strong abuse in the caption
     if (!_isStory && !await hiTextOk(context, [_caption.text])) return;
     if (!mounted) return;
+    // v0.20 Hyper Intelligence: strikes + new-account limit
+    final stop = await postingStopReason(isStory: _isStory);
+    if (!mounted) return;
+    if (stop != null) {
+      setState(() => _error = stop);
+      return;
+    }
     setState(() {
       _progress = 0;
       _error = null;
@@ -218,6 +226,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         audioName: widget.audio?.name ?? '',
         replyTo: _isStory ? null : _reply,
       );
+      if (!_isStory) SpamGuard.instance.recordPost();
       if (!mounted) return;
       final messenger = ScaffoldMessenger.of(context);
       Navigator.of(context).popUntil((r) => r.isFirst);
@@ -1304,4 +1313,14 @@ class _HighlightChooserState extends State<_HighlightChooser> {
       ),
     );
   }
+}
+
+/// v0.20: why you can't share right now (null = you can).
+Future<String?> postingStopReason({required bool isStory}) async {
+  final until = await PostRepository.instance.postingBlockedUntil();
+  if (until != null) {
+    return 'You broke the community rules 2 times. '
+        'You can post again on ${fullDate(until)}.';
+  }
+  return isStory ? null : SpamGuard.instance.checkPost();
 }

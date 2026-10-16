@@ -6,28 +6,35 @@
 <meta name="robots" content="noindex, nofollow">
 <title>InstantGram Admin</title>
 <style>
+  /* v0.20: phone-first dark design (bottom tabs on phones, sidebar on wide screens) */
   :root {
-    --bg: #0d0f14; --card: #161a22; --card2: #1d222c; --line: #2a303c;
+    --bg: #0b0d12; --card: #151922; --card2: #1d2230; --line: #262c3a;
     --text: #f2f4f8; --muted: #8e96a6; --lime: #c6ff3d; --red: #ff4d6d; --blue: #3897f0;
+    --amber: #ffb648; --violet: #a78bfa; --side: 232px; --tabs: 64px;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   a { color: var(--lime); }
-  button { font: inherit; cursor: pointer; border: 0; border-radius: 10px; padding: 8px 14px;
-    background: var(--card2); color: var(--text); font-weight: 600; }
+  button { font: inherit; cursor: pointer; border: 0; border-radius: 12px; padding: 10px 16px; min-height: 44px;
+    background: var(--card2); color: var(--text); font-weight: 650; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
   button:hover { filter: brightness(1.15); }
-  button:disabled { opacity: .45; cursor: default; }
+  button:active { transform: scale(.97); }
+  button:disabled { opacity: .45; cursor: default; transform: none; }
   button.lime { background: var(--lime); color: #111; }
-  button.red { background: rgba(255,77,109,.15); color: var(--red); }
-  button.blue { background: rgba(56,151,240,.15); color: var(--blue); }
+  button.red { background: rgba(255,77,109,.16); color: var(--red); }
+  button.blue { background: rgba(56,151,240,.16); color: var(--blue); }
+  button.amber { background: rgba(255,182,72,.16); color: var(--amber); }
+  button.child { background: var(--red); color: #fff; }
   button.ghost { background: transparent; color: var(--muted); }
-  input, textarea, select { font: inherit; color: var(--text); background: var(--card2);
-    border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; width: 100%; }
-  input:focus, textarea:focus { outline: 2px solid var(--lime); border-color: transparent; }
+  button.small { min-height: 40px; padding: 8px 12px; font-size: 13px; }
+  input, textarea, select { font: inherit; color: var(--text); background: var(--card2); min-height: 44px;
+    border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; width: 100%; }
+  input[type=radio] { min-height: 0; }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--lime); border-color: transparent; }
   .hide { display: none !important; }
   .muted { color: var(--muted); }
-  .small { font-size: 12px; }
+  .small { font-size: 12.5px; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .grow { flex: 1; }
   .logo { font-weight: 800; font-size: 20px; letter-spacing: -.3px; }
@@ -35,54 +42,115 @@
 
   /* login */
   #login { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
-  .box { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 26px; width: 100%; max-width: 360px; }
-  .box h1 { margin: 0 0 4px; font-size: 22px; }
-  .box label { display: block; margin: 14px 0 6px; color: var(--muted); font-size: 12px; }
-  .msg { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: rgba(255,77,109,.12); color: #ffb3c1; font-size: 13px; word-break: break-word; }
+  .box { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 24px; width: 100%; max-width: 380px; }
+  .box h1 { margin: 0 0 4px; font-size: 24px; }
+  .box label { display: block; margin: 14px 0 6px; color: var(--muted); font-size: 12.5px; }
+  .msg { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: rgba(255,77,109,.12); color: #ffb3c1; font-size: 13.5px; word-break: break-word; }
   .msg.ok { background: rgba(198,255,61,.12); color: var(--lime); }
 
-  /* app */
-  header { position: sticky; top: 0; z-index: 5; background: rgba(13,15,20,.92); backdrop-filter: blur(8px);
-    border-bottom: 1px solid var(--line); padding: 10px 16px; }
-  nav { display: flex; gap: 4px; overflow-x: auto; }
-  nav button { background: transparent; color: var(--muted); padding: 7px 12px; white-space: nowrap; }
-  nav button.on { background: rgba(198,255,61,.12); color: var(--lime); }
-  main { max-width: 1100px; margin: 0 auto; padding: 18px 16px 60px; }
-  h2 { margin: 6px 0 14px; font-size: 18px; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
-  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
-  .stat .n { font-size: 26px; font-weight: 800; }
-  .stat .l { color: var(--muted); font-size: 12px; }
-  .list { display: flex; flex-direction: column; gap: 6px; }
+  /* layout */
+  #app { min-height: 100vh; }
+  header { position: sticky; top: 0; z-index: 5; background: rgba(11,13,18,.92); backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line); padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top)); }
+  #nav { position: fixed; z-index: 6; display: flex; }
+  #nav button { background: transparent; color: var(--muted); position: relative; font-weight: 600; }
+  #nav button .ic { font-size: 20px; line-height: 1; }
+  #nav button.on { color: var(--lime); }
+  #nav #hiBadge { position: absolute; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px 14px 40px; }
+  /* phones: bottom tab bar */
+  @media (max-width: 899px) {
+    header .row { flex-wrap: nowrap; }
+    header .logo { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    #who { display: none; }
+    #nav { left: 0; right: 0; bottom: 0; height: calc(var(--tabs) + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom);
+      background: rgba(17,20,27,.97); backdrop-filter: blur(10px); border-top: 1px solid var(--line); }
+    #nav button { flex: 1; flex-direction: column; gap: 3px; padding: 6px 2px; border-radius: 0; font-size: 10.5px; min-width: 0; }
+    #nav button .lb { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+    #nav button .full { display: none; }
+    #nav button.on .ic { background: rgba(198,255,61,.14); border-radius: 99px; padding: 3px 14px; }
+    #nav #hiBadge { top: 2px; right: calc(50% - 26px); margin: 0; }
+    main { padding-bottom: calc(var(--tabs) + 30px + env(safe-area-inset-bottom)); }
+  }
+  /* wide screens: sidebar */
+  @media (min-width: 900px) {
+    #nav { top: 0; left: 0; bottom: 0; width: var(--side); flex-direction: column; gap: 4px; padding: 76px 12px 16px;
+      background: var(--card); border-right: 1px solid var(--line); }
+    #nav button { justify-content: flex-start; gap: 12px; padding: 12px 14px; text-align: left; }
+    #nav button .short { display: none; }
+    #nav button.on { background: rgba(198,255,61,.12); }
+    #nav #hiBadge { position: static; margin-left: auto; }
+    header, main { margin-left: var(--side); }
+    header { z-index: 7; }
+    main { max-width: calc(1100px + var(--side)); padding: 22px 28px 60px; }
+  }
+  h2 { margin: 4px 0 14px; font-size: 21px; letter-spacing: -.2px; }
+  h3 { font-size: 16px; margin: 18px 0 8px; }
+  .cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  @media (min-width: 600px) { .cards { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); } }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 14px; display: grid;
+    grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 12px; align-items: center; min-height: 84px; }
+  .stat .ico { grid-row: 1 / 3; width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; font-size: 22px; background: var(--card2); }
+  .stat .n { font-size: 26px; font-weight: 800; line-height: 1.1; }
+  .stat .l { color: var(--muted); font-size: 12.5px; line-height: 1.25; }
+  .stat.c-lime .ico { background: rgba(198,255,61,.13); } .stat.c-blue .ico { background: rgba(56,151,240,.15); }
+  .stat.c-red .ico { background: rgba(255,77,109,.15); } .stat.c-amber .ico { background: rgba(255,182,72,.15); }
+  .stat.c-violet .ico { background: rgba(167,139,250,.15); }
+  .stat.alert { border-color: rgba(255,77,109,.5); }
+  .list { display: flex; flex-direction: column; gap: 8px; }
   .item { display: flex; gap: 12px; align-items: center; background: var(--card); border: 1px solid var(--line);
-    border-radius: 12px; padding: 10px 12px; cursor: pointer; }
+    border-radius: 16px; padding: 12px; cursor: pointer; min-height: 64px; }
   .item:hover { border-color: #3a4252; }
-  .av { width: 40px; height: 40px; border-radius: 50%; background: var(--card2) center/cover; flex: none;
+  .item.urgent { border-color: rgba(255,77,109,.65); background: linear-gradient(0deg, rgba(255,77,109,.06), rgba(255,77,109,.06)), var(--card); }
+  .item .side { color: var(--muted); font-size: 12.5px; text-align: right; }
+  @media (max-width: 599px) { .item .side { display: none; } }
+  .av { width: 44px; height: 44px; border-radius: 50%; background: var(--card2) center/cover; flex: none;
     display: grid; place-items: center; font-weight: 800; color: var(--muted); }
-  .tag { display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 700; margin-left: 4px; }
-  .tag.red { background: rgba(255,77,109,.15); color: var(--red); }
-  .tag.blue { background: rgba(56,151,240,.15); color: var(--blue); }
-  .tag.lime { background: rgba(198,255,61,.12); color: var(--lime); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
-  .tile { position: relative; aspect-ratio: 3/4; border-radius: 12px; overflow: hidden; background: var(--card2) center/cover; cursor: pointer; border: 1px solid var(--line); }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11.5px; font-weight: 700; margin: 0 4px 2px 0; }
+  .tag.red { background: rgba(255,77,109,.16); color: var(--red); }
+  .tag.blue { background: rgba(56,151,240,.16); color: var(--blue); }
+  .tag.lime { background: rgba(198,255,61,.13); color: var(--lime); }
+  .tag.amber { background: rgba(255,182,72,.16); color: var(--amber); }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  @media (min-width: 600px) { .grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; } }
+  .tile { position: relative; aspect-ratio: 3/4; border-radius: 14px; overflow: hidden; background: var(--card2) center/cover; cursor: pointer; border: 1px solid var(--line); }
   .tile .meta { position: absolute; inset: auto 0 0 0; padding: 18px 8px 6px; font-size: 11px;
     background: linear-gradient(transparent, rgba(0,0,0,.85)); }
   .tile .kind { position: absolute; top: 6px; left: 6px; }
-  .more { margin: 14px auto 0; display: block; }
-  .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .more { margin: 16px auto 0; display: flex; width: 100%; max-width: 320px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 12px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button { flex: none; border-radius: 99px; padding: 8px 16px; min-height: 40px; }
+  .tabs select { width: auto; flex: none; border-radius: 99px; min-height: 40px; padding: 6px 12px; }
   .tabs button.on { background: var(--lime); color: #111; }
+  .bar-top { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .bar-top h2 { flex: 1; margin: 0; }
+  .note { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; color: var(--muted); font-size: 13px; }
+  .quick { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 12px 0 4px; }
+  @media (min-width: 600px) { .quick { grid-template-columns: repeat(4, max-content); } }
 
-  /* drawer */
+  /* drawer: full screen on phones, sticky title + sticky actions */
   #shade { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 10; }
-  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100%); background: var(--bg);
-    border-left: 1px solid var(--line); z-index: 11; overflow-y: auto; padding: 16px 18px 40px; }
-  .media { display: flex; gap: 8px; overflow-x: auto; margin: 10px 0; }
-  .media img, .media video { height: 320px; max-width: 100%; border-radius: 12px; background: #000; }
-  .comment { padding: 8px 0; border-bottom: 1px solid var(--line); display: flex; gap: 8px; }
-  .kv { display: grid; grid-template-columns: 120px 1fr; gap: 4px 10px; font-size: 13px; margin: 10px 0; }
-  .kv div:nth-child(odd) { color: var(--muted); }
-  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--card2);
-    border: 1px solid var(--line); padding: 10px 16px; border-radius: 12px; z-index: 20; max-width: 90vw; }
+  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(600px, 100%); background: var(--bg);
+    border-left: 1px solid var(--line); z-index: 11; overflow-y: auto; padding: 0 16px 0; overscroll-behavior: contain; }
+  #drawer .dhead { position: sticky; top: 0; z-index: 2; background: rgba(11,13,18,.96); backdrop-filter: blur(8px);
+    margin: 0 -16px 12px; padding: 10px 8px 10px 16px; padding-top: max(10px, env(safe-area-inset-top)); border-bottom: 1px solid var(--line); }
+  #drawer .dhead h2 { margin: 0; font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #drawer .actions { position: sticky; bottom: 0; z-index: 2; background: rgba(11,13,18,.97); backdrop-filter: blur(8px);
+    margin: 16px -16px 0; padding: 10px 16px; padding-bottom: max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line);
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  #drawer .actions .wide { grid-column: 1 / -1; }
+  #drawer .pad { height: 24px; }
+  .media { display: flex; gap: 8px; overflow-x: auto; margin: 10px 0; scroll-snap-type: x mandatory; }
+  .media img, .media video { height: min(60vh, 420px); max-width: 100%; border-radius: 14px; background: #000; scroll-snap-align: start; }
+  .comment { padding: 10px 0; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: flex-start; }
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; font-size: 13.5px; margin: 12px 0;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+  .kv > div:nth-child(odd) { color: var(--muted); }
+  .kv > div { word-break: break-word; }
+  #toast { position: fixed; left: 50%; bottom: calc(var(--tabs) + 16px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--card2);
+    border: 1px solid var(--line); padding: 12px 18px; border-radius: 14px; z-index: 20; max-width: 92vw; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
+  @media (min-width: 900px) { #toast { bottom: 24px; } }
   .progress { height: 8px; background: var(--card2); border-radius: 9px; overflow: hidden; margin-top: 10px; }
   .progress div { height: 100%; width: 0; background: var(--lime); transition: width .3s; }
 </style>
@@ -106,24 +174,29 @@
 <!-- ============ app ============ -->
 <section id="app" class="hide">
   <header>
-    <div class="row" style="margin-bottom:8px">
-      <div class="logo grow">Instant<b>Gram</b> <span class="muted small">admin</span> <span id="ver" class="muted small" title="Version (page · server)">v0.19.0</span></div>
+    <div class="row">
+      <div class="logo grow">Instant<b>Gram</b> <span class="muted small">admin</span> <span id="ver" class="muted small" title="Version (page · server)">v0.20.0</span></div>
       <span id="who" class="muted small"></span>
       <button class="ghost small" id="logout">Log out</button>
     </div>
-    <nav id="nav">
-      <button data-page="dash" class="on">Dashboard</button>
-      <button data-page="users">Users</button>
-      <button data-page="posts">Posts &amp; clips</button>
-      <button data-page="reports">Reports</button>
-      <button data-page="hi">Hyper Intelligence <span id="hiBadge" class="tag red hide"></span></button>
-      <button data-page="notice">Send notice</button>
-    </nav>
   </header>
+  <nav id="nav">
+    <button data-page="dash" class="on"><span class="ic">🏠</span><span class="lb"><span class="full">Dashboard</span><span class="short">Home</span></span></button>
+    <button data-page="users"><span class="ic">👥</span><span class="lb">Users</span></button>
+    <button data-page="posts"><span class="ic">🖼️</span><span class="lb"><span class="full">Posts &amp; clips</span><span class="short">Posts</span></span></button>
+    <button data-page="reports"><span class="ic">🚩</span><span class="lb">Reports</span></button>
+    <button data-page="hi"><span class="ic">🛡️</span><span class="lb"><span class="full">Hyper Intelligence</span><span class="short">Safety</span></span> <span id="hiBadge" class="tag red hide"></span></button>
+    <button data-page="notice"><span class="ic">📣</span><span class="lb"><span class="full">Send notice</span><span class="short">Notice</span></span></button>
+  </nav>
   <main>
     <div id="page-dash">
-      <div class="row"><h2 class="grow">Dashboard</h2><button id="dashRefresh">Refresh</button></div>
+      <div class="bar-top"><h2>Dashboard</h2><button id="dashRefresh">↻ Refresh</button></div>
       <div class="cards" id="stats"></div>
+      <div class="quick">
+        <button class="amber" id="dashTrending">🔥 Trending now</button>
+        <button class="red" id="dashCyber">🚨 Report to cybercrime.gov.in</button>
+      </div>
+      <div class="small muted" id="dashTrendInfo"></div>
       <h2 style="margin-top:24px">Newest users</h2>
       <div class="list" id="dashUsers"></div>
       <h2 style="margin-top:24px">Newest posts</h2>
@@ -131,7 +204,7 @@
     </div>
 
     <div id="page-users" class="hide">
-      <h2>Users</h2>
+      <div class="bar-top"><h2>Users</h2></div>
       <div class="tabs" id="userTabs">
         <button data-filter="new" class="on">Newest</button>
         <button data-filter="followers">Most followers</button>
@@ -143,7 +216,7 @@
         <input id="userCountry" class="hide" maxlength="2" placeholder="IN" style="width:70px;text-transform:uppercase">
       </div>
       <form class="row" id="userSearch" style="margin-bottom:12px">
-        <input id="userQ" class="grow" placeholder="Search username, email or user id" style="flex:1;width:auto">
+        <input id="userQ" class="grow" placeholder="Search username, email or user id" style="flex:1;width:auto;min-width:0">
         <button class="lime">Search</button>
       </form>
       <div class="list" id="userList"></div>
@@ -151,7 +224,7 @@
     </div>
 
     <div id="page-posts" class="hide">
-      <h2>Posts &amp; clips</h2>
+      <div class="bar-top"><h2>Posts &amp; clips</h2></div>
       <div class="tabs" id="postTabs">
         <button data-type="all" class="on">All</button>
         <button data-type="clip">Clips</button>
@@ -163,8 +236,8 @@
     </div>
 
     <div id="page-reports" class="hide">
-      <div class="row"><h2 class="grow">Reports</h2><button id="repRefresh">Refresh</button></div>
-      <div class="muted small" style="margin-bottom:10px">Reports from the app. Press Done after you handled one.</div>
+      <div class="bar-top"><h2>Reports</h2><button id="repRefresh">↻ Refresh</button></div>
+      <div class="note">Reports from the app. 3 report points = blurred, 6 = hidden, <b>Child safety</b> = hidden at once. Press Done after you handled one.</div>
       <div class="tabs" id="repTabs">
         <button data-kind="" class="on">All</button>
         <button data-kind="post">Posts</button>
@@ -175,7 +248,7 @@
           <option value="">Any reason</option>
           <option>Spam</option><option>Nudity or sexual content</option><option>Hate speech</option>
           <option>Violence or dangerous acts</option><option>Bullying or harassment</option><option>Scam or fraud</option>
-          <option>False information</option><option>Copyright</option><option>Something else</option>
+          <option>False information</option><option>Copyright</option><option>Child safety</option><option>Something else</option>
         </select>
       </div>
       <div class="muted small hide" id="repInfo" style="margin-bottom:8px"></div>
@@ -184,8 +257,8 @@
     </div>
 
     <div id="page-hi" class="hide">
-      <div class="row"><h2 class="grow">Hyper Intelligence</h2><button id="hiSweep">Check now</button><button id="hiLimits">Limits</button><button id="hiRefresh">Refresh</button></div>
-      <div class="muted small" style="margin-bottom:10px">InstantGram's safety system. It checks every new post, clip, moment and comment with OpenAI (chats are never checked).
+      <div class="bar-top"><h2>Hyper Intelligence</h2><button id="hiSweep">✓ Check now</button><button id="hiLimits">Limits</button><button id="hiRefresh">↻</button></div>
+      <div class="note">InstantGram's safety system. It checks every new post, clip, moment and comment with OpenAI (chats are never checked).
         <b>Blurred</b> = people see "Sensitive content · Tap to view". <b>Hidden</b> = only the owner sees it. <b>Unchecked</b> = OpenAI did not answer (tried again every day and when this page opens).</div>
       <div class="msg hide" id="hiKey">OPENAI_API_KEY is missing in Vercel: nothing can be checked.</div>
       <div class="tabs" id="hiTabs">
@@ -207,7 +280,7 @@
 
     <div id="page-notice" class="hide">
       <h2>Send notice</h2>
-      <div class="box" style="max-width:560px">
+      <div class="box" style="max-width:560px;margin:0">
         <label class="muted small">Send to</label>
         <div class="row" style="margin:6px 0 12px">
           <label class="row"><input type="radio" name="to" value="all" checked style="width:auto"> Everyone</label>
@@ -227,7 +300,7 @@
           <button type="button" class="ghost small hide" id="noticeImgDel">Remove</button>
         </div>
         <img id="noticeImgPreview" class="hide" alt="" style="margin-top:8px;max-width:100%;max-height:220px;border-radius:12px">
-        <button class="lime" id="noticeSend" style="margin-top:14px">Send</button>
+        <button class="lime" id="noticeSend" style="margin-top:14px;width:100%">Send</button>
         <div class="progress hide" id="noticeBar"><div></div></div>
         <div class="small muted" id="noticeStatus" style="margin-top:8px"></div>
       </div>
@@ -332,7 +405,7 @@
 
   // v0.15: shows if Vercel serves an old deployment
   // v0.18: the label always shows the server version (from /api/health)
-  const PAGE_VERSION = '0.19.0';
+  const PAGE_VERSION = '0.20.0';
   async function checkVersion() {
     try {
       const r = await fetch('/api/health', { cache: 'no-store' });
@@ -370,7 +443,7 @@
         <div><b>@${esc(u.username || '(no username)')}</b>${u.verified ? '<span class="tag blue">verified</span>' : ''}${u.banned ? '<span class="tag red">blocked</span>' : ''}${u.private ? '<span class="tag lime">private</span>' : ''}</div>
         <div class="muted small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.name)} · ${esc(u.email)}</div>
       </div>
-      <div class="muted small" style="text-align:right">${fmt(u.followers)} followers<br>${fmt(u.posts)} posts · ${esc(when(u.createdAt))}</div>
+      <div class="side">${fmt(u.followers)} followers<br>${fmt(u.posts)} posts · ${esc(when(u.createdAt))}</div>
     </div>`;
   const tile = (p) => {
     const bg = safeUrl(p.thumb);
@@ -391,19 +464,35 @@
     $('stats').innerHTML = '<div class="muted">Loading…</div>';
     try {
       const s = await api('stats');
+      // [label, number, icon, colour, page to open, red border when > 0]
       const items = [
-        ['Users', s.users], ['New today', s.users24h], ['New this week', s.users7d],
-        ['Online now', s.online], ['Active today', s.active24h],
-        ['Posts + clips', s.posts], ['Clips', s.clips], ['Posts', s.photos], ['Live moments', s.moments],
-        ['Chats', s.chats], ['Open reports', s.reports], ['Hyper Intelligence review', s.review], ['Blocked', s.banned], ['Verified', s.verified], ['Phones (push)', s.phones],
+        ['Users', s.users, '👥', 'lime', 'users'], ['New today', s.users24h, '✨', 'lime', 'users'], ['New this week', s.users7d, '📈', 'lime', 'users'],
+        ['Online now', s.online, '🟢', 'lime', 'users'], ['Active today', s.active24h, '⚡', 'amber', 'users'],
+        ['Open reports', s.reports, '🚩', 'red', 'reports', true], ['Hyper Intelligence review', s.review, '🛡️', 'red', 'hi', true],
+        ['Posts + clips', s.posts, '🖼️', 'blue', 'posts'], ['Clips', s.clips, '🎬', 'blue', 'posts'], ['Posts', s.photos, '📷', 'blue', 'posts'], ['Live moments', s.moments, '⭕', 'violet', 'posts'],
+        ['Chats', s.chats, '💬', 'violet'], ['Blocked', s.banned, '⛔', 'red', 'users'], ['Verified', s.verified, '✔️', 'blue', 'users'], ['Phones (push)', s.phones, '📱', 'amber'],
       ];
       hiBadge(s.review);
-      $('stats').innerHTML = items.map(([l, n]) => `<div class="stat"><div class="n">${fmt(n)}</div><div class="l">${l}</div></div>`).join('');
+      const card = ([l, n, ic, c, page, warn]) => `<div class="stat c-${c}${warn && n > 0 ? ' alert' : ''}"${page ? ` data-go="${page}" style="cursor:pointer"` : ''}><div class="ico">${ic}</div><div class="n">${fmt(n)}</div><div class="l">${l}</div></div>`;
+      $('stats').innerHTML = items.map(card).join('');
     } catch (e) { $('stats').innerHTML = `<div class="msg">${esc(e.message)}</div>`; }
     api('users', {}).then((r) => { $('dashUsers').innerHTML = r.users.slice(0, 6).map(userRow).join('') || '<div class="muted">No users</div>'; }).catch((e) => { $('dashUsers').innerHTML = `<div class="msg">${esc(e.message)}</div>`; });
     api('posts', { type: 'all' }).then((r) => { $('dashPosts').innerHTML = r.posts.slice(0, 12).map(tile).join('') || '<div class="muted">No posts</div>'; }).catch((e) => { $('dashPosts').innerHTML = `<div class="msg">${esc(e.message)}</div>`; });
   }
   $('dashRefresh').addEventListener('click', loadDash);
+  $('stats').addEventListener('click', (e) => { const c = e.target.closest('[data-go]'); if (c) go(c.dataset.go); });
+  // v0.20: open a page in a new tab (tests replace it)
+  const openLink = (url) => (typeof window.igOpenLink === 'function' ? window.igOpenLink(url) : window.open(url, '_blank', 'noopener'));
+  const CYBERCRIME = 'https://cybercrime.gov.in';
+  $('dashCyber').addEventListener('click', () => openLink(CYBERCRIME));
+  $('dashTrending').addEventListener('click', async () => {
+    $('dashTrending').disabled = true;
+    try {
+      const r = await api('trending');
+      const text = `Trending updated: ${fmt(r.trending)} posts, ${fmt(r.clips)} clips (from ${fmt(r.scanned)} new ones)`;
+      $('dashTrendInfo').textContent = text; toast(text);
+    } catch (e) { fail(e); } finally { $('dashTrending').disabled = false; }
+  });
 
   // ---------------- users ----------------
   // v0.14: filters (search text wins over the filter)
@@ -459,18 +548,24 @@
 
   // ---------------- reports ----------------
   let repCursor = '', repKind = '';
-  const repRow = (r) => `
-    <div class="item" style="cursor:default;align-items:flex-start" id="rep-${esc(r.id)}">
-      <div class="grow">
-        <div><span class="tag red">${esc(r.kind)}</span> <b>${esc(r.reason)}</b> <span class="muted small">· ${esc(when(r.createdAt))} · by @${esc(r.reporterUsername || r.reporterUid)}</span></div>
+  const CHILD = 'Child safety';
+  const repRow = (r) => {
+    const child = r.reason === CHILD;
+    const canChild = r.kind !== 'user' && (r.targetId || r.postId);
+    return `
+    <div class="item${child ? ' urgent' : ''}" style="cursor:default;align-items:flex-start" id="rep-${esc(r.id)}">
+      <div class="grow" style="min-width:0">
+        <div>${child ? '<span class="tag red">URGENT</span>' : ''}<span class="tag red">${esc(r.kind)}</span> <b>${esc(r.reason)}</b> <span class="muted small">· ${esc(when(r.createdAt))} · by @${esc(r.reporterUsername || r.reporterUid)}</span></div>
         ${r.message ? `<div style="margin-top:4px;white-space:pre-wrap">${esc(r.message)}</div>` : ''}
-        <div class="row" style="margin-top:8px">
+        <div class="row" style="margin-top:10px">
           ${r.postId ? `<button class="small" data-open-post="${esc(r.postId)}">Open post</button>` : ''}
           ${r.targetUid ? `<button class="small" data-open-user="${esc(r.targetUid)}">Open user</button>` : ''}
+          ${canChild ? `<button class="child small" data-child-rep="${esc(r.id)}" data-kind="${esc(r.kind)}" data-id="${esc(r.targetId || r.postId)}" data-post="${esc(r.postId || '')}" data-uid="${esc(r.targetUid || '')}">🚨 Child safety</button>` : ''}
           <button class="lime small" data-done="${esc(r.id)}">Done</button>
         </div>
       </div>
     </div>`;
+  };
   async function loadReports(reset) {
     if (reset) { repCursor = ''; $('repList').innerHTML = '<div class="muted">Loading…</div>'; }
     try {
@@ -496,6 +591,11 @@
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.openPost) return openPost(b.dataset.openPost, b.dataset.openKind || 'post');
     if (b.dataset.openUser) return openUser(b.dataset.openUser);
+    if (b.dataset.childRep) {
+      const ok = await childSafety({ kind: b.dataset.kind, id: b.dataset.id, postId: b.dataset.post, uid: b.dataset.uid });
+      if (ok) { try { await api('resolveReport', { id: b.dataset.childRep }); } catch { /* still open */ } document.getElementById(`rep-${b.dataset.childRep}`)?.remove(); }
+      return;
+    }
     if (b.dataset.done) {
       b.disabled = true;
       try { await api('resolveReport', { id: b.dataset.done }); const el = document.getElementById(`rep-${b.dataset.done}`); if (el) el.remove(); toast('Report closed'); }
@@ -517,11 +617,11 @@
     const bg = safeUrl(x.preview);
     const reasons = x.reasons.map((g) => `<span class="tag red">${esc(HI_LABEL[g] || g)} ${esc(pct(x.scores[g]))}</span>`).join('');
     const open = x.kind === 'comment' ? x.postId : x.targetId;
-    return `<div class="item" id="hi-${esc(x.id)}" style="align-items:flex-start">
+    return `<div class="item${x.urgent || (x.reportReasons || {})[CHILD] ? ' urgent' : ''}" id="hi-${esc(x.id)}" style="align-items:flex-start;cursor:default">
       <div class="tile" style="width:84px;flex:none;aspect-ratio:3/4;${bg ? `background-image:url('${esc(bg)}');filter:blur(${x.state === 'unchecked' ? 0 : 6}px)` : ''}" data-pid="${esc(open)}" data-kind="${x.kind === 'moment' ? 'moment' : 'post'}"></div>
       <div class="grow" style="min-width:0">
         <div>${x.urgent ? '<span class="tag red">URGENT</span>' : ''}<span class="tag ${stColor}">${esc(stLabel)}</span><span class="tag lime">${esc(x.kind)}</span> <b>@${esc(x.authorUsername || '?')}</b> <span class="muted small">${esc(when(x.at))}</span></div>
-        <div style="margin:6px 0">${reasons}</div>
+        <div style="margin:6px 0">${reasons}${x.reports ? `<span class="tag amber">🚩 ${fmt(x.reports)} report${x.reports === 1 ? '' : 's'}${Object.keys(x.reportReasons || {}).length ? ` · ${esc(Object.keys(x.reportReasons).slice(0, 3).join(', '))}` : ''}</span>` : ''}</div>
         ${x.text ? `<div class="small" style="white-space:pre-wrap;max-height:4.5em;overflow:hidden">${esc(x.text)}</div>` : ''}
         ${x.error ? `<div class="small muted">OpenAI: ${esc(x.error)}</div>` : ''}
         <div class="row" style="margin-top:8px">
@@ -530,6 +630,7 @@
           <button class="red small" data-hi="delete" data-id="${esc(x.id)}">Delete</button>
           <button class="red small" data-hi="strike" data-id="${esc(x.id)}">Delete + strike</button>
           <button class="red small" data-hi="ban" data-id="${esc(x.id)}">Ban</button>
+          <button class="child small" data-hi="child" data-id="${esc(x.id)}">🚨 Child safety</button>
           ${x.state === 'unchecked' ? `<button class="small" data-hi="recheck" data-id="${esc(x.id)}">Check again</button>` : ''}
           <button class="ghost small" data-open-post="${esc(open)}" data-open-kind="${x.kind === 'moment' ? 'moment' : 'post'}">Open</button>
           ${x.authorId ? `<button class="ghost small" data-open-user="${esc(x.authorId)}">User</button>` : ''}
@@ -578,8 +679,9 @@
   });
   const HI_ASK = {
     delete: 'Delete it for ever?',
-    strike: 'Delete it and give the account a strike? (3 strikes = blocked later)',
+    strike: 'Delete it and give the account a strike? (2 strikes = no posting for 7 days, 3 = you are asked to block)',
     ban: 'Delete it and BLOCK the account? They are logged out and can not log in any more.',
+    child: 'CHILD SAFETY: delete it, BLOCK the account and open cybercrime.gov.in to report it?',
   };
   document.addEventListener('click', async (e) => {
     const b = e.target.closest('button[data-hi]'); if (!b) return;
@@ -595,11 +697,13 @@
       }
       const r = await api('hiDecide', { id: mid, decision: what });
       if (row) row.remove();
-      toast({ approve: 'Approved: shown normally', blur: 'Stays blurred', delete: 'Deleted', strike: `Deleted + strike (${r.strikes || 1})`, ban: r.banned ? 'Deleted + account blocked' : 'Deleted (block failed)' }[what]);
-      if (['delete', 'strike', 'ban'].includes(what) && r.authorId) {
+      toast({ approve: 'Approved: shown normally', blur: 'Stays blurred', delete: 'Deleted', strike: strikeText(r), ban: r.banned ? 'Deleted + account blocked' : 'Deleted (block failed)', child: r.banned ? 'Deleted + account blocked. Report it on cybercrime.gov.in' : 'Deleted (block failed)' }[what], 5000);
+      if (what === 'child') openLink(r.cybercrime || CYBERCRIME);
+      if (['delete', 'strike', 'ban', 'child'].includes(what) && r.authorId) {
         try {
           const u = (await api('user', { uid: r.authorId })).user;
-          mail(u, what === 'ban' ? 'block' : what === 'strike' ? 'hiStrike' : 'hiDelete');
+          mail(u, what === 'ban' || what === 'child' ? 'block' : what === 'strike' ? strikeMail(r) : 'hiDelete');
+          if (what === 'strike' && r.askBan) await askBan(u, r.strikes);
         } catch { /* user gone */ }
       }
       const left = Math.max(0, (Number($('hiBadge').textContent) || 1) - 1);
@@ -609,6 +713,26 @@
       if (row) row.querySelectorAll('button').forEach((x) => { x.disabled = false; });
     }
   });
+  // v0.20: strikes. 1 = warning, 2 = no posting for 7 days, 3 = ask to block
+  const strikeText = (r) => `Strike ${r.strikes || 1} given${r.blockUntil ? ` · no posting until ${new Date(r.blockUntil).toLocaleDateString()}` : ''}`;
+  const strikeMail = (r) => ((r.strikes || 1) >= 2 ? 'strike2' : 'hiStrike');
+  async function askBan(u, n) {
+    if (!confirm(`@${u.username} now has ${n} strikes. Block the account?`)) return false;
+    try { await api('ban', { uid: u.uid, on: true }); toast('Account blocked'); mail(u, 'block'); return true; } catch (e) { fail(e); return false; }
+  }
+  // v0.20: Child safety = delete + block + report on cybercrime.gov.in
+  async function childSafety(target) {
+    if (!confirm(HI_ASK.child)) return false;
+    try {
+      const r = await api('childSafety', target);
+      toast(`${r.deleted ? 'Deleted' : 'Already deleted'}${r.banned ? ' + account blocked' : ''}. Report it on cybercrime.gov.in`, 6000);
+      document.querySelectorAll(`[data-pid="${cssEsc(target.postId || target.id)}"]`).forEach((el) => el.remove());
+      openLink(r.cybercrime || CYBERCRIME);
+      if (r.uid) { try { mail((await api('user', { uid: r.uid })).user, 'block'); } catch { /* gone */ } }
+      return true;
+    } catch (e) { fail(e); return false; }
+  }
+
   $('hiLimits').addEventListener('click', async () => {
     openDrawer(drawerHead('Hyper Intelligence limits') + '<div class="muted">Loading…</div>');
     try {
@@ -636,7 +760,7 @@
   function closeDrawer() { $('drawer').classList.add('hide'); $('shade').classList.add('hide'); $('drawer').querySelectorAll('video').forEach((v) => v.pause()); }
   $('shade').addEventListener('click', closeDrawer);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
-  const drawerHead = (title) => `<div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">${title}</h2><button class="ghost" data-close>✕</button></div>`;
+  const drawerHead = (title) => `<div class="row dhead"><h2 class="grow">${title}</h2><button class="ghost" data-close aria-label="Close">✕</button></div>`;
   $('drawer').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeDrawer(); });
 
   async function openUser(uid) {
@@ -644,6 +768,7 @@
     try {
       const r = await api('user', { uid });
       const u = r.user;
+      const st = r.strikes || { strikes: 0, blockUntil: 0, lastReason: '' };
       openDrawer(`${drawerHead(`@${esc(u.username)}`)}
         <div class="row">${avatar(u)}<div class="grow"><b>${esc(u.name)}</b>${u.verified ? '<span class="tag blue">verified</span>' : ''}${u.banned ? '<span class="tag red">blocked</span>' : ''}<div class="muted small">${r.online ? '🟢 online' : r.lastActive ? `active ${esc(when(r.lastActive))}` : ''}</div></div></div>
         ${u.bio ? `<div style="margin:10px 0;white-space:pre-wrap">${esc(u.bio)}</div>` : ''}
@@ -656,20 +781,38 @@
           <div>Joined</div><div>${esc(full(u.createdAt || r.auth.createdAt))}</div>
           <div>Last login</div><div>${esc(full(r.auth.lastLoginAt))}</div>
           <div>Phones</div><div>${fmt(r.phones)} (for notifications)</div>
+          <div>Strikes</div><div>${st.strikes ? `<span class="tag ${st.strikes >= 2 ? 'red' : 'amber'}">${st.strikes} in 90 days</span>${st.lastReason ? ` ${esc(st.lastReason)}` : ''}` : '0'}${st.blockUntil ? `<br><span class="small">No posting until ${esc(full(st.blockUntil))}</span>` : ''}</div>
           ${r.auth.error ? `<div>Login account</div><div class="small">${esc(r.auth.error)}</div>` : ''}
-        </div>
-        <div class="row" style="margin:12px 0">
-          <button class="blue" id="uVerify">${u.verified ? 'Remove badge' : 'Give verified badge'}</button>
-          <button class="red" id="uBan">${u.banned ? 'Unblock' : 'Block account'}</button>
-          <button id="uNotice">Send notice</button>
-          <button id="uMail">Email</button>
-          <button class="red" id="uDelete">Delete account</button>
         </div>
         <div class="progress hide" id="uDelBar"><div></div></div>
         <div class="small muted" id="uDelStatus"></div>
         ${r.reports.length ? `<h3>Reports about this user (${r.reports.length})</h3>${r.reports.map((x) => `<div class="small" style="margin:4px 0">• ${esc(x.reason)} — ${esc(x.message || '')} <span class="muted">${esc(when(x.createdAt))}</span></div>`).join('')}` : ''}
         <h3>Posts &amp; clips</h3>
-        <div class="grid">${r.posts.map(tile).join('') || '<div class="muted">No posts</div>'}</div>`);
+        <div class="grid">${r.posts.map(tile).join('') || '<div class="muted">No posts</div>'}</div>
+        <div class="actions">
+          <button class="blue" id="uVerify">${u.verified ? 'Remove badge' : '✔ Verify'}</button>
+          <button class="red" id="uBan">${u.banned ? 'Unblock' : '⛔ Block account'}</button>
+          <button class="amber" id="uStrike">⚠ Give strike</button>
+          <button id="uNotice">📣 Notice</button>
+          <button id="uMail"${st.strikes || st.blockUntil ? '' : ' class="wide"'}>✉ Email</button>
+          ${st.strikes || st.blockUntil ? '<button id="uClear">Clear strikes</button>' : ''}
+          <button class="red wide" id="uDelete">🗑 Delete account</button>
+        </div>`);
+      $('uStrike').onclick = async () => {
+        const reason = prompt(`Strike for @${u.username}. Reason (shown to them):`, 'Broke the community rules');
+        if (reason === null) return;
+        try {
+          const s2 = await api('strike', { uid, reason: reason.trim().slice(0, 80) });
+          toast(strikeText(s2), 5000);
+          mail(u, strikeMail(s2));
+          if (s2.askBan && !u.banned) await askBan(u, s2.strikes);
+          openUser(uid);
+        } catch (e) { fail(e); }
+      };
+      if ($('uClear')) $('uClear').onclick = async () => {
+        if (!confirm(`Remove all strikes of @${u.username} (and the posting block)?`)) return;
+        try { await api('clearStrikes', { uid }); toast('Strikes cleared'); openUser(uid); } catch (e) { fail(e); }
+      };
       $('uVerify').onclick = async () => {
         try {
           await api('verify', { uid, on: !u.verified });
@@ -703,7 +846,8 @@
     plain: ['InstantGram', ''],
     // v0.18: Hyper Intelligence decisions
     hiDelete: ['We removed something you shared on InstantGram', 'Hyper Intelligence and our team removed one of your posts / clips / moments / comments because it broke the InstantGram community rules.'],
-    hiStrike: ['Warning: you got a strike on InstantGram', 'We removed something you shared because it broke the InstantGram community rules, and your account got a strike. After 3 strikes the account is blocked.'],
+    hiStrike: ['Warning: you got a strike on InstantGram', 'Something you shared broke the InstantGram community rules, and your account got a strike. With 2 strikes you can not post for 7 days. With 3 strikes the account can be blocked.'],
+    strike2: ['You can not post on InstantGram for 7 days', 'Your account got a second strike for breaking the InstantGram community rules. You can not share new posts, clips or moments for 7 days. One more strike and the account can be blocked.'],
   };
   const openMail = (url) => (typeof window.igOpenMail === 'function' ? window.igOpenMail(url) : (window.location.href = url));
   function mail(u, kind) {
@@ -754,14 +898,19 @@
         <div class="media">${media}</div>
         ${p.caption ? `<div style="white-space:pre-wrap;margin-bottom:8px">${esc(p.caption)}</div>` : ''}
         ${p.kind === 'moment' ? `<div class="muted small">Ends ${esc(full(p.expiresAt))}</div>` : `<div class="muted small">♥ ${fmt(p.likes)} · 💬 ${fmt(p.comments)} · 👁 ${fmt(p.views)}</div>`}
-        <div class="row" style="margin:12px 0"><button class="red" id="pDel">Delete ${p.kind === 'moment' ? 'moment' : p.type === 'clip' ? 'clip' : 'post'}</button></div>
         ${p.kind === 'moment' ? '' : `<h3>Comments (${r.comments.length})</h3>${r.comments.map((c) => `
           <div class="comment" id="c-${esc(c.id)}">
             <div class="grow"><b data-uid="${esc(c.authorId)}" style="cursor:pointer">@${esc(c.authorUsername)}</b> <span class="muted small">${esc(when(c.createdAt))}</span>
               <div style="white-space:pre-wrap">${esc(c.text)}</div>
               ${safeUrl(c.imageUrl) ? `<img src="${esc(safeUrl(c.imageUrl))}" alt="" style="max-height:120px;border-radius:8px;margin-top:4px">` : ''}</div>
             <button class="red small" data-del-comment="${esc(c.id)}">Delete</button>
-          </div>`).join('') || '<div class="muted">No comments</div>'}`}`);
+          </div>`).join('') || '<div class="muted">No comments</div>'}`}
+        <div class="actions">
+          <button class="red" id="pDel">🗑 Delete ${p.kind === 'moment' ? 'moment' : p.type === 'clip' ? 'clip' : 'post'}</button>
+          <button class="child" id="pChild">🚨 Child safety</button>
+          <button class="wide" data-open-user="${esc(p.authorId)}">👤 Open @${esc(p.authorUsername)}</button>
+        </div>`);
+      $('pChild').onclick = async () => { if (await childSafety({ kind: p.kind === 'moment' ? 'moment' : 'post', id, uid: p.authorId })) closeDrawer(); };
       $('pDel').onclick = async () => {
         if (!confirm('Delete it for everyone? This can not be undone.')) return;
         try { await api('deletePost', { id, kind: p.kind }); toast('Deleted'); closeDrawer(); document.querySelectorAll(`[data-pid="${cssEsc(id)}"]`).forEach((el) => el.remove()); } catch (e) { fail(e); }

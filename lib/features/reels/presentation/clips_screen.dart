@@ -462,6 +462,7 @@ class _ClipPlayerState extends State<ClipPlayer>
   // watch time of the current video (for the author's Analytics)
   int _maxWatch = 0;
   bool _completed = false;
+  int _lastTickPos = 0;
 
   // hold gestures
   bool _fast = false; // 2x speed
@@ -763,6 +764,7 @@ class _ClipPlayerState extends State<ClipPlayer>
     }
     _maxWatch = 0;
     _completed = false;
+    _lastTickPos = 0;
   }
 
   void _goToItem(int i) {
@@ -851,6 +853,19 @@ class _ClipPlayerState extends State<ClipPlayer>
     final pos = v.position.inMilliseconds;
     final watched = pos - _startMs;
     if (watched > _maxWatch) _maxWatch = watched;
+    // v0.20: watched to the end - also when the video loops by itself
+    // (before, looping clips never counted as "watched to the end").
+    // The position comes only about every 0.5 s.
+    if (!_completed &&
+        VideoTime.reachedEnd(
+          pos: pos,
+          lastPos: _lastTickPos,
+          startMs: _startMs,
+          endMs: _endOrTotal,
+        )) {
+      _completed = true;
+    }
+    _lastTickPos = pos;
     if (_mustStayPaused) {
       // v0.9: whatever started it (system, buffering, loop) -> stop again.
       // Holding (2x) may play it for a moment.

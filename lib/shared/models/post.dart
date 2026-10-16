@@ -308,6 +308,21 @@ class VideoTime {
     return out;
   }
 
+  /// v0.20: did the video reach its end? [lastPos] = the position at the
+  /// previous tick (positions come about every 0.5 s, and a looping video
+  /// jumps back to the start without showing its very last moment).
+  static bool reachedEnd({
+    required int pos,
+    required int lastPos,
+    required int startMs,
+    required int endMs,
+  }) {
+    if (endMs <= startMs) return false;
+    if (pos >= endMs - 700) return true;
+    // jumped back to the start from near the end = it looped
+    return lastPos >= endMs - 1500 && pos < lastPos - 1000;
+  }
+
   /// Inside a removed part: where to jump to (else null).
   static int? skipTo(int pos, List<VideoCut> cuts) {
     for (final c in cuts) {
@@ -868,6 +883,81 @@ List<Comment> threadComments(List<Comment> all) {
     out.addAll(replies[c.id] ?? const []);
   }
   return out;
+}
+
+/// v0.20 (Hyper Intelligence): order of comment threads.
+/// Your own comments first (newest first), then the pinned one, then the
+/// best: likes + 2 points per reply (newer first when equal).
+/// The order stays while the sheet is open (no jumping when someone
+/// likes a comment); new comments are placed without moving the others.
+class CommentOrder {
+  List<String>? _ids;
+
+  static double score(Comment c, int replies) =>
+      c.likesCount + 2.0 * max(replies, c.repliesCount);
+
+  /// Start again (sheet opened again).
+  void reset() => _ids = null;
+
+  List<(Comment, List<Comment>)> apply(
+    List<(Comment, List<Comment>)> groups, {
+    required String me,
+    String pinned = '',
+  }) {
+    double sc((Comment, List<Comment>) g) => score(g.$1, g.$2.length);
+    int best((Comment, List<Comment>) a, (Comment, List<Comment>) b) {
+      final c = sc(b).compareTo(sc(a));
+      return c != 0 ? c : b.$1.createdAt.compareTo(a.$1.createdAt);
+    }
+
+    bool mine((Comment, List<Comment>) g) =>
+        me.isNotEmpty && g.$1.authorId == me;
+    final known = _ids;
+    final out = <(Comment, List<Comment>)>[];
+    if (known == null) {
+      final my = groups.where(mine).toList()
+        ..sort((a, b) => b.$1.createdAt.compareTo(a.$1.createdAt));
+      final rest = groups.where((g) => !mine(g)).toList()..sort(best);
+      out
+        ..addAll(my)
+        ..addAll(rest);
+    } else {
+      final byId = {for (final g in groups) g.$1.id: g};
+      for (final id in known) {
+        final g = byId.remove(id);
+        if (g != null) out.add(g);
+      }
+      final news = byId.values.toList()
+        ..sort((a, b) => a.$1.createdAt.compareTo(b.$1.createdAt));
+      for (final g in news) {
+        if (mine(g)) {
+          out.insert(0, g);
+          continue;
+        }
+        var at = out.length;
+        for (var i = 0; i < out.length; i++) {
+          if (mine(out[i])) continue;
+          if (sc(out[i]) < sc(g)) {
+            at = i;
+            break;
+          }
+        }
+        out.insert(at, g);
+      }
+    }
+    // the pinned one: right after yours
+    final p = out.indexWhere((g) => g.$1.id == pinned && !mine(g));
+    if (p >= 0) {
+      final g = out.removeAt(p);
+      var at = 0;
+      while (at < out.length && mine(out[at])) {
+        at++;
+      }
+      out.insert(at, g);
+    }
+    _ids = [for (final g in out) g.$1.id];
+    return out;
+  }
 }
 
 class Story {

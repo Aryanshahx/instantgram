@@ -132,42 +132,9 @@ Future<void> showPostMenu(
                   'Delete',
                   style: TextStyle(color: AppColors.like),
                 ),
-                onTap: () async {
+                onTap: () {
                   Navigator.pop(ctx);
-                  final ok = await showDialog<bool>(
-                    context: context,
-                    builder: (d) => AlertDialog(
-                      title: Text(
-                        'Delete this ${post.isClip ? 'clip' : 'post'}?',
-                      ),
-                      content: const Text('This cannot be undone.'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(d, false),
-                          child: const Text('Cancel'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(d, true),
-                          child: const Text(
-                            'Delete',
-                            style: TextStyle(color: AppColors.like),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                  if (ok != true) return;
-                  try {
-                    await PostRepository.instance.delete(post);
-                    onDeleted?.call();
-                    messenger.showSnackBar(
-                      const SnackBar(content: Text('Deleted')),
-                    );
-                  } catch (e) {
-                    messenger.showSnackBar(
-                      SnackBar(content: Text(friendlyError(e))),
-                    );
-                  }
+                  confirmDeletePost(context, post, onDeleted: onDeleted);
                 },
               ),
             const SizedBox(height: 8),
@@ -323,5 +290,43 @@ class _PostOptionsSheetState extends State<_PostOptionsSheet> {
         ),
       ),
     );
+  }
+}
+
+/// "Delete this post?" -> deletes it (⋯ menu and hold on your own post).
+Future<bool> confirmDeletePost(
+  BuildContext context,
+  Post post, {
+  VoidCallback? onDeleted,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (d) => AlertDialog(
+      title: Text('Delete this ${post.isClip ? 'clip' : 'post'}?'),
+      content: const Text('This cannot be undone.'),
+      actions: [
+        TextButton(
+          key: const ValueKey('delete-cancel'),
+          onPressed: () => Navigator.pop(d, false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          key: const ValueKey('delete-confirm'),
+          onPressed: () => Navigator.pop(d, true),
+          child: const Text('Delete', style: TextStyle(color: AppColors.like)),
+        ),
+      ],
+    ),
+  );
+  if (ok != true) return false;
+  try {
+    await (PostRepository.debugDelete ?? PostRepository.instance.delete)(post);
+    onDeleted?.call();
+    messenger.showSnackBar(const SnackBar(content: Text('Deleted')));
+    return true;
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    return false;
   }
 }

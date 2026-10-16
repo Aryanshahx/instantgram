@@ -56,6 +56,32 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
   bool get _isTag => _query.startsWith('#');
 
+  /// v0.20: trending clips + clips with your top hashtags (mixed into the
+  /// grid by Hyper Intelligence).
+  List<Post> _extraClips = const [];
+
+  Future<void> _loadExtra({bool force = false}) async {
+    final repo = PostRepository.instance;
+    try {
+      final r = await Future.wait([
+        repo.loadTrending(force: force),
+        repo.interestCandidates(HyperFeed.instance.topTags(3)),
+      ]);
+      final list = [
+        for (final l in r)
+          for (final p in l)
+            if (p.isClip) p,
+      ];
+      if (mounted) setState(() => _extraClips = list);
+    } catch (_) {}
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExtra();
+  }
+
   Stream<List<Post>> _newStream() => PostRepository.instance
       .recent(type: Post.clip, limit: 100)
       .asBroadcastStream();
@@ -69,6 +95,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
     if (!mounted) return;
     HyperFeed.instance.reset('explore');
     setState(() => _recentClips = _newStream());
+    unawaited(_loadExtra(force: true));
     if (_word.isNotEmpty) _onChanged(_searchCtrl.text);
     if (!ok) refreshFailed(context);
   }
@@ -205,11 +232,10 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 // new creators (steady order until you pull to refresh)
                 : [
                     _grid(
-                      HyperFeed.instance.ordered(
-                        'explore',
-                        posts,
-                        mode: FeedMode.explore,
-                      ),
+                      HyperFeed.instance.ordered('explore', [
+                        ...posts,
+                        ..._extraClips,
+                      ], mode: FeedMode.explore),
                     ),
                   ];
           } else {

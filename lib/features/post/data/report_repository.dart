@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/config/app_info.dart';
+import '../../../core/services/api_client.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/models/user_profile.dart';
 
@@ -57,8 +58,17 @@ const List<ReportReason> kReportReasons = [
     Icons.copyright,
     'This {item} uses my content without permission.',
   ),
+  // v0.20: hidden at once (on 1 report) until the team checks it
+  ReportReason(
+    kChildSafetyReason,
+    Icons.child_care,
+    'This {item} may harm or show a child in an unsafe way.',
+  ),
   ReportReason('Something else', Icons.more_horiz, ''),
 ];
+
+/// v0.20: this reason hides the item at once.
+const String kChildSafetyReason = 'Child safety';
 
 class AlreadyReportedException implements Exception {
   const AlreadyReportedException();
@@ -106,13 +116,21 @@ class ReportRepository {
   }
 
   /// Saves a report for the admin (never throws; the email still works).
+  /// v0.20: then Hyper Intelligence counts it (3 points = blurred,
+  /// 6 = hidden, child safety = hidden at once).
   Future<void> save(Map<String, dynamic> data) async {
     if ((data['reporterUid'] as String? ?? '').isEmpty) return;
     try {
-      await FirebaseFirestore.instance
+      final ref = await FirebaseFirestore.instance
           .collection('reports')
           .add({...data, 'createdAt': FieldValue.serverTimestamp()})
           .timeout(const Duration(seconds: 10));
+      if (data['kind'] != 'user') {
+        await ApiClient.instance.post('/api/hi', {
+          'action': 'report',
+          'reportId': ref.id,
+        });
+      }
     } catch (e) {
       debugPrint('report save: $e');
     }

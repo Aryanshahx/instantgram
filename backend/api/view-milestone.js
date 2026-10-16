@@ -9,6 +9,7 @@ import { requireUser } from '../lib/firebase-auth.js';
 import { HttpError, postHandler } from '../lib/http.js';
 import { addDoc, getDocMeta, notSetUp, patchDoc, serviceAccount } from '../lib/google.js';
 import { pushTo } from './activity-push.js';
+import { refreshTrendingIfOld } from '../lib/safety.js';
 
 export const MILESTONES = [100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000];
 
@@ -57,6 +58,8 @@ export async function handle(uid, body, { sa = serviceAccount(), fetchFn = fetch
     read: false,
     createdAt: now(),
   };
+  // v0.20: a post is getting popular -> trending list again (max every 30 min)
+  await refreshTrendingIfOld(sa, { fetchFn }).catch((e) => console.warn('trending', e?.message || e));
   await addDoc(sa, `users/${author}/notifications`, n, fetchFn);
   await pushTo(sa, author, { ...n, postType: String(p.type || '') }, fetchFn);
   return { milestone: m };

@@ -150,6 +150,7 @@ class _MediaVideoState extends State<MediaVideo> {
   int _startMs = 0;
   int _endMs = 0;
   int _maxPos = 0;
+  int _lastTickPos = 0;
   bool _completed = false;
 
   // adaptive quality (small copy while the network is slow)
@@ -324,6 +325,17 @@ class _MediaVideoState extends State<MediaVideo> {
     final end = _endMs > 0 ? _endMs : c.value.duration.inMilliseconds;
     final watched = pos - _startMs;
     if (watched > _maxPos) _maxPos = watched;
+    // v0.20: also when it loops by itself (position comes every ~0.5 s)
+    if (!_completed &&
+        VideoTime.reachedEnd(
+          pos: pos,
+          lastPos: _lastTickPos,
+          startMs: _startMs,
+          endMs: end,
+        )) {
+      _completed = true;
+    }
+    _lastTickPos = pos;
     if (_skipper.check(c, _edits, startMs: _startMs, endMs: _endMs)) return;
     if (end > 0 && pos >= end - 150) {
       _completed = true;
@@ -352,6 +364,7 @@ class _MediaVideoState extends State<MediaVideo> {
       widget.onWatched?.call(_maxPos, _completed);
       _maxPos = 0;
       _completed = false;
+      _lastTickPos = 0;
     }
   }
 

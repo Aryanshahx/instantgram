@@ -21,6 +21,8 @@ class PostInsights {
     required this.watchSamples,
     required this.avgWatchMs,
     required this.completionRate,
+    required this.watchDocs,
+    required this.engagementRate,
     required this.timeline,
     required this.hourly,
     required this.likes,
@@ -63,6 +65,9 @@ class PostInsights {
   /// 0..1 part of viewers who watched to the end.
   final double completionRate;
 
+  /// v0.20: views that have watch data (completion is made from these).
+  final int watchDocs;
+
   /// Views per day (or per hour when the post is younger than 2 days).
   final List<(DateTime, int)> timeline;
   final bool hourly;
@@ -77,8 +82,8 @@ class PostInsights {
   bool get isAccount => post == null;
   int get interactions => likes + comments + shares + reposts + saves;
 
-  /// Interactions per account reached (0..∞, shown as %).
-  double get engagementRate => reach == 0 ? 0 : interactions / reach;
+  /// v0.20: interactions per account reached, 0..1 (was over 100%).
+  final double engagementRate;
 
   /// Average interactions per post.
   double get interactionsPerPost =>
@@ -121,7 +126,7 @@ class PostInsights {
   }) {
     final n = now ?? DateTime.now();
     var views = 0, followers = 0, watchN = 0, watchSum = 0, done = 0;
-    var videoDocs = 0, detailed = 0, maxReach = 0;
+    var videoDocs = 0, detailed = 0, maxReach = 0, reachSum = 0;
     final viewers = <String>{};
     final countries = <String, int>{};
     final ages = <String, int>{};
@@ -143,7 +148,6 @@ class PostInsights {
       if (p.hasVideo) hasVideo = true;
       // watch time: one post = all its docs; account = video posts only
       final countWatch = post != null || p.hasVideo;
-      if (countWatch) videoDocs += docs.length;
       var pViews = 0;
       for (final d in docs) {
         final c = d['count'];
@@ -174,7 +178,11 @@ class PostInsights {
             watchN++;
             watchSum += w.toInt();
           }
-          if (d['completed'] == true) done++;
+          // v0.20: only views with watch data count (old docs had none)
+          if (w is num || d['completed'] is bool) {
+            videoDocs++;
+            if (d['completed'] == true) done++;
+          }
         }
         final at = _date(d['createdAt']);
         if (at != null) dates.add(at);
@@ -182,6 +190,7 @@ class PostInsights {
       detailed += docs.length;
       final pReach = docs.length > p.viewsCount ? docs.length : p.viewsCount;
       if (pReach > maxReach) maxReach = pReach;
+      reachSum += pReach;
       views += pViews < pReach ? pReach : pViews;
     }
 
@@ -193,6 +202,16 @@ class PostInsights {
     } else {
       reach = viewers.length > maxReach ? viewers.length : maxReach;
     }
+
+    // v0.20: engagement = interactions / accounts reached of each post
+    // (account: added up, so older posts count too). Everyone who liked
+    // saw it. Never over 100%.
+    var base = post != null ? reach : (reachSum > reach ? reachSum : reach);
+    if (likes > base) base = likes;
+    final interactions = likes + comments + shares + reposts + saves;
+    final engagement = base == 0
+        ? 0.0
+        : (interactions / base).clamp(0.0, 1.0).toDouble();
 
     // timeline: hours for young posts, else days (max 30 buckets)
     final start = posts.isEmpty
@@ -234,7 +253,11 @@ class PostInsights {
       languages: _sorted(langs),
       watchSamples: watchN,
       avgWatchMs: watchN == 0 ? 0 : watchSum / watchN,
-      completionRate: videoDocs == 0 ? 0 : done / videoDocs,
+      completionRate: videoDocs == 0
+          ? 0
+          : (done / videoDocs).clamp(0.0, 1.0).toDouble(),
+      watchDocs: videoDocs,
+      engagementRate: engagement,
       timeline: timeline,
       hourly: hourly,
       likes: likes,

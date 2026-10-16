@@ -8,11 +8,15 @@
 // GET /api/hi?job=sweep  (Vercel cron, once a day): checks what is left.
 // v0.19: POST /api/hi { action: 'translate', text, to } -> { text, from, to }
 //   "See translation" for captions, comments and bios (any signed-in user).
+// v0.20: POST /api/hi { action: 'report', reportId } -> counts a report
+//   (3 points = blurred, 6 = hidden, child safety = hidden at once).
+//   The daily job also updates the trending list (config/trending).
 import { requireUser } from '../lib/firebase-auth.js';
 import { HttpError, env, postHandler, send } from '../lib/http.js';
 import { getDoc, notSetUp, serviceAccount } from '../lib/google.js';
 import { KINDS, checkItem, decided, pathOf, sweep } from '../lib/hi.js';
 import { allowTranslate, translate } from '../lib/translate.js';
+import { handleReport, updateTrending } from '../lib/safety.js';
 
 const ID = /^[A-Za-z0-9_-]{6,64}$/;
 
@@ -20,6 +24,10 @@ export async function handle(uid, body, { sa = serviceAccount(), fetchFn = fetch
   if (body.action === 'translate') {
     if (!allowTranslate(uid, now)) throw new HttpError(429, 'Too many translations, try again in a few minutes');
     return translate(body, { fetchFn });
+  }
+  if (body.action === 'report') {
+    if (!sa) throw notSetUp('Reports');
+    return handleReport(sa, uid, body.reportId, { fetchFn, now });
   }
   if (body.action !== 'check') throw new HttpError(400, 'Bad action');
   const kind = KINDS.includes(body.kind) ? body.kind : '';
@@ -56,7 +64,9 @@ export default async function handler(req, res) {
     const sa = serviceAccount();
     if (!sa) return send(res, 500, { error: 'FIREBASE_SERVICE_ACCOUNT missing' });
     try {
-      return send(res, 200, await sweep(sa, { limit: 20 }));
+      const checked = await sweep(sa, { limit: 20 });
+      const trending = await updateTrending(sa).catch((e) => ({ error: String(e?.message || e) }));
+      return send(res, 200, { ...checked, trending });
     } catch (e) {
       console.error(e);
       return send(res, 500, { error: 'Sweep failed' });

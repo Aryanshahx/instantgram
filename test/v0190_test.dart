@@ -86,7 +86,9 @@ void main() {
     Translator.debugDirect = null;
   });
 
-  test('version is 0.19.0', () => expect(AppInfo.version, '0.19.0'));
+  test('version is 0.19 or newer', () {
+    expect(AppInfo.version, matches(RegExp(r'^0\.(19|[2-9]\d)\.\d+$')));
+  });
 
   // ------------------------------------------------------------ bad words
   group('BadWords (strong only)', () {
@@ -554,9 +556,10 @@ void main() {
       ];
       final r = _ids(feed.rank(posts));
       expect(r.indexOf('fresh'), lessThan(10));
-      expect(r.indexOf('mine'), lessThan(10));
+      // v0.20: your own posts are never in your feed
+      expect(r, isNot(contains('mine')));
       expect(r.indexOf('old'), greaterThanOrEqualTo(10));
-      expect(r.length, posts.length);
+      expect(r.length, posts.length - 1);
     });
 
     test('1 in every 5 is from someone new', () {

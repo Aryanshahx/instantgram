@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../core/services/content_filter.dart';
 import '../../../core/services/media_service.dart';
+import '../../../core/services/spam_guard.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/models/user_profile.dart';
 import '../../../shared/widgets/bio_font.dart';
@@ -299,6 +300,8 @@ class UserRepository {
 
   /// Follow (public) or send a follow request (private account).
   Future<void> follow(UserProfile target) async {
+    // v0.20 Hyper Intelligence: max follows an hour / a day
+    SpamGuard.stopIf(SpamGuard.instance.checkFollow());
     final fresh = await getUser(target.uid) ?? target;
     if (fresh.isPrivate) return requestFollow(fresh);
     final me = await this.me();
@@ -322,6 +325,7 @@ class UserRepository {
       type: AppNotification.follow,
     );
     await batch.commit();
+    SpamGuard.instance.recordFollow();
     pending.send();
   }
 
@@ -392,6 +396,7 @@ class UserRepository {
       _request(targetUid, myUid).snapshots().map((s) => s.exists);
 
   Future<void> requestFollow(UserProfile target) async {
+    SpamGuard.stopIf(SpamGuard.instance.checkFollow());
     final me = await meCached();
     await _request(target.uid, me.uid).set({
       'username': me.username,
@@ -399,6 +404,7 @@ class UserRepository {
       'photoUrl': me.photoUrl,
       'createdAt': FieldValue.serverTimestamp(),
     });
+    SpamGuard.instance.recordFollow();
   }
 
   Future<void> cancelRequest(String targetUid) =>

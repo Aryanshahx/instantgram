@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../core/services/spam_guard.dart';
 import '../../../core/services/gif_search.dart';
 import '../../../core/services/hyper_intelligence.dart';
 import '../../../core/services/media_service.dart';
@@ -310,6 +311,9 @@ class _CommentsSheetState extends State<CommentsSheet> {
 
   /// v0.11: pinned comment id ('' = none).
   late String _pinned = widget.post.pinnedComment;
+
+  /// v0.20: steady order of the threads while the sheet is open.
+  final CommentOrder _order = CommentOrder();
   bool _sending = false;
   Comment? _replyTo;
   _Draft? _draft;
@@ -470,6 +474,9 @@ class _CommentsSheetState extends State<CommentsSheet> {
     if ((text.isEmpty && draft == null && linked == null) || _sending) return;
     // v0.18 Hyper Intelligence: no strong abuse
     if (!await hiTextOk(context, [text]) || !mounted) return;
+    // v0.20 Hyper Intelligence: spam limits
+    final stop = SpamGuard.instance.checkComment(text);
+    if (stop != null) return _snack(stop);
     setState(() => _sending = true);
     try {
       CommentPicture? pic;
@@ -503,6 +510,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
         picture: pic,
         linked: linked,
       );
+      SpamGuard.instance.recordComment(text);
       _ctrl.clear();
       if (mounted) {
         setState(() {
@@ -688,10 +696,13 @@ class _CommentsSheetState extends State<CommentsSheet> {
       }
       groups.add((c, replies));
     }
-    // v0.11: the pinned comment comes first
-    final p = groups.indexWhere((g) => g.$1.id == _pinned);
-    if (p > 0) groups.insert(0, groups.removeAt(p));
-    for (final (c, replies) in groups) {
+    // v0.20: yours first, then the pinned one, then most likes + replies
+    final ordered = _order.apply(
+      groups,
+      me: widget.myUid ?? UserRepository.instance.myUid,
+      pinned: _pinned,
+    );
+    for (final (c, replies) in ordered) {
       out.add(c);
       final open = _expanded.contains(c.id);
       final shown = open ? replies.length : _repliesShown;

@@ -42,6 +42,15 @@ import {
   sweep,
   targetFields,
 } from '../lib/hi.js';
+import {
+  CYBERCRIME_URL,
+  REPORT_LABEL,
+  addStrike,
+  clearStrikes,
+  closeReports,
+  strikeInfo,
+  updateTrending,
+} from '../lib/safety.js';
 
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const PAGE = 30;
@@ -319,11 +328,11 @@ export const actions = {
     return { users: rows.map(card), cursor: nextCursor(rows, PAGE) };
   },
 
-  async user({ sa, fetchFn, body }) {
+  async user({ sa, fetchFn, body, now }) {
     const uid = id(body.uid, 'user');
     const d = await getDoc(sa, `users/${uid}`, fetchFn);
     if (!d) throw new HttpError(404, 'User not found');
-    const [auth, posts, reports, presence, push, verified] = await Promise.all([
+    const [auth, posts, reports, presence, push, verified, strikes] = await Promise.all([
       authLookup(sa, uid, fetchFn).catch((e) => ({ error: e.message })),
       runQuery(
         sa,
@@ -335,8 +344,11 @@ export const actions = {
       getDoc(sa, `presence/${uid}`, fetchFn).catch(() => null),
       getDoc(sa, `pushTokens/${uid}`, fetchFn).catch(() => null),
       verifiedSet(sa, fetchFn),
+      getDoc(sa, `strikes/${uid}`, fetchFn).catch(() => null),
     ]);
     return {
+      // v0.20: strikes in the last 90 days + posting block
+      strikes: strikeInfo(strikes, now),
       user: {
         ...userCard(uid, d),
         bio: str(d.bio, 400),
@@ -558,7 +570,8 @@ export const actions = {
 // ------------------------------------------- v0.18: Hyper Intelligence
 
 const HI_STATES = ['review', 'hidden', 'unchecked'];
-export const HI_DECISIONS = ['approve', 'blur', 'delete', 'strike', 'ban'];
+export const HI_DECISIONS = ['approve', 'blur', 'delete', 'strike', 'ban', 'child'];
+const ALL_LABELS = { ...GROUP_LABEL, ...REPORT_LABEL };
 
 function hiCard(r) {
   const d = r.data;
@@ -579,6 +592,10 @@ function hiCard(r) {
     error: str(d.error, 300),
     source: str(d.source, 10),
     at: d.at || null,
+    // v0.20: reports from people
+    reports: Number(d.reports) || 0,
+    reportScore: Number(d.reportScore) || 0,
+    reportReasons: d.reportReasons && typeof d.reportReasons === 'object' ? d.reportReasons : {},
   };
 }
 
@@ -596,7 +613,7 @@ Object.assign(actions, {
   async hiList({ sa, fetchFn, body }) {
     const state = HI_STATES.includes(body.state) ? body.state : '';
     const kind = ['post', 'clip', 'moment', 'comment'].includes(body.kind) ? body.kind : '';
-    const reason = Object.hasOwn(GROUP_LABEL, body.reason) ? body.reason : '';
+    const reason = Object.hasOwn(ALL_LABELS, body.reason) ? body.reason : '';
     const rows = await runQuery(sa, { from: [{ collectionId: 'moderation' }], where: F.eq('open', F.b(true)), limit: 200 }, '', fetchFn);
     const all = rows.map(hiCard).sort((a, b) => (b.urgent - a.urgent) || String(b.at || '').localeCompare(String(a.at || '')));
     const hits = all.filter((x) => (!state || x.state === state) && (!kind || x.kind === kind) && (!reason || x.reasons.includes(reason)));
@@ -605,7 +622,7 @@ Object.assign(actions, {
       items: hits.slice(0, 100),
       total: hits.length,
       counts: { all: all.length, review: count('review'), hidden: count('hidden'), unchecked: count('unchecked'), urgent: all.filter((x) => x.urgent).length },
-      labels: GROUP_LABEL,
+      labels: ALL_LABELS,
       openai: !!process.env.OPENAI_API_KEY,
     };
   },
@@ -630,6 +647,7 @@ Object.assign(actions, {
         out.gone = true; // deleted in the meantime
       }
       await commitWrites(sa, [{ update: `moderation/${mid}`, fields: done }], fetchFn);
+      out.thanked = (await closeReports(sa, mid, { fetchFn, now })).told;
       return out;
     }
     const ctx = { sa, fetchFn, admin, now, deleteFiles, saveImage };
@@ -638,12 +656,16 @@ Object.assign(actions, {
       : (await actions.deletePost({ ...ctx, body: { id: targetId, kind: kind === 'moment' ? 'moment' : 'post' } })).deleted;
     const uid = m.authorId;
     if (decision === 'strike' && typeof uid === 'string' && ID.test(uid)) {
-      const prev = await getDoc(sa, `strikes/${uid}`, fetchFn).catch(() => null);
-      const count = (Number(prev?.count) || 0) + 1;
-      await commitWrites(sa, [{ update: `strikes/${uid}`, fields: { count, lastAt: new Date(now), lastReason: (m.reasons || [])[0] || '' } }], fetchFn);
-      out.strikes = count;
+      // v0.20: 1 = warning, 2 = no posting for 7 days, 3 = the page asks to ban
+      const reason = ALL_LABELS[(m.reasons || [])[0]] || '';
+      const r = await addStrike(sa, uid, { reason, fetchFn, now });
+      out.strikes = r.strikes;
+      out.blockUntil = r.blockUntil;
+      out.askBan = r.askBan;
     }
-    if (decision === 'ban' && typeof uid === 'string' && ID.test(uid)) {
+    // v0.20: child safety = delete + ban + report to cybercrime.gov.in
+    if (decision === 'child') out.cybercrime = CYBERCRIME_URL;
+    if ((decision === 'ban' || decision === 'child') && typeof uid === 'string' && ID.test(uid)) {
       try {
         await actions.ban({ ...ctx, body: { uid, on: true } });
         out.banned = true;
@@ -653,7 +675,55 @@ Object.assign(actions, {
       }
     }
     await commitWrites(sa, [{ update: `moderation/${mid}`, fields: done }], fetchFn);
+    out.thanked = (await closeReports(sa, mid, { fetchFn, now })).told;
     return out;
+  },
+
+  // v0.20: strikes from the Users page
+  async strike({ sa, fetchFn, body, now }) {
+    const uid = id(body.uid, 'user');
+    if (!(await getDoc(sa, `users/${uid}`, fetchFn))) throw new HttpError(404, 'User not found');
+    return addStrike(sa, uid, { reason: str(body.reason, 80), fetchFn, now });
+  },
+
+  async clearStrikes({ sa, fetchFn, body }) {
+    return clearStrikes(sa, id(body.uid, 'user'), { fetchFn });
+  },
+
+  // v0.20: Child safety from a report / post: delete + ban the owner.
+  // The page then opens cybercrime.gov.in (and the email template).
+  async childSafety({ sa, fetchFn, body, admin, now, deleteFiles, saveImage }) {
+    const ctx = { sa, fetchFn, admin, now, deleteFiles, saveImage };
+    const out = { cybercrime: CYBERCRIME_URL, deleted: false, banned: false };
+    let uid = typeof body.uid === 'string' && ID.test(body.uid) ? body.uid : '';
+    if (body.kind === 'comment') {
+      const pid = id(body.postId, 'post');
+      const cid = id(body.id, 'comment');
+      const c = await getDoc(sa, `posts/${pid}/comments/${cid}`, fetchFn);
+      if (c && !uid) uid = str(c.authorId, 128);
+      out.deleted = (await actions.deleteComment({ ...ctx, body: { postId: pid, id: cid } })).deleted;
+    } else if (body.id) {
+      const pid = id(body.id, 'post');
+      const coll = body.kind === 'moment' ? 'stories' : 'posts';
+      const d = await getDoc(sa, `${coll}/${pid}`, fetchFn);
+      if (d && !uid) uid = str(d.authorId, 128);
+      out.deleted = (await actions.deletePost({ ...ctx, body: { id: pid, kind: body.kind === 'moment' ? 'moment' : 'post' } })).deleted;
+    }
+    if (uid && ID.test(uid) && uid !== admin.uid) {
+      try {
+        await actions.ban({ ...ctx, body: { uid, on: true } });
+        out.banned = true;
+      } catch (e) {
+        out.banError = String(e?.message || e);
+      }
+    }
+    out.uid = uid;
+    return out;
+  },
+
+  // v0.20: trending list now (also daily + on view milestones)
+  async trending({ sa, fetchFn, now }) {
+    return updateTrending(sa, { fetchFn, now });
   },
 
   // check one item again now

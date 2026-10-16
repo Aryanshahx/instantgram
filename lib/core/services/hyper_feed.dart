@@ -473,17 +473,20 @@ class HyperFeed with WidgetsBindingObserver {
       closeness(p.authorId) < 0.1;
 
   bool _mustFirst(Post p, int now) =>
-      (p.authorId == _me || ContentFilter.instance.isFollowing(p.authorId)) &&
+      ContentFilter.instance.isFollowing(p.authorId) &&
       now - p.createdAt.millisecondsSinceEpoch < _day;
 
-  /// Scores + mixing rules. Hidden posts are left out.
+  /// v0.20: your own posts and clips are never in your feeds.
+  bool _mine(Post p) => _me.isNotEmpty && p.authorId == _me;
+
+  /// Scores + mixing rules. Hidden posts and your own are left out.
   List<Post> rank(List<Post> posts, {FeedMode mode = FeedMode.discover}) {
     final now = _now;
     final scores = <String, double>{};
     final pool = <Post>[];
     final ids = <String>{};
     for (final p in posts) {
-      if (!ids.add(p.id)) continue;
+      if (_mine(p) || !ids.add(p.id)) continue;
       final s = score(p);
       if (s <= 0 &&
           (_hidden.containsKey(p.id) || HyperIntelligence.instance.hides(p))) {
@@ -497,7 +500,7 @@ class HyperFeed with WidgetsBindingObserver {
       return c != 0 ? c : b.createdAt.compareTo(a.createdAt);
     });
     final discover = mode == FeedMode.discover;
-    // new posts from people you follow (+ yours): always in the first 10
+    // new posts from people you follow: always in the first 10
     final must = discover
         ? pool
               .where((p) => _mustFirst(p, now))
@@ -583,7 +586,9 @@ class HyperFeed with WidgetsBindingObserver {
     FeedMode mode = FeedMode.discover,
     int protect = 4,
   }) {
-    final visible = fresh.where((p) => !_hidden.containsKey(p.id)).toList();
+    final visible = fresh
+        .where((p) => !_hidden.containsKey(p.id) && !_mine(p))
+        .toList();
     final old = _orders[key];
     if (old == null || old.isEmpty) {
       final r = rank(visible, mode: mode);

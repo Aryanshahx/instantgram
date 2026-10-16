@@ -104,6 +104,7 @@ class AppSettings {
       textScale.value = (p.getDouble(_kTextScale) ?? 1.0).clamp(0.8, 1.4);
       reduceMotion.value = p.getBool(_kReduceMotion) ?? false;
       language.value = p.getString(_kLanguage) ?? 'en';
+      languageSaved = p.containsKey(_kLanguage);
       seenMoments.value = (p.getStringList(_kSeen) ?? const []).toSet();
       dailyLimitMinutes.value = p.getInt(_kLimit) ?? 0;
       _limitShownDay = p.getString(_kLimitShown) ?? '';
@@ -159,8 +160,13 @@ class AppSettings {
     await (await _prefs())?.setBool(_kReduceMotion, on);
   }
 
+  /// v0.20: false = never chosen on this phone (logged in on a new phone):
+  /// the language from your profile is used then.
+  bool languageSaved = false;
+
   Future<void> setLanguage(String code) async {
     language.value = code;
+    languageSaved = true;
     await (await _prefs())?.setString(_kLanguage, code);
   }
 

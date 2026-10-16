@@ -13,6 +13,14 @@ service cloud.firestore {
         && d.get('modState', 'pending') == 'pending';
     }
 
+    // v0.20: 2 strikes = no new posts / clips / moments for 7 days
+    function postingAllowed() {
+      let st = /databases/$(database)/documents/strikes/$(request.auth.uid);
+      return !exists(st)
+        || get(st).data.get('blockUntil', null) == null
+        || get(st).data.blockUntil < request.time;
+    }
+
     function signedIn() { return request.auth != null; }
     function me() { return request.auth.uid; }
     function changed() {
@@ -226,7 +234,8 @@ service cloud.firestore {
         && request.resource.data.get('uniqueViews', 0) == 0
         && request.resource.data.get('savesCount', 0) == 0
         && request.resource.data.get('sharesCount', 0) == 0
-        && tagsOk() && optionsOk() && hiStartOk(request.resource.data);
+        && tagsOk() && optionsOk() && hiStartOk(request.resource.data)
+        && postingAllowed();
       allow update: if signedIn() && (
         (resource.data.authorId == me()
           && changed().hasOnly(['caption', 'tags', 'pinned', 'authorPhotoUrl',
@@ -429,6 +438,7 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.authorId == me()
         && request.resource.data.mediaUrl is string
         && hiStartOk(request.resource.data)
+        && postingAllowed()
         && request.resource.data.get('type', 'photo') in ['photo', 'video']
         && request.resource.data.get('audience', 'everyone') in ['everyone', 'followers', 'only_me'];
       allow delete: if signedIn() && resource.data.authorId == me();
