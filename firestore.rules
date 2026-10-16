@@ -653,7 +653,11 @@ service cloud.firestore {
       allow read, delete: if signedIn() && me() == uid;
       allow create, update: if signedIn() && me() == uid
         && request.resource.data.keys().hasOnly(['pinnedChats', 'mutedChats',
-             'mutedCalls', 'cleared', 'updatedAt', 'pushOff', 'vanishChats'])
+             'mutedCalls', 'cleared', 'updatedAt', 'pushOff', 'vanishChats',
+             'chatThemes'])
+        // v0.0.1: chat themes, only for you (chat id -> theme id)
+        && request.resource.data.get('chatThemes', {}) is map
+        && request.resource.data.get('chatThemes', {}).size() <= 1000
         // v0.13: disappearing messages only on your phone
         && request.resource.data.get('vanishChats', {}) is map
         && request.resource.data.get('vanishChats', {}).size() <= 1000

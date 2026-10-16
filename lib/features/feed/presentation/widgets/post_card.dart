@@ -181,7 +181,9 @@ class _PostCardState extends State<PostCard>
                       onDeleted: widget.onDeleted,
                     )
                   : null,
-              onSeen: () => _repo.addView(p, source: widget.source),
+              // v0.0.1: seen at once (smart feed), the view after 3 s
+              onSeen: () => _repo.markSeen(p),
+              onView: () => _repo.addView(p, source: widget.source),
               onWatched: (ms, done) =>
                   _repo.reportWatch(p, watchMs: ms, completed: done),
               overlay: IgnorePointer(

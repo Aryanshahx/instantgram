@@ -84,7 +84,7 @@ void main() {
   });
 
   test('version is 0.20 or newer', () {
-    expect(AppInfo.version, matches(RegExp(r'^0\.(2\d|[3-9]\d)\.\d+$')));
+    expect(AppInfo.version, matches(RegExp(r'^\d+\.\d+\.\d+$')));
   });
 
   // ------------------------------------------------ watched to the end

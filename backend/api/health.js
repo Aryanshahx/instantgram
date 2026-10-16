@@ -61,6 +61,7 @@ export default async function handler(req, res) {
       ok: missing.length === 0,
       app: 'instantgram',
       version: VERSION,
+      hyperIntelligenceVersion: VERSION, // v0.0.1: same as the app
       firebaseServiceAccount,
       bucket: bucket || null,
       firebaseProject: env('FIREBASE_PROJECT_ID') || null,

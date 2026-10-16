@@ -393,7 +393,7 @@ void main() {
     expect(d.isAccount, isTrue);
     expect(d.postCount, 2);
     expect(d.reach, 2); // u1 + u2 (u1 counted once)
-    expect(d.views, 4); // 3 + 1
+    expect(d.views, 3); // v0.0.1: 2 + 1 (one view per person per post)
     expect(d.likes, 4);
     expect(d.interactions, 4 + 1 + 2);
     expect(d.detailed, 3);

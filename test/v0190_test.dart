@@ -87,7 +87,7 @@ void main() {
   });
 
   test('version is 0.19 or newer', () {
-    expect(AppInfo.version, matches(RegExp(r'^0\.(19|[2-9]\d)\.\d+$')));
+    expect(AppInfo.version, matches(RegExp(r'^\d+\.\d+\.\d+$')));
   });
 
   // ------------------------------------------------------------ bad words

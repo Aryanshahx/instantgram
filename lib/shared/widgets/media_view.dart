@@ -5,6 +5,7 @@ import 'package:video_player/video_player.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
 import '../../core/navigation/page_cover.dart';
+import '../../core/services/watch_clock.dart';
 import '../../core/services/media_prefetch.dart';
 import '../../core/services/app_settings.dart';
 import '../../core/services/content_filter.dart';
@@ -124,6 +125,7 @@ class MediaVideo extends StatefulWidget {
     this.mixWithOthers = false,
     this.fit = BoxFit.contain,
     this.onWatched,
+    this.onViewReached,
   });
 
   final MediaItem item;
@@ -139,6 +141,9 @@ class MediaVideo extends StatefulWidget {
   /// Called when it stops playing: watched ms + reached the end.
   final void Function(int watchMs, bool completed)? onWatched;
 
+  /// v0.0.1: once, after 3 s of real playing (or the end of a short video).
+  final VoidCallback? onViewReached;
+
   @override
   State<MediaVideo> createState() => _MediaVideoState();
 }
@@ -152,6 +157,7 @@ class _MediaVideoState extends State<MediaVideo> {
   int _maxPos = 0;
   int _lastTickPos = 0;
   bool _completed = false;
+  final WatchClock _clock = WatchClock(); // v0.0.1: view after 3 s
 
   // adaptive quality (small copy while the network is slow)
   bool _usingLow = false;
@@ -336,6 +342,14 @@ class _MediaVideoState extends State<MediaVideo> {
       _completed = true;
     }
     _lastTickPos = pos;
+    if (widget.onViewReached != null &&
+        _clock.update(
+          playing: c.value.isPlaying && !c.value.isBuffering,
+          nowMs: DateTime.now().millisecondsSinceEpoch,
+          completed: _completed,
+        )) {
+      widget.onViewReached!();
+    }
     if (_skipper.check(c, _edits, startMs: _startMs, endMs: _endMs)) return;
     if (end > 0 && pos >= end - 150) {
       _completed = true;
@@ -344,6 +358,7 @@ class _MediaVideoState extends State<MediaVideo> {
   }
 
   void _release() {
+    _clock.pause(DateTime.now().millisecondsSinceEpoch);
     _startTimer?.cancel();
     _stall?.dispose();
     _stall = null;
@@ -437,6 +452,7 @@ class PostMedia extends StatefulWidget {
     this.onDoubleTap,
     this.onLongPress,
     this.onSeen,
+    this.onView,
     this.onWatched,
     this.overlay,
   });
@@ -452,6 +468,9 @@ class PostMedia extends StatefulWidget {
 
   /// Called once after the post was on screen for 1 second.
   final VoidCallback? onSeen;
+
+  /// v0.0.1: the view counts: a photo 3 s on screen, a video 3 s played.
+  final VoidCallback? onView;
   final void Function(int watchMs, bool completed)? onWatched;
 
   /// Extra layer on top (heart animation).
@@ -468,6 +487,8 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
   bool _onScreen = false;
   Timer? _seenTimer;
   bool _seenSent = false;
+  Timer? _viewTimer;
+  bool _viewSent = false;
 
   Post get p => widget.post;
   String get _musicOwner => 'post-${p.id}';
@@ -484,6 +505,7 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
   void dispose() {
     AppSettings.instance.feedMuted.removeListener(_onMute);
     _seenTimer?.cancel();
+    _viewTimer?.cancel();
     if (p.hasMusic) MusicPlayer.instance.stop(_musicOwner);
     _pages.dispose();
     super.dispose();
@@ -525,10 +547,32 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
           widget.onSeen?.call();
         });
       }
+      _photoViewTimer();
     } else {
       _seenTimer?.cancel();
+      _viewTimer?.cancel();
       if (p.hasMusic) MusicPlayer.instance.stop(_musicOwner);
     }
+  }
+
+  /// v0.0.1: photos count after 3 s on screen (videos: [MediaVideo]).
+  void _photoViewTimer() {
+    _viewTimer?.cancel();
+    final items = p.items;
+    if (_viewSent || widget.onView == null || !_visible || items.isEmpty) {
+      return;
+    }
+    if (items[_index.clamp(0, items.length - 1)].isVideo) return;
+    _viewTimer = Timer(const Duration(milliseconds: WatchClock.viewAfterMs), () {
+      if (mounted && _visible) _sendView();
+    });
+  }
+
+  void _sendView() {
+    if (_viewSent) return;
+    _viewSent = true;
+    _viewTimer?.cancel();
+    widget.onView?.call();
   }
 
   void _toggleMute() {
@@ -545,6 +589,7 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
       muted: AppSettings.instance.feedMuted.value || p.hasMusic,
       mixWithOthers: p.hasMusic,
       onWatched: widget.onWatched,
+      onViewReached: widget.onView == null ? null : _sendView,
     );
   }
 
@@ -591,7 +636,10 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
                   PageView.builder(
                     controller: _pages,
                     itemCount: items.length,
-                    onPageChanged: (i) => setState(() => _index = i),
+                    onPageChanged: (i) {
+                      setState(() => _index = i);
+                      _photoViewTimer();
+                    },
                     itemBuilder: (context, i) => _item(items[i], i),
                   ),
                 if (items.length > 1)

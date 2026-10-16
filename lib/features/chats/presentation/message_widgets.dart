@@ -14,6 +14,7 @@ import '../../../shared/models/post.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/net_image.dart';
+import '../chat_theme.dart';
 import '../data/chat_repository.dart';
 import '../../../shared/widgets/verified_badge.dart';
 import '../../../shared/widgets/bio_font.dart';
@@ -244,16 +245,20 @@ class QuoteBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = onDark ? AppColors.textPrimary : Colors.black;
+    // v0.0.1: on your bubble the colours come from the chat theme
+    final mineText = ChatTheme.of(context).mineText;
+    final fg = onDark ? AppColors.textPrimary : mineText;
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.fromLTRB(9, 5, 9, 6),
       decoration: BoxDecoration(
-        color: onDark ? AppColors.surfaceHigh : Colors.black12,
+        color: onDark
+            ? AppColors.surfaceHigh
+            : mineText.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(10),
         border: Border(
           left: BorderSide(
-            color: onDark ? AppColors.lime : Colors.black54,
+            color: onDark ? AppColors.lime : mineText.withValues(alpha: 0.54),
             width: 3,
           ),
         ),
@@ -318,12 +323,26 @@ class MessageBubble extends StatelessWidget {
 
   bool get _bare => message.isImage || message.isGif;
 
+  /// v0.0.1: bubble colour from the chat theme.
+  BoxDecoration _bubbleBox(ChatTheme ct) {
+    final r = BorderRadius.only(
+      topLeft: const Radius.circular(20),
+      topRight: const Radius.circular(20),
+      bottomLeft: Radius.circular(mine ? 20 : 6),
+      bottomRight: Radius.circular(mine ? 6 : 20),
+    );
+    return mine
+        ? ct.mineBubble(r)
+        : BoxDecoration(color: ct.other, borderRadius: r);
+  }
+
   @override
   Widget build(BuildContext context) {
     final m = message;
     final maxW = MediaQuery.of(context).size.width * 0.75;
-    final fg = mine ? Colors.black : AppColors.textPrimary;
-    final sub = mine ? Colors.black54 : AppColors.textSecondary;
+    final ct = ChatTheme.of(context);
+    final fg = mine ? ct.mineText : ct.otherText;
+    final sub = mine ? ct.mineSub : AppColors.textSecondary;
     final q = m.replyTo;
     final header = <Widget>[
       if (m.forwarded)
@@ -385,7 +404,7 @@ class MessageBubble extends StatelessWidget {
               timeText,
               if (tick != MessageTick.none) ...[
                 const SizedBox(width: 3),
-                TickIcon(tick: tick, onDark: _bare),
+                TickIcon(tick: tick, onDark: _bare || ct.mineDark),
               ],
             ],
           );
@@ -423,15 +442,7 @@ class MessageBubble extends StatelessWidget {
           )
         : Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: mine ? AppColors.lime : AppColors.surface,
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(20),
-                topRight: const Radius.circular(20),
-                bottomLeft: Radius.circular(mine ? 20 : 6),
-                bottomRight: Radius.circular(mine ? 6 : 20),
-              ),
-            ),
+            decoration: _bubbleBox(ct),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -530,8 +541,9 @@ class CallLogContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final m = message;
     final missed = m.callStatus == 'missed' || m.callStatus == 'busy';
-    final fg = mine ? Colors.black : AppColors.textPrimary;
-    final sub = mine ? Colors.black54 : AppColors.textSecondary;
+    final ct = ChatTheme.of(context);
+    final fg = mine ? ct.mineText : ct.otherText;
+    final sub = mine ? ct.mineSub : AppColors.textSecondary;
     final what = m.video ? 'Video call' : 'Voice call';
     final title = mine && missed ? '$what · No answer' : m.callLabel;
     final IconData icon;
@@ -553,7 +565,9 @@ class CallLogContent extends StatelessWidget {
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              color: mine ? Colors.black12 : AppColors.surfaceHigh,
+              color: mine
+                  ? ct.mineText.withValues(alpha: 0.12)
+                  : AppColors.surfaceHigh,
               shape: BoxShape.circle,
             ),
             child: Icon(
@@ -758,7 +772,8 @@ class _VoiceBubbleState extends State<VoiceBubble> {
 
   @override
   Widget build(BuildContext context) {
-    final fg = widget.mine ? Colors.black : AppColors.textPrimary;
+    final ct = ChatTheme.of(context);
+    final fg = widget.mine ? ct.mineText : ct.otherText;
     final total = widget.durationMs > 0
         ? widget.durationMs
         : (_p?.duration?.inMilliseconds ?? 0);
@@ -842,7 +857,8 @@ class LocationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final m = message;
-    final fg = mine ? Colors.black : AppColors.textPrimary;
+    final ct = ChatTheme.of(context);
+    final fg = mine ? ct.mineText : ct.otherText;
     return GestureDetector(
       key: ValueKey('location-${m.id}'),
       onTap: () => _open(context),
@@ -978,7 +994,8 @@ class SharedPostCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final m = message;
-    final fg = mine ? Colors.black : AppColors.textPrimary;
+    final ct = ChatTheme.of(context);
+    final fg = mine ? ct.mineText : ct.otherText;
     return GestureDetector(
       key: ValueKey('shared-post-${m.postId}'),
       onTap: () => openPostById(context, m.postId),

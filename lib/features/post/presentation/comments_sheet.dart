@@ -322,6 +322,9 @@ class _CommentsSheetState extends State<CommentsSheet> {
   Post? _linked;
   final Set<String> _expanded = {};
 
+  /// v0.0.1: comments whose replies were closed with the arrow.
+  final Set<String> _closed = {};
+
   /// Replies shown before "View more replies".
   static const _repliesShown = 2;
 
@@ -518,7 +521,9 @@ class _CommentsSheetState extends State<CommentsSheet> {
           _linked = null;
           _replyTo = null;
           if (reply != null) {
-            _expanded.add(reply.isReply ? reply.parentId : reply.id);
+            final top = reply.isReply ? reply.parentId : reply.id;
+            _expanded.add(top);
+            _closed.remove(top);
           }
         });
       }
@@ -704,14 +709,82 @@ class _CommentsSheetState extends State<CommentsSheet> {
     );
     for (final (c, replies) in ordered) {
       out.add(c);
+      if (replies.isEmpty) continue;
+      // v0.0.1: closed with the arrow -> only "View N replies"
+      if (_closed.contains(c.id)) {
+        out.add(_MoreReplies(c.id, replies.length, closed: true));
+        continue;
+      }
       final open = _expanded.contains(c.id);
       final shown = open ? replies.length : _repliesShown;
       out.addAll(replies.take(shown));
-      if (replies.length > shown) {
-        out.add(_MoreReplies(c.id, replies.length - shown));
-      }
+      out.add(_MoreReplies(c.id, replies.length - shown));
     }
     return out;
+  }
+
+  /// v0.0.1: "View N more replies ⌄" and the arrow "Hide ⌃" that closes
+  /// the replies again.
+  Widget _repliesBar(_MoreReplies r) {
+    const style = TextStyle(
+      color: AppColors.textSecondary,
+      fontWeight: FontWeight.w600,
+      fontSize: 13,
+    );
+    final word = r.count == 1 ? 'reply' : 'replies';
+    Widget button(Key key, String text, IconData icon, VoidCallback onTap) =>
+        TextButton(
+          key: key,
+          onPressed: onTap,
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            minimumSize: const Size(0, 34),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(text, style: style),
+              const SizedBox(width: 2),
+              Icon(icon, size: 18, color: AppColors.textSecondary),
+            ],
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.only(left: 54, bottom: 4),
+      child: Row(
+        children: [
+          if (r.closed)
+            button(
+              ValueKey('more-replies-${r.parentId}'),
+              'View ${r.count} $word',
+              Icons.keyboard_arrow_down_rounded,
+              () => setState(() {
+                _closed.remove(r.parentId);
+                _expanded.add(r.parentId);
+              }),
+            )
+          else ...[
+            if (r.count > 0)
+              button(
+                ValueKey('more-replies-${r.parentId}'),
+                'View ${r.count} more $word',
+                Icons.keyboard_arrow_down_rounded,
+                () => setState(() => _expanded.add(r.parentId)),
+              ),
+            button(
+              ValueKey('hide-replies-${r.parentId}'),
+              'Hide',
+              Icons.keyboard_arrow_up_rounded,
+              () => setState(() {
+                _closed.add(r.parentId);
+                _expanded.remove(r.parentId);
+              }),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Widget _header() {
@@ -800,28 +873,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
                 itemCount: rows.length,
                 itemBuilder: (context, i) {
                   final r = rows[i];
-                  if (r is _MoreReplies) {
-                    return Padding(
-                      padding: const EdgeInsets.only(left: 62, bottom: 6),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton(
-                          key: ValueKey('more-replies-${r.parentId}'),
-                          onPressed: () =>
-                              setState(() => _expanded.add(r.parentId)),
-                          child: Text(
-                            'View ${r.count} more '
-                            '${r.count == 1 ? 'reply' : 'replies'}',
-                            style: const TextStyle(
-                              color: AppColors.textSecondary,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }
+                  if (r is _MoreReplies) return _repliesBar(r);
                   final c = r as Comment;
                   return CommentTile(
                     key: ValueKey('comment-${c.id}'),
@@ -1042,9 +1094,14 @@ class _CommentsSheetState extends State<CommentsSheet> {
 }
 
 class _MoreReplies {
-  const _MoreReplies(this.parentId, this.count);
+  const _MoreReplies(this.parentId, this.count, {this.closed = false});
   final String parentId;
+
+  /// Replies not shown.
   final int count;
+
+  /// v0.0.1: closed with the arrow (all replies hidden).
+  final bool closed;
 }
 
 class _DraftPreview extends StatelessWidget {

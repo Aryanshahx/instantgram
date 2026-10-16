@@ -150,8 +150,8 @@ class PostInsights {
       final countWatch = post != null || p.hasVideo;
       var pViews = 0;
       for (final d in docs) {
-        final c = d['count'];
-        pViews += c is num && c >= 1 ? c.toInt() : 1;
+        // v0.0.1: one view per person (watching again doesn't count)
+        pViews += 1;
         final id = d['_id'];
         if (id is String && id.isNotEmpty) viewers.add(id);
         if (d['follower'] == true) followers++;

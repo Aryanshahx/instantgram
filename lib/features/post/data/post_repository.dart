@@ -799,7 +799,15 @@ class PostRepository {
   /// watch time was lost when you swiped on fast).
   final Map<String, Future<void>> _pendingViews = {};
 
-  /// Counts a view (once per account) + adds it to History.
+  /// v0.0.1: on screen (smart feed "seen" list), not a view yet.
+  void markSeen(Post post) {
+    if (FirebaseAuth.instance.currentUser == null) return;
+    HyperFeed.instance.markSeen(post);
+  }
+
+  /// Counts a view (once per account, ever) + adds it to History.
+  /// v0.0.1: called after 3 s of watching (see WatchClock). Watching it
+  /// again does NOT count again.
   Future<void> addView(Post post, {String source = ViewSource.other}) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return Future.value();
@@ -822,11 +830,8 @@ class PostRepository {
       var known = AppSettings.instance.hasViewed(post.id);
       if (!known) known = (await ref.get()).exists;
       if (known) {
+        // v0.0.1: watched again -> not counted again
         AppSettings.instance.markViewed(post.id);
-        await ref.update({
-          'count': FieldValue.increment(1),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
         return;
       }
       final batch = _db.batch();

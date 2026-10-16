@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../../core/navigation/page_cover.dart';
 import '../../../core/services/app_settings.dart';
+import '../../../core/services/watch_clock.dart';
 import '../../../core/services/content_filter.dart';
 import '../../../core/services/hyper_feed.dart';
 import '../../../core/services/hyper_intelligence.dart';
@@ -464,6 +465,11 @@ class _ClipPlayerState extends State<ClipPlayer>
   bool _completed = false;
   int _lastTickPos = 0;
 
+  // v0.0.1: the view counts after 3 s of real watching (once)
+  final WatchClock _viewClock = WatchClock();
+  Timer? _viewTimer;
+  bool _viewSent = false;
+
   // hold gestures
   bool _fast = false; // 2x speed
   bool _volumeMode = false;
@@ -736,6 +742,8 @@ class _ClipPlayerState extends State<ClipPlayer>
   /// Frees the current video player (and reports watch time).
   void _closeItem() {
     _photoTimer?.cancel();
+    _viewTimer?.cancel();
+    _viewClock.pause(DateTime.now().millisecondsSinceEpoch);
     _startTimer?.cancel();
     _stall?.dispose();
     _stall = null;
@@ -776,12 +784,31 @@ class _ClipPlayerState extends State<ClipPlayer>
       _openItem();
     });
     if (widget.active && !_isVideo) _startPhotoTimer();
+    _photoViewTimer();
+  }
+
+  /// v0.0.1: photo items count after 3 s on screen (videos: [WatchClock]).
+  void _photoViewTimer() {
+    _viewTimer?.cancel();
+    if (_viewSent || !widget.active || _isVideo) return;
+    _viewTimer = Timer(const Duration(milliseconds: WatchClock.viewAfterMs), () {
+      if (mounted && widget.active) _sendView();
+    });
+  }
+
+  void _sendView() {
+    if (_viewSent) return;
+    _viewSent = true;
+    _viewTimer?.cancel();
+    _repo.addView(widget.clip, source: widget.source);
   }
 
   /// Clip came on screen.
   void _startActive() {
     _userPaused = false; // came back to it: plays again
-    _repo.addView(widget.clip, source: widget.source);
+    // v0.0.1: seen at once (smart feed); the view counts after 3 s
+    _repo.markSeen(widget.clip);
+    _photoViewTimer();
     if (widget.clip.hasMusic && !_coverPaused && !pageCovered) {
       MusicPlayer.instance.play(
         _musicOwner,
@@ -866,6 +893,15 @@ class _ClipPlayerState extends State<ClipPlayer>
       _completed = true;
     }
     _lastTickPos = pos;
+    if (!_viewSent &&
+        widget.active &&
+        _viewClock.update(
+          playing: v.isPlaying && !v.isBuffering,
+          nowMs: DateTime.now().millisecondsSinceEpoch,
+          completed: _completed,
+        )) {
+      _sendView();
+    }
     if (_mustStayPaused) {
       // v0.9: whatever started it (system, buffering, loop) -> stop again.
       // Holding (2x) may play it for a moment.
@@ -915,6 +951,8 @@ class _ClipPlayerState extends State<ClipPlayer>
         _startActive();
       } else {
         _photoTimer?.cancel();
+        _viewTimer?.cancel();
+        _viewClock.pause(DateTime.now().millisecondsSinceEpoch);
         c?.pause();
         c?.setPlaybackSpeed(1);
         _sendWatch();

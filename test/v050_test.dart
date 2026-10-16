@@ -317,7 +317,7 @@ void main() {
     ];
     final d = PostInsights.from(p, docs, now: DateTime(2026, 10, 13, 12));
     expect(d.reach, 4); // counter is bigger than docs (old views)
-    expect(d.views, 5);
+    expect(d.views, 4); // v0.0.1: one view per person (rewatches don't count)
     expect(d.detailed, 3);
     expect(d.followerViews, 1);
     expect(d.nonFollowerViews, 2);
@@ -365,7 +365,8 @@ void main() {
     }
     expect(find.text('Post analytics'), findsOneWidget);
     expect(find.text('Views'), findsOneWidget);
-    expect(find.text('3'), findsWidgets); // 2 + 1 views
+    expect(find.text('2'), findsWidgets); // v0.0.1: 2 people = 2 views
+    expect(find.text('3'), findsNothing);
     expect(find.text('Accounts reached'), findsOneWidget);
     await tester.drag(find.byType(ListView).first, const Offset(0, -700));
     await tester.pump(const Duration(milliseconds: 300));

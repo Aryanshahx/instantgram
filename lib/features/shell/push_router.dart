@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/services/notice_push.dart';
 import '../../core/services/calls.dart';
 import '../../core/services/chat_prefs.dart';
 import '../../core/theme/app_colors.dart';
@@ -31,11 +32,16 @@ class PushRouter {
       final fm = FirebaseMessaging.instance;
       _opened = FirebaseMessaging.onMessageOpenedApp.listen((m) => route(m.data));
       _foreground = FirebaseMessaging.onMessage.listen(_banner);
+      // v0.0.1: notices shown by the app (with picture) -> Notifications
+      NoticePush.onTap = () => route(const {'type': 'notice'});
       final first = await fm.getInitialMessage();
       if (first != null) {
         // let the home screen build first
         await Future<void>.delayed(const Duration(milliseconds: 600));
         route(first.data);
+      } else if (await NoticePush.openedFromNotice()) {
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+        route(const {'type': 'notice'});
       }
     } catch (e) {
       debugPrint('push router: $e');
@@ -60,7 +66,9 @@ class PushRouter {
           Calls.instance.openMutedFromNotification(d);
         }
       // v0.12: likes, comments, followers, views -> Notifications
+      // v0.0.1: admin notices too
       case 'activity':
+      case 'notice':
         Calls.instance.navigatorKey.currentState?.push(
           MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
         );
@@ -90,6 +98,15 @@ class PushRouter {
   /// App is open: Android shows no notification, so a small banner.
   void _banner(RemoteMessage m) {
     final d = m.data;
+    // v0.0.1: admin notice while the app is open -> a real notification
+    if (d['type'] == 'notice') {
+      NoticePush.show(
+        d,
+        title: m.notification?.title,
+        body: m.notification?.body,
+      );
+      return;
+    }
     if (d['type'] != 'message') return;
     final chatId = '${d['chatId'] ?? ''}';
     if (ChatDetailScreen.openChatId == chatId) return;

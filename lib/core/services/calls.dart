@@ -15,6 +15,7 @@ import '../../features/calls/call_session.dart';
 import '../../features/calls/incoming_call_screen.dart';
 import '../../firebase_options.dart';
 import 'chat_prefs.dart';
+import 'notice_push.dart';
 import 'server_clock.dart';
 import 'system_settings.dart';
 
@@ -58,6 +59,11 @@ Future<void> pushBackgroundHandler(RemoteMessage m) async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
   } catch (_) {}
+  // v0.0.1: admin notice with a picture (the app shows it itself)
+  if (m.data['type'] == 'notice' && m.notification == null) {
+    await NoticePush.show(m.data);
+    return;
+  }
   await CallRinger.onPush(m.data);
 }
 

@@ -164,6 +164,16 @@ export const F = {
 
 /** Text of a notice push. */
 export function noticeMessages(tokens, title, text, image = '') {
+  // v0.0.1: with a picture -> "data" push; the app downloads the picture
+  // and shows it itself (Android's own download was often blocked by
+  // battery savers: text came, picture didn't).
+  if (image) {
+    return tokens.map((token) => ({
+      token,
+      data: { type: 'notice', title: str(title || 'InstantGram', 80), body: str(text, 900), image },
+      android: { priority: 'HIGH', ttl: '604800s' },
+    }));
+  }
   return tokens.map((token) => ({
     token,
     data: { type: 'notice' },

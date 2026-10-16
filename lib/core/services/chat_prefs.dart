@@ -16,6 +16,7 @@ class ChatPrefsData {
     this.cleared = const {},
     this.pushOff = const {},
     this.vanish = const {},
+    this.themes = const {},
   });
 
   static const empty = ChatPrefsData();
@@ -40,6 +41,11 @@ class ChatPrefsData {
   /// v0.13: disappearing messages, only on MY phone:
   /// chat id -> (mode, since when).
   final Map<String, (String, DateTime)> vanish;
+
+  /// v0.0.1: chat id -> chat theme id (only you see it).
+  final Map<String, String> themes;
+
+  String themeOf(String chatId) => themes[chatId] ?? 'lime';
 
   String vanishMode(String chatId) => vanish[chatId]?.$1 ?? Disappear.off;
   DateTime? vanishSince(String chatId) => vanish[chatId]?.$2;
@@ -67,6 +73,15 @@ class ChatPrefsData {
     return out;
   }
 
+  static Map<String, String> _themes(Object? v) {
+    if (v is! Map) return const {};
+    return {
+      for (final e in v.entries)
+        if (e.key is String && e.value is String && e.value != '')
+          e.key as String: e.value as String,
+    };
+  }
+
   factory ChatPrefsData.fromMap(Map<String, dynamic>? m) {
     if (m == null) return empty;
     List<String> list(Object? v) =>
@@ -78,6 +93,7 @@ class ChatPrefsData {
       mutedCalls: list(m['mutedCalls']).toSet(),
       pushOff: list(m['pushOff']).toSet(),
       vanish: _vanish(m['vanishChats']),
+      themes: _themes(m['chatThemes']),
       cleared: {
         if (c is Map)
           for (final e in c.entries)
@@ -186,6 +202,7 @@ class ChatPrefs {
       cleared: v.cleared,
       pushOff: v.pushOff,
       vanish: next,
+      themes: v.themes,
     );
     return _save({
       'vanishChats': {
@@ -193,6 +210,30 @@ class ChatPrefs {
             ? FieldValue.delete()
             : {'m': m, 'at': FieldValue.serverTimestamp()},
       },
+    });
+  }
+
+  /// v0.0.1: chat theme for this chat (only you see it). 'lime' = default.
+  Future<void> setTheme(String chatId, String themeId) {
+    final v = value.value;
+    final next = {...v.themes};
+    final off = themeId.isEmpty || themeId == 'lime';
+    if (off) {
+      next.remove(chatId);
+    } else {
+      next[chatId] = themeId;
+    }
+    value.value = ChatPrefsData(
+      pinned: v.pinned,
+      mutedChats: v.mutedChats,
+      mutedCalls: v.mutedCalls,
+      cleared: v.cleared,
+      pushOff: v.pushOff,
+      vanish: v.vanish,
+      themes: next,
+    );
+    return _save({
+      'chatThemes': {chatId: off ? FieldValue.delete() : themeId},
     });
   }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/config/app_info.dart';
 import '../../../core/services/hyper_intelligence.dart';
 import '../../../core/theme/app_colors.dart';
 import 'settings_widgets.dart';
@@ -28,7 +29,8 @@ class HyperIntelligenceScreen extends StatelessWidget {
                     'Hyper Intelligence keeps InstantGram safe. It checks new '
                     'posts, clips, moments and comments, blurs sensitive '
                     'content and stops strong abuse. Your chats are never '
-                    'checked.',
+                    'checked.\nVersion ${AppInfo.hiVersion}',
+                    key: ValueKey('hi-version'),
                     style: TextStyle(
                       fontSize: 13.5,
                       height: 1.35,

@@ -24,6 +24,7 @@ import '../../../shared/widgets/async_views.dart';
 import '../../../shared/widgets/attach_menu.dart';
 import '../../../shared/widgets/avatar.dart';
 import '../../post/presentation/gif_picker.dart';
+import '../chat_theme.dart';
 import '../data/chat_repository.dart';
 import 'message_widgets.dart';
 import '../data/typing_tracker.dart';
@@ -868,6 +869,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             ),
           ),
           IconButton(
+            key: const ValueKey('chat-theme-btn'),
+            tooltip: 'Chat theme',
+            onPressed: () => showChatThemePicker(context, _chatId),
+            icon: const Icon(Icons.palette_outlined),
+          ),
+          IconButton(
             key: const ValueKey('call-voice'),
             tooltip: 'Voice call',
             onPressed: () => _call(video: false),
@@ -882,7 +889,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           const SizedBox(width: 4),
         ],
       ),
-      body: Column(
+      // v0.0.1: chat theme (only you see it)
+      body: ValueListenableBuilder<ChatPrefsData>(
+        valueListenable: ChatPrefs.instance.value,
+        builder: (context, prefs, child) {
+          final ct = ChatTheme.byId(prefs.themeOf(_chatId));
+          return DecoratedBox(
+            key: ValueKey('chat-bg-${ct.id}'),
+            decoration: ct.background,
+            child: ChatThemeScope(theme: ct, child: child!),
+          );
+        },
+        child: Column(
         children: [
           Builder(
             builder: (context) {
@@ -1031,6 +1049,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           else
             _composer(),
         ],
+      ),
       ),
     );
   }
