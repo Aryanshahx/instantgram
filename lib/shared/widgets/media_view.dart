@@ -14,6 +14,7 @@ import '../../core/services/music_player.dart';
 import '../../core/services/net_quality.dart';
 import '../../core/theme/app_colors.dart';
 import '../../features/editor/filters.dart';
+import '../../features/music/presentation/music_screen.dart';
 import '../models/post.dart';
 import 'hi_blur.dart';
 import 'media_links.dart';
@@ -538,6 +539,7 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
           _musicOwner,
           p.audioUrl,
           volume: AppSettings.instance.feedMuted.value ? 0 : 1,
+          startMs: p.audioStartMs,
         );
       }
       if (!_seenSent) {
@@ -653,8 +655,8 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
                     top: 10,
                     child: MediaPill(text: '${_index + 1}/${items.length}'),
                   ),
-                // dots for photo posts; clips only show "1/3"
-                if (items.length > 1 && !p.isClip)
+                // dots for posts and clips (fix update: clips too)
+                if (items.length > 1)
                   Positioned(
                     left: 0,
                     right: 0,
@@ -666,11 +668,16 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
                 if (p.hasMusic)
                   Positioned(
                     left: 10,
-                    bottom: items.length > 1 && !p.isClip ? 26 : 10,
+                    bottom: items.length > 1 ? 26 : 10,
                     right: 60,
                     child: Align(
                       alignment: Alignment.centerLeft,
-                      child: MusicChip(name: p.audioName),
+                      child: MusicChip(
+                        name: p.audioName,
+                        onTap: p.musicId.isEmpty
+                            ? null
+                            : () => openMusicOf(context, p),
+                      ),
                     ),
                   ),
                 if (_hasSound)

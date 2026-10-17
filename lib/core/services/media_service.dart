@@ -38,13 +38,63 @@ enum PickKind {
   moment,
 }
 
-/// A music file picked from the phone.
+/// Music for a post / clip / moment: a file from the phone, or (music
+/// update) a song from the library / an AI song / someone's audio
+/// ([url] set, nothing to upload).
 class PickedAudio {
-  const PickedAudio(this.file, this.name);
+  const PickedAudio(
+    this.file,
+    this.name, {
+    this.url = '',
+    this.musicId = '',
+    this.startMs = 0,
+    this.durationMs = 0,
+  });
+
+  /// A song that is online already (no upload).
+  factory PickedAudio.online({
+    required String url,
+    required String name,
+    required String musicId,
+    int startMs = 0,
+    int durationMs = 0,
+  }) => PickedAudio(
+    File(''),
+    name,
+    url: url,
+    musicId: musicId,
+    startMs: startMs,
+    durationMs: durationMs,
+  );
+
   final File file;
 
-  /// File name without the extension (shown to people).
+  /// Shown to people ("Song · Artist", or the file name).
   final String name;
+
+  /// Online song (music/{musicId}); '' = a file from the phone.
+  final String url;
+  final String musicId;
+
+  /// Where the song starts (ms).
+  final int startMs;
+
+  /// Song length if known (0 = unknown).
+  final int durationMs;
+
+  bool get isOnline => url.isNotEmpty;
+
+  /// What the player plays (url or file path).
+  String get source => isOnline ? url : file.path;
+
+  PickedAudio withStart(int ms) => PickedAudio(
+    file,
+    name,
+    url: url,
+    musicId: musicId,
+    startMs: ms < 0 ? 0 : ms,
+    durationMs: durationMs,
+  );
 }
 
 /// Music file types we accept.

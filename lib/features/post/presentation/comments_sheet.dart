@@ -43,7 +43,12 @@ String commentShareText(Post post, Comment c) {
 }
 
 /// Most used emojis, shown above the comment box (tap = add).
-const kCommentEmojis = ['❤️', '🙌', '🔥', '👏', '😢', '😍', '😮', '😂'];
+/// Fix update: more of them, the row scrolls sideways.
+const kCommentEmojis = [
+  '❤️', '🙌', '🔥', '👏', '😢', '😍', '😮', '😂', //
+  '🥰', '😭', '🤣', '😎', '🥺', '😘', '💯', '👍', //
+  '🤯', '😅', '🤩', '😡', '🙏', '💀', '✨', '🎉', //
+];
 
 /// Comments panel (v0.9): opens at 60 % of the screen, drag it up to full
 /// screen or down to close.
@@ -968,22 +973,28 @@ class _CommentsSheetState extends State<CommentsSheet> {
               ),
             ),
           // most used emojis
+          // (scrolls sideways; no light / ink when tapped)
           SizedBox(
             height: 44,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                for (final e in kCommentEmojis)
-                  InkResponse(
-                    key: ValueKey('emoji-$e'),
-                    radius: 22,
-                    onTap: () => _insert(e),
-                    child: Padding(
-                      padding: const EdgeInsets.all(6),
+            child: ListView.builder(
+              key: const ValueKey('comment-emojis'),
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              itemCount: kCommentEmojis.length,
+              itemBuilder: (_, i) {
+                final e = kCommentEmojis[i];
+                return GestureDetector(
+                  key: ValueKey('emoji-$e'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _insert(e),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 7),
+                    child: Center(
                       child: Text(e, style: const TextStyle(fontSize: 23)),
                     ),
                   ),
-              ],
+                );
+              },
             ),
           ),
           if (_linked != null)

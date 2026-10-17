@@ -278,7 +278,11 @@ service cloud.firestore {
           && (!('hideReposts' in d) || d.hideReposts is bool)
           && (!('hideShares' in d) || d.hideShares is bool)
           // v0.16: only on the profile (not in feeds)
-          && (!('profileOnly' in d) || d.profileOnly is bool);
+          && (!('profileOnly' in d) || d.profileOnly is bool)
+          // music update: which song (music/{id}) + where it starts
+          && (!('musicId' in d) || (d.musicId is string && d.musicId.size() <= 64))
+          && (!('audioStartMs' in d) || (d.audioStartMs is int
+                && d.audioStartMs >= 0 && d.audioStartMs <= 7200000));
       }
       // shares can only go up by 1
       function shareOk() {
@@ -722,6 +726,55 @@ service cloud.firestore {
     match /config/{doc} {
       allow read: if signedIn();
       allow write: if false;
+    }
+
+    // Music update: songs for posts, clips and moments.
+    // Library songs (admin) and AI songs (Lyria): only the server writes.
+    // "Original audio" = music from a phone, written together with its
+    // post (id "o_<postId>"). Using a song = uses + 1, only together with
+    // a NEW post of yours that has this song.
+    match /music/{mid} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['source', 'ownerUid', 'title',
+              'artist', 'url', 'key', 'durationMs', 'uses', 'hidden',
+              'createdAt', 'lastPost'])
+        && request.resource.data.source == 'original'
+        && request.resource.data.ownerUid == me()
+        && mid == 'o_' + request.resource.data.lastPost
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 120
+        && request.resource.data.artist is string
+        && request.resource.data.artist.size() <= 80
+        && request.resource.data.url is string
+        && request.resource.data.url.size() <= 500
+        && request.resource.data.url.matches('https://.+')
+        && request.resource.data.key is string
+        && request.resource.data.key.matches('audio/' + me() + '/.+')
+        && request.resource.data.durationMs is int
+        && request.resource.data.uses == 1
+        && request.resource.data.hidden == false
+        && request.resource.data.createdAt == request.time
+        && musicPostOk(mid);
+      allow update: if signedIn()
+        && changed().hasOnly(['uses', 'lastPost'])
+        && request.resource.data.uses == resource.data.get('uses', 0) + 1
+        && resource.data.get('hidden', false) == false
+        && musicPostOk(mid);
+      allow delete: if false;
+
+      function musicPostOk(mid) {
+        let p = request.resource.data.lastPost;
+        let post = /databases/$(database)/documents/posts/$(p);
+        return p is string && p.matches('[A-Za-z0-9_-]{1,64}')
+          && !exists(post) && existsAfter(post)
+          && getAfter(post).data.get('musicId', '') == mid
+          && getAfter(post).data.authorId == me();
+      }
+    }
+    // daily AI song counters: only the server
+    match /songQuota/{qid} {
+      allow read, write: if false;
     }
 
     // v0.18: Hyper Intelligence. Scores: only the server (admin website).

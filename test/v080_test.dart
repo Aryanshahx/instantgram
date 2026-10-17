@@ -622,7 +622,10 @@ void main() {
       // GIF comment
       await t.dragUntilVisible(
         find.byKey(const ValueKey('comment-pic-c2')),
-        find.byType(ListView),
+        // (the emoji row is a sideways list too)
+        find.byWidgetPredicate(
+          (w) => w is ListView && w.scrollDirection == Axis.vertical,
+        ),
         const Offset(0, -80),
       );
       expect(find.byKey(const ValueKey('comment-pic-c2')), findsOneWidget);

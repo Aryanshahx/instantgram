@@ -1,4 +1,5 @@
 // GET /api/health  -> shows whether the server is configured.
+import { limits as songLimits } from '../lib/music.js';
 import { env } from '../lib/http.js';
 import { accessToken, checkServiceAccount } from '../lib/google.js';
 import { turnProviders } from './turn.js';
@@ -83,6 +84,10 @@ export default async function handler(req, res) {
         // v0.18: Hyper Intelligence = safety checks of posts, clips, moments, comments
         hyperIntelligence,
         translation,
+        // music update: AI songs (Google Lyria, paid) with daily limits
+        aiSongs: env('GEMINI_API_KEY')
+          ? `ok (${songLimits().perDay} per person, ${songLimits().cap} for everyone per day)`
+          : 'add GEMINI_API_KEY (optional, paid)',
         adminLogin: adminPassword() ? 'ok' : process.env.ADMIN_PASSWORD ? 'ADMIN_PASSWORD too short (16+)' : 'add ADMIN_PASSWORD',
       },
     }),

@@ -135,6 +135,10 @@ class UploadTask {
     this.coverPath,
     this.audioPath,
     this.audioName = '',
+    this.audioUrl = '',
+    this.musicId = '',
+    this.audioStartMs = 0,
+    this.audioDurationMs = 0,
     this.postId = '',
     this.replyTo,
   });
@@ -151,6 +155,15 @@ class UploadTask {
   final String? coverPath;
   final String? audioPath;
   final String audioName;
+
+  /// Music update: a song that is online already (library / AI / someone's
+  /// audio) -> nothing to upload. [musicId] = its music/{id} doc.
+  final String audioUrl;
+  final String musicId;
+
+  /// Where the song starts (ms) and its length (0 = unknown).
+  final int audioStartMs;
+  final int audioDurationMs;
   String postId;
 
   /// v0.9: answers a comment; after sharing, a reply comment links to it.
@@ -217,6 +230,10 @@ class UploadTask {
     'coverPath': coverPath,
     'audioPath': audioPath,
     'audioName': audioName,
+    'audioUrl': audioUrl,
+    'musicId': musicId,
+    'audioStartMs': audioStartMs,
+    'audioDurationMs': audioDurationMs,
     'postId': postId,
     'replyTo': replyTo?.toMap(),
     'replyDone': replyDone,
@@ -254,6 +271,10 @@ class UploadTask {
           coverPath: m['coverPath'] as String?,
           audioPath: m['audioPath'] as String?,
           audioName: (m['audioName'] as String?) ?? '',
+          audioUrl: (m['audioUrl'] as String?) ?? '',
+          musicId: (m['musicId'] as String?) ?? '',
+          audioStartMs: (m['audioStartMs'] as num?)?.toInt() ?? 0,
+          audioDurationMs: (m['audioDurationMs'] as num?)?.toInt() ?? 0,
           postId: (m['postId'] as String?) ?? '',
           replyTo: ReplyRef.fromMap(m['replyTo']),
         )
@@ -337,6 +358,10 @@ class UploadQueue extends ChangeNotifier {
     String? coverPath,
     String? audioPath,
     String audioName = '',
+    String audioUrl = '',
+    String musicId = '',
+    int audioStartMs = 0,
+    int audioDurationMs = 0,
     ReplyRef? replyTo,
   }) {
     if (items.isEmpty) throw ArgumentError('Nothing to share');
@@ -347,8 +372,12 @@ class UploadQueue extends ChangeNotifier {
       caption: caption,
       options: options,
       coverPath: coverPath,
-      audioPath: audioPath,
+      audioPath: audioUrl.isNotEmpty ? null : audioPath,
       audioName: audioName,
+      audioUrl: audioUrl,
+      musicId: musicId,
+      audioStartMs: audioStartMs,
+      audioDurationMs: audioDurationMs,
       replyTo: replyTo,
     );
     _tasks.add(t);
@@ -602,6 +631,10 @@ class UploadQueue extends ChangeNotifier {
         );
       }
     }
+    if (t.audioUrl.isNotEmpty && t.audio == null) {
+      // music update: online song, no upload (key '' = not ours to delete)
+      t.audio = UploadedMedia(url: t.audioUrl, key: '');
+    }
     if (t.audioPath != null && t.audio == null) {
       slots.add(
         _Slot(await sizeOf(t.audioPath), (p) async {
@@ -681,6 +714,7 @@ class UploadQueue extends ChangeNotifier {
               audioUrl: t.audio?.url ?? '',
               audioKey: t.audio?.key ?? '',
               audioName: t.audio == null ? '' : t.audioName,
+              audioStartMs: t.audio == null ? 0 : t.audioStartMs,
             ),
         ],
       );
@@ -700,6 +734,7 @@ class UploadQueue extends ChangeNotifier {
           audience: t.options.audience,
           audio: t.audio,
           audioName: t.audioName,
+          audioStartMs: t.audioStartMs,
         );
         m.published = true;
         _save(now: true);
@@ -718,6 +753,9 @@ class UploadQueue extends ChangeNotifier {
         cover: t.cover,
         audio: t.audio,
         audioName: t.audioName,
+        musicId: t.musicId,
+        audioStartMs: t.audioStartMs,
+        audioDurationMs: t.audioDurationMs,
         options: t.options,
         replyTo: t.replyTo,
         media: [
@@ -859,7 +897,9 @@ class UploadQueue extends ChangeNotifier {
     }
     if (deleteUploads) {
       for (final u in [t.cover, t.audio]) {
-        if (u != null) unawaited(MediaService.instance.delete(u.key));
+        if (u != null && u.key.isNotEmpty) {
+          unawaited(MediaService.instance.delete(u.key));
+        }
       }
     }
   }

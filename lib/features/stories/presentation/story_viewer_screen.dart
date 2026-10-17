@@ -155,7 +155,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
   /// v0.16: music of the moment (loops while it is on screen).
   void _startMusic(Story st) {
     if (!st.hasMusic || _paused) return;
-    MusicPlayer.instance.play(_kMusic, st.audioUrl);
+    MusicPlayer.instance.play(_kMusic, st.audioUrl, startMs: st.audioStartMs);
   }
 
   /// Start the current moment (photo timer or video).

@@ -23,12 +23,14 @@ import {
   countQuery,
   getDoc,
   listPage,
+  patchDoc,
   notSetUp,
   runQuery,
   sendFcm,
   serviceAccount,
 } from '../lib/google.js';
-import { deleteKeys, publicUrl, putNoticeImage } from '../lib/tigris.js';
+import { createMusicUpload, deleteKeys, ensureCors, publicUrl, putFile, putNoticeImage } from '../lib/tigris.js';
+import { SOURCES as MUSIC_SOURCES, decodeAudio, libraryFields, musicFileKey } from '../lib/music.js';
 import { tokensOf } from './call-push.js';
 import { VERSION } from '../lib/version.js';
 import {
@@ -219,6 +221,14 @@ async function deleteUserStep(step, uid, { sa, fetchFn, deleteFiles }) {
       await commitAll(rows.map((r) => ({ delete: `users/${uid}/${sub}/${r.id}` })));
       n += rows.length;
       if (rows.length === 300) return { n, more: true };
+    }
+    // music update: their AI songs + "original audio" entries
+    const songs = await runQuery(sa, { from: [{ collectionId: 'music' }], where: F.eq('ownerUid', F.s(uid)), limit: 100 }, '', fetchFn).catch(() => []);
+    if (songs.length) {
+      await deleteFiles(songs.map((r) => musicFileKey(r.data)).filter(Boolean));
+      await commitAll(songs.filter((r) => ID.test(r.id)).map((r) => ({ delete: `music/${r.id}` })));
+      n += songs.length;
+      if (songs.length === 100) return { n, more: true };
     }
     return { n, more: false };
   }
@@ -449,7 +459,9 @@ export const actions = {
     if (!d) return { deleted: false };
     // comments first (max 300 here; more are left hidden without the post)
     const comments = await runQuery(sa, { from: [{ collectionId: 'comments' }], limit: 300 }, `posts/${pid}`, fetchFn).catch(() => []);
-    const keys = fileKeys(d, d.authorId);
+    // music update: other posts may use this post's song ("use this audio")
+    const shared = String(d.musicId || '').startsWith('o_') ? d.audioKey : null;
+    const keys = fileKeys(d, d.authorId).filter((k) => k !== shared);
     for (const c of comments) keys.push(...fileKeys(c.data, c.data.authorId));
     const writes = comments.map((c) => ({ delete: `posts/${pid}/comments/${c.id}` }));
     writes.push({ delete: `posts/${pid}` });
@@ -543,6 +555,86 @@ export const actions = {
     const bytes = decodeJpeg(body.image);
     const { url } = await saveImage(bytes);
     return { url };
+  },
+
+  // ---------------- music (library, AI songs, original audio) ----------------
+
+  /** Songs of one kind, newest first. */
+  async musicList({ sa, fetchFn, body }) {
+    const source = MUSIC_SOURCES.includes(body.source) ? body.source : 'library';
+    const rows = await runQuery(sa, { from: [{ collectionId: 'music' }], where: F.eq('source', F.s(source)), limit: 300 }, '', fetchFn);
+    const items = rows
+      .map((r) => ({
+        id: r.id,
+        source,
+        title: str(r.data.title, 80),
+        artist: str(r.data.artist, 80),
+        mood: str(r.data.mood, 20),
+        url: typeof r.data.url === 'string' ? r.data.url : '',
+        durationMs: Number(r.data.durationMs) || 0,
+        uses: Number(r.data.uses) || 0,
+        hidden: r.data.hidden === true,
+        ownerUid: typeof r.data.ownerUid === 'string' ? r.data.ownerUid : '',
+        prompt: str(r.data.prompt, 300),
+        createdAt: r.data.createdAt || null,
+      }))
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+    return { items };
+  },
+
+  /** Big files: the page uploads straight to the bucket with this link. */
+  async musicUploadUrl({ body, makeMusicUpload, setCors }) {
+    const cors = await setCors();
+    const up = await makeMusicUpload({ contentType: body.contentType, size: body.size });
+    return { ...up, cors };
+  },
+
+  /** Adds a library song: [file] (data url, small files) or [key] from musicUploadUrl. */
+  async musicAdd({ sa, fetchFn, body, now, saveFile }) {
+    const f = libraryFields(body);
+    let key;
+    let url;
+    if (body.file) {
+      const { bytes, type, ext } = decodeAudio(body.file);
+      key = `music/lib/${now}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+      ({ url } = await saveFile(key, bytes, type));
+    } else {
+      key = typeof body.key === 'string' ? body.key : '';
+      if (!/^music\/lib\/[A-Za-z0-9._-]{5,120}$/.test(key)) throw new HttpError(400, 'Upload the file first');
+      url = publicUrl(key);
+    }
+    const mid = `lib_${now.toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    await patchDoc(sa, `music/${mid}`, {
+      source: 'library', ownerUid: '', ...f, url, key, uses: 0, hidden: false, createdAt: new Date(now),
+    }, {}, fetchFn);
+    return { id: mid, url };
+  },
+
+  /** Rename / hide / show a song. */
+  async musicEdit({ sa, fetchFn, body }) {
+    const mid = id(body.id, 'song');
+    const d = await getDoc(sa, `music/${mid}`, fetchFn);
+    if (!d) throw new HttpError(404, 'Song not found');
+    const fields = {};
+    if (typeof body.hidden === 'boolean') fields.hidden = body.hidden;
+    if (d.source === 'library' && body.title !== undefined) {
+      Object.assign(fields, libraryFields({ ...d, ...body }));
+    }
+    if (!Object.keys(fields).length) throw new HttpError(400, 'Nothing to change');
+    await patchDoc(sa, `music/${mid}`, fields, {}, fetchFn);
+    return { ok: true };
+  },
+
+  /** Deletes a song for ever (posts using it become silent). Hide keeps them. */
+  async musicDelete({ sa, fetchFn, body, deleteFiles }) {
+    const mid = id(body.id, 'song');
+    if (body.confirm !== 'DELETE') throw new HttpError(400, 'Type DELETE to confirm');
+    const d = await getDoc(sa, `music/${mid}`, fetchFn);
+    if (!d) throw new HttpError(404, 'Song not found');
+    const k = musicFileKey(d);
+    const files = k ? await deleteFiles([k]) : 0;
+    await commitWrites(sa, [{ delete: `music/${mid}` }], fetchFn);
+    return { ok: true, files };
   },
 
   /** v0.14: deletes an account step by step. The page calls again with
@@ -784,7 +876,7 @@ Object.assign(actions, {
 export async function handle(
   req,
   body,
-  { sa = serviceAccount(), fetchFn = fetch, password = process.env.ADMIN_PASSWORD, wait, now = Date.now(), deleteFiles = deleteKeys, saveImage = putNoticeImage } = {},
+  { sa = serviceAccount(), fetchFn = fetch, password = process.env.ADMIN_PASSWORD, wait, now = Date.now(), deleteFiles = deleteKeys, saveImage = putNoticeImage, saveFile = putFile, makeMusicUpload = createMusicUpload, setCors = ensureCors } = {},
 ) {
   const action = typeof body.action === 'string' ? body.action : '';
   // the only action without a login
@@ -795,7 +887,7 @@ export async function handle(
   const fn = Object.hasOwn(actions, action) ? actions[action] : null;
   if (!fn) throw new HttpError(400, 'Unknown action');
   if (!sa) throw notSetUp('The admin website');
-  return fn({ sa, fetchFn, body, admin, now, deleteFiles, saveImage });
+  return fn({ sa, fetchFn, body, admin, now, deleteFiles, saveImage, saveFile, makeMusicUpload, setCors });
 }
 
 export default postHandler((req, body) => handle(req, body));

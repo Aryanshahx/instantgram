@@ -14,6 +14,7 @@ class MusicPlayer with WidgetsBindingObserver {
   AudioPlayer? _player;
   String? _owner;
   String? _source;
+  int _startMs = 0;
   double _volume = 1;
   bool _observing = false;
   bool _pausedByApp = false;
@@ -21,10 +22,19 @@ class MusicPlayer with WidgetsBindingObserver {
   /// Who is playing now (null = nothing).
   final ValueNotifier<String?> owner = ValueNotifier(null);
 
+  /// Music update: full length of the song playing now (ms, 0 = unknown).
+  final ValueNotifier<int> length = ValueNotifier(0);
+
   bool isOwner(String id) => _owner == id;
 
   /// Plays [source] (an https URL or a file path) for [ownerId].
-  Future<void> play(String ownerId, String source, {double volume = 1}) async {
+  /// Music update: [startMs] = where the song starts (loops from there).
+  Future<void> play(
+    String ownerId,
+    String source, {
+    double volume = 1,
+    int startMs = 0,
+  }) async {
     if (disabled || source.isEmpty) return;
     _volume = volume;
     if (!_observing) {
@@ -35,21 +45,31 @@ class MusicPlayer with WidgetsBindingObserver {
       handleInterruptions: false,
       handleAudioSessionActivation: false,
     );
-    if (_owner == ownerId && _source == source) {
+    final start = startMs < 0 ? 0 : startMs;
+    if (_owner == ownerId && _source == source && _startMs == start) {
       await p.setVolume(volume);
       if (!p.playing) p.play();
       return;
     }
     _owner = ownerId;
     _source = source;
+    _startMs = start;
     owner.value = ownerId;
+    length.value = 0;
     try {
+      final Duration? d;
       if (source.startsWith('http')) {
-        await p.setUrl(source);
+        d = await p.setUrl(source);
       } else {
-        await p.setFilePath(source);
+        d = await p.setFilePath(source);
       }
       if (_owner != ownerId) return; // someone else started meanwhile
+      length.value = d?.inMilliseconds ?? 0;
+      // the loop starts at the chosen part of the song
+      if (start > 0) {
+        await p.setClip(start: Duration(milliseconds: start));
+        if (_owner != ownerId) return;
+      }
       await p.setLoopMode(LoopMode.one);
       await p.setVolume(volume);
       p.play(); // don't await: completes when playback stops

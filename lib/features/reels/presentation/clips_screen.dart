@@ -32,6 +32,7 @@ import '../../../shared/widgets/media_view.dart';
 import '../../../shared/widgets/net_image.dart';
 import '../../../shared/widgets/seek_bar.dart';
 import '../../../shared/widgets/video_extras.dart';
+import '../../music/presentation/music_screen.dart';
 import '../../post/data/post_repository.dart';
 import '../data/clips_warmup.dart';
 import '../../post/presentation/comments_sheet.dart';
@@ -251,8 +252,11 @@ class _ClipsScreenState extends State<ClipsScreen> {
         body: Stack(
           children: [
             Positioned.fill(
+              // the video goes down behind the name / caption and the
+              // phone's nav bar (the caption bar keeps its own space)
               child: SafeArea(
                 top: false,
+                bottom: false,
                 child: widget.clips != null
                     ? _pager(widget.clips!)
                     : StreamBuilder<List<Post>>(
@@ -815,6 +819,7 @@ class _ClipPlayerState extends State<ClipPlayer>
         _musicOwner,
         widget.clip.audioUrl,
         volume: widget.muted ? 0 : 1,
+        startMs: widget.clip.audioStartMs,
       );
     }
     if (_isVideo) {
@@ -1134,30 +1139,68 @@ class _ClipPlayerState extends State<ClipPlayer>
     _big = p;
     final t = top ?? h;
     final below = (1 - p) * math.max(0.0, h - math.max(t, pad));
+    final safeBottom = MediaQuery.paddingOf(context).bottom;
+    final small = p < 1;
     // v0.11: same widget tree small or full (a changing key here rebuilt
     // everything and made the video jump when the comments closed).
-    return ColoredBox(
-      color: Colors.black,
-      child: Column(
-        children: [
-          SizedBox(
-            key: ValueKey(p < 1 ? 'clip-small' : 'clip-full'),
-            height: pad * (1 - p),
-          ),
-          Expanded(child: _videoArea(c, small: p < 1)),
-          ClipRect(
-            child: Align(
-              alignment: Alignment.topCenter,
-              heightFactor: p,
-              child: IgnorePointer(
-                ignoring: p < 1,
-                child: Opacity(opacity: p, child: _bottomBars(c)),
+    // Fix update: the video fills down to the bottom (behind the caption
+    // bar); buttons + caption are a layer on top.
+    return StreamBuilder<bool>(
+      stream: _likedStream,
+      builder: (context, likeSnap) {
+        final likedServer = likeSnap.data ?? false;
+        final liked = _like.show(likedServer);
+        return ColoredBox(
+          color: Colors.black,
+          child: Stack(
+            children: [
+              Positioned(
+                key: const ValueKey('clip-video-layer'),
+                left: 0,
+                right: 0,
+                top: pad * (1 - p),
+                bottom: below,
+                child: _videoArea(c, liked, small: small),
               ),
-            ),
+              Positioned.fill(
+                child: Column(
+                  children: [
+                    SizedBox(
+                      key: ValueKey(small ? 'clip-small' : 'clip-full'),
+                      height: pad * (1 - p),
+                    ),
+                    Expanded(child: _overlayLayer(c, liked, likedServer, small)),
+                    ClipRect(
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        heightFactor: p,
+                        child: IgnorePointer(
+                          ignoring: small,
+                          child: Opacity(
+                            opacity: p,
+                            child: ColoredBox(
+                              key: const ValueKey('clip-bars'),
+                              color: const Color(0x99000000),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _bottomBars(c),
+                                  SizedBox(height: safeBottom),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: below),
+                  ],
+                ),
+              ),
+            ],
           ),
-          SizedBox(height: below),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -1193,13 +1236,9 @@ class _ClipPlayerState extends State<ClipPlayer>
     );
   }
 
-  Widget _videoArea(Post c, {bool small = false}) {
-    return StreamBuilder<bool>(
-      stream: _likedStream,
-      builder: (context, likeSnap) {
-        final likedServer = likeSnap.data ?? false;
-        final liked = _like.show(likedServer);
-        return Stack(
+  /// The video / photos + their gestures (bottom layer).
+  Widget _videoArea(Post c, bool liked, {bool small = false}) {
+    return Stack(
           fit: StackFit.expand,
           children: [
             // 1) the video + its gestures (bottom layer)
@@ -1243,23 +1282,23 @@ class _ClipPlayerState extends State<ClipPlayer>
                   ),
                 ),
               ),
-            // buttons fade out / in with the panel (v0.11)
-            if (_big > 0)
-              Positioned.fill(
-                child: IgnorePointer(
-                  ignoring: small,
-                  child: Opacity(
-                    opacity: _big,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: _overlays(c, liked, likedServer),
-                    ),
-                  ),
-                ),
-              ),
           ],
         );
-      },
+  }
+
+  /// Buttons, name, dots (above the video, under nothing). Empty parts let
+  /// touches through to the video. They fade out / in with the panel.
+  Widget _overlayLayer(Post c, bool liked, bool likedServer, bool small) {
+    if (_big <= 0) return const SizedBox.expand();
+    return IgnorePointer(
+      ignoring: small,
+      child: Opacity(
+        opacity: _big,
+        child: Stack(
+          fit: StackFit.expand,
+          children: _overlays(c, liked, likedServer),
+        ),
+      ),
     );
   }
 
@@ -1303,13 +1342,6 @@ class _ClipPlayerState extends State<ClipPlayer>
             ),
             if (!_ready && !_failed && !kDisableVideoPlayback)
               const Center(child: CircularProgressIndicator()),
-            // only "1/3" (no dots on clips)
-            if (_items.length > 1)
-              Positioned(
-                right: 12,
-                top: MediaQuery.of(context).padding.top + 14,
-                child: MediaPill(text: '${_item + 1}/${_items.length}'),
-              ),
 
             if (_ready && _ctrl != null && !_ctrl!.value.isPlaying && !_fast)
               Center(
@@ -1368,13 +1400,27 @@ class _ClipPlayerState extends State<ClipPlayer>
       if (c.replyTo != null)
         Positioned(
           left: 14,
-          bottom: c.hasMusic ? 74 : 60,
+          bottom: (c.hasMusic ? 74 : 60) + (_items.length > 1 ? 16 : 0),
           right: 80,
           child: Align(
             alignment: Alignment.centerLeft,
             child: ReplyStickerChip(
               reply: c.replyTo!,
               onTap: () => openPostById(context, c.replyTo!.postId),
+            ),
+          ),
+        ),
+      // fix update: dots above the name (photos / videos of this clip)
+      if (_items.length > 1)
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: c.hasMusic ? 66 : 56,
+          child: IgnorePointer(
+            child: PageDots(
+              key: const ValueKey('clip-dots'),
+              count: _items.length,
+              index: _item,
             ),
           ),
         ),
@@ -1426,7 +1472,12 @@ class _ClipPlayerState extends State<ClipPlayer>
                       ),
                       if (c.hasMusic) ...[
                         const SizedBox(height: 3),
-                        MusicChip(name: c.audioName),
+                        MusicChip(
+                          name: c.audioName,
+                          onTap: c.musicId.isEmpty
+                              ? null
+                              : () => openMusicOf(context, c),
+                        ),
                       ],
                     ],
                   ),
@@ -1616,7 +1667,8 @@ class _CaptionBar extends StatelessWidget {
         alignment: Alignment.topCenter,
         child: Container(
           width: double.infinity,
-          color: Colors.black,
+          // see-through: the video shows behind (the bar box is dark)
+          color: Colors.transparent,
           padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
           child: open
               ? ConstrainedBox(

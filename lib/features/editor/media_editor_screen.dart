@@ -22,6 +22,7 @@ import '../../shared/widgets/media_links.dart';
 import '../../shared/models/post.dart';
 import '../../shared/widgets/video_extras.dart';
 import '../../shared/widgets/stickers.dart';
+import '../music/presentation/music_picker_sheet.dart';
 import '../post/presentation/create_post_screen.dart';
 import 'edit_models.dart';
 import 'filters.dart';
@@ -34,11 +35,13 @@ import '../../shared/widgets/hi_text_check.dart';
 Future<void> openEditor(
   BuildContext context,
   List<PickedMedia> media,
-  ComposeMode mode,
-) {
+  ComposeMode mode, {
+  PickedAudio? audio,
+}) {
   return Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (_) => MediaEditorScreen(media: media, mode: mode),
+      builder: (_) =>
+          MediaEditorScreen(media: media, mode: mode, initialAudio: audio),
     ),
   );
 }
@@ -80,10 +83,14 @@ class MediaEditorScreen extends StatefulWidget {
     required this.media,
     required this.mode,
     this.onDone,
+    this.initialAudio,
   });
 
   final List<PickedMedia> media;
   final ComposeMode mode;
+
+  /// Music update: "Use this audio" -> starts with this song.
+  final PickedAudio? initialAudio;
 
   /// Tests: called with the result instead of opening the share screen.
   final ValueChanged<List<EditedMedia>>? onDone;
@@ -98,7 +105,11 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
       .map((m) => EditItem(m, mode: widget.mode))
       .toList();
   int _index = 0;
-  late _Tool _tool = _items.first.isVideo ? _Tool.text : _Tool.filters;
+  late _Tool _tool = widget.initialAudio != null
+      ? _Tool.music
+      : _items.first.isVideo
+      ? _Tool.text
+      : _Tool.filters;
   _Adjust _adjust = _Adjust.brightness;
   bool _exporting = false;
   bool _showGrid = false;
@@ -108,7 +119,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
   String? _videoError;
 
   /// Music from phone storage (v0.16: posts, clips and moments).
-  PickedAudio? _audio;
+  late PickedAudio? _audio = widget.initialAudio;
   bool _audioPlaying = false;
   bool get _musicAllowed => true;
 
@@ -181,6 +192,12 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
   @override
   void initState() {
     super.initState();
+    // music update: "Use this audio" -> the song plays at once
+    final a = widget.initialAudio;
+    if (a != null) {
+      _audioPlaying = true;
+      MusicPlayer.instance.play(_kPreview, a.source, startMs: a.startMs);
+    }
     _openItem();
   }
 
@@ -543,19 +560,31 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
 
   static const String _kPreview = 'editor-preview';
 
+  /// Music update: library / AI song / phone.
   Future<void> _pickMusic() async {
-    try {
-      final a = await MediaService.instance.pickAudio();
-      if (a == null || !mounted) return;
-      setState(() => _audio = a);
-      _playMusic(true);
-    } catch (e) {
-      if (!mounted) return;
-      final msg = e is StateError ? e.message : 'Could not open music: $e';
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(msg)));
+    final wasOn = _audioPlaying;
+    if (wasOn) _playMusic(false);
+    final a = await showMusicPicker(context);
+    if (!mounted) return;
+    if (a == null) {
+      if (wasOn) _playMusic(true);
+      return;
     }
+    setState(() => _audio = a);
+    _playMusic(true);
+  }
+
+  /// Start point dragged (shown at once, played on release).
+  int? _dragStartMs;
+
+  void _setMusicStart(int ms) {
+    final a = _audio;
+    if (a == null) return;
+    setState(() {
+      _dragStartMs = null;
+      _audio = a.withStart(ms);
+    });
+    _playMusic(true);
   }
 
   void _playMusic(bool on) {
@@ -563,7 +592,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
     if (a == null) return;
     setState(() => _audioPlaying = on);
     if (on) {
-      MusicPlayer.instance.play(_kPreview, a.file.path);
+      MusicPlayer.instance.play(_kPreview, a.source, startMs: a.startMs);
       _video?.setVolume(0); // music replaces the video sound
     } else {
       MusicPlayer.instance.stop(_kPreview);
@@ -603,7 +632,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
           ),
           const SizedBox(height: 10),
           const Text(
-            'From your phone · plays in a loop · replaces the video sound',
+            'Library · AI songs · your phone · plays in a loop',
             style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
         ],
@@ -666,7 +695,25 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
               ],
             ),
           ),
+          // music update: which part of the song plays
+          ValueListenableBuilder<int>(
+            valueListenable: MusicPlayer.instance.length,
+            builder: (_, playing, _) {
+              final len = a.durationMs > 0
+                  ? a.durationMs
+                  : MusicPlayer.instance.isOwner(_kPreview)
+                  ? playing
+                  : 0;
+              return MusicStartSlider(
+                startMs: _dragStartMs ?? a.startMs,
+                lengthMs: len,
+                onChanged: (ms) => setState(() => _dragStartMs = ms),
+                onChangeEnd: _setMusicStart,
+              );
+            },
+          ),
           TextButton.icon(
+            key: const ValueKey('editor-music-change'),
             onPressed: _pickMusic,
             icon: const Icon(Icons.swap_horiz, size: 18),
             label: const Text('Change music'),

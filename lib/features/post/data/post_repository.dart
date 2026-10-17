@@ -203,6 +203,9 @@ class PostRepository {
     UploadedMedia? cover,
     UploadedMedia? audio,
     String audioName = '',
+    String musicId = '',
+    int audioStartMs = 0,
+    int audioDurationMs = 0,
     PostOptions options = const PostOptions(),
     ReplyRef? replyTo,
   }) async {
@@ -216,7 +219,132 @@ class PostRepository {
     // cover for grids: chosen cover, else the first item's image
     final coverUrl = cover?.url ?? first.coverUrl;
     final coverKey = cover?.key ?? (first.isVideo ? first.thumbKey : '');
-    final batch = _db.batch();
+    // music update: the song gets a page ("use this audio")
+    final music = audio == null
+        ? null
+        : musicLink(
+            postId: postId,
+            musicId: musicId,
+            audioKey: audio.key,
+          );
+    await _commitPost(
+        ref,
+        me: me,
+        withMusic: music != null,
+        build: (batch, withMusic) {
+          _postBatch(
+            batch,
+            ref,
+            me: me,
+            type: type,
+            media: media,
+            caption: caption,
+            coverUrl: coverUrl,
+            coverKey: coverKey,
+            audio: audio,
+            audioName: audioName,
+            audioStartMs: audioStartMs,
+            musicId: withMusic ? music!.id : '',
+            options: options,
+            replyTo: replyTo,
+          );
+          if (withMusic && audio != null) {
+            final m = _db.collection('music').doc(music!.id);
+            if (music.create) {
+              batch.set(m, {
+                'source': 'original',
+                'ownerUid': me.uid,
+                'title': cut(audioName.isEmpty ? 'Original audio' : audioName, 120),
+                'artist': cut('@${me.username}', 80),
+                'url': audio.url,
+                'key': audio.key,
+                'durationMs': audioDurationMs < 0 ? 0 : audioDurationMs,
+                'uses': 1,
+                'hidden': false,
+                'createdAt': FieldValue.serverTimestamp(),
+                'lastPost': postId,
+              });
+            } else {
+              batch.update(m, {
+                'uses': FieldValue.increment(1),
+                'lastPost': postId,
+              });
+            }
+          }
+        },
+      );
+  }
+
+  /// Which song doc a new post links to. Phone music -> a new
+  /// "original audio" song `o_<postId>`; a library / AI / someone's song ->
+  /// that song (+1 use). null = no song page.
+  static ({String id, bool create})? musicLink({
+    required String postId,
+    required String musicId,
+    required String audioKey,
+  }) {
+    if (musicId.isNotEmpty) {
+      if (musicId.contains('/') || musicId.length > 64) return null;
+      return (id: musicId, create: false);
+    }
+    if (audioKey.isEmpty) return null;
+    return (id: 'o_$postId', create: true);
+  }
+
+  static String cut(String s, int max) =>
+      s.length <= max ? s : s.substring(0, max);
+
+  /// Commits; if the song part is refused (song hidden / rules not pasted
+  /// yet) the post still goes up without the song page.
+  Future<void> _commitPost(
+    DocumentReference<Map<String, dynamic>> ref, {
+    required UserProfile me,
+    required bool withMusic,
+    required void Function(WriteBatch batch, bool withMusic) build,
+  }) async {
+    Future<void> once(bool music) {
+      final batch = _db.batch();
+      build(batch, music);
+      return batch.commit();
+    }
+
+    Future<bool> posted() => ref
+        .get()
+        .then((d) => d.exists && d.data()?['authorId'] == me.uid)
+        .catchError((Object _) => false);
+
+    try {
+      await once(withMusic);
+    } catch (e) {
+      // posted already (app closed right after the last try)?
+      if (await posted()) return;
+      if (!withMusic) rethrow;
+      debugPrint('post: song link refused ($e), posting without it');
+      try {
+        await once(false);
+      } catch (_) {
+        if (!await posted()) rethrow;
+      }
+    }
+  }
+
+  void _postBatch(
+    WriteBatch batch,
+    DocumentReference<Map<String, dynamic>> ref, {
+    required UserProfile me,
+    required String type,
+    required List<MediaItem> media,
+    required String caption,
+    required String coverUrl,
+    required String coverKey,
+    required UploadedMedia? audio,
+    required String audioName,
+    required int audioStartMs,
+    required String musicId,
+    required PostOptions options,
+    required ReplyRef? replyTo,
+  }) {
+    final first = media.first;
     batch.set(ref, {
       ..._base(me, options, caption),
       'type': type,
@@ -234,6 +362,8 @@ class PostRepository {
         'audioUrl': audio.url,
         'audioKey': audio.key,
         'audioName': audioName,
+        if (musicId.isNotEmpty) 'musicId': musicId,
+        if (audioStartMs > 0) 'audioStartMs': audioStartMs,
       },
       // v0.9: made as an answer to a comment
       if (replyTo != null) 'replyTo': replyTo.toMap(),
@@ -252,16 +382,6 @@ class PostRepository {
         edits: first.edits,
         durationMs: first.durationMs,
       );
-    }
-    try {
-      await batch.commit();
-    } catch (e) {
-      // posted already (app closed right after the last try)?
-      final done = await ref
-          .get()
-          .then((d) => d.exists && d.data()?['authorId'] == me.uid)
-          .catchError((Object _) => false);
-      if (!done) rethrow;
     }
   }
 

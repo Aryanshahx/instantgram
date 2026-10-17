@@ -150,12 +150,6 @@ class _PostCardState extends State<PostCard>
                       ),
                     ),
                   ),
-                  if (p.pinned)
-                    const Icon(
-                      Icons.push_pin,
-                      size: 18,
-                      color: AppColors.textSecondary,
-                    ),
                   IconButton(
                     onPressed: () =>
                         showPostMenu(context, p, onDeleted: widget.onDeleted),

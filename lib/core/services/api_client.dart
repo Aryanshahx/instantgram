@@ -22,10 +22,12 @@ class ApiClient {
   ApiClient._();
   static final ApiClient instance = ApiClient._();
 
+  /// [timeout]: AI songs take up to a few minutes (default 30 s).
   Future<Map<String, dynamic>> post(
     String path,
-    Map<String, dynamic> body,
-  ) async {
+    Map<String, dynamic> body, {
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
     if (!AppConfig.hasApi) {
       throw const ApiException(
         'Upload server is not set up yet (API_BASE_URL missing).',
@@ -46,7 +48,7 @@ class ApiClient {
             },
             body: jsonEncode(body),
           )
-          .timeout(const Duration(seconds: 30));
+          .timeout(timeout);
     } catch (_) {
       throw const ApiException('Could not reach the server. Check internet.');
     }

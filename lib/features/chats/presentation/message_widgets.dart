@@ -19,9 +19,11 @@ import '../data/chat_repository.dart';
 import 'group_widgets.dart';
 import '../../../shared/widgets/verified_badge.dart';
 import '../../../shared/widgets/bio_font.dart';
+import '../../../shared/widgets/emoji_picker.dart';
 
-/// Quick reactions on a long-press (v0.9).
-const List<String> kReactEmojis = ['❤️', '😂', '😮', '😢', '😡', '👍'];
+/// Quick reactions on a long-press (v0.9). Default ones - you can change
+/// them ("+" -> Your quick reactions), see [QuickReactions].
+const List<String> kReactEmojis = QuickReactions.defaults;
 
 enum MessageAction { reply, forward, copy, pin, unpin, deleteAll, deleteMe }
 
@@ -55,6 +57,7 @@ Future<MessageMenuResult?> showMessageMenu(
 }) {
   final deleteAll = canDeleteAll ?? mine;
   HapticFeedback.mediumImpact();
+  unawaited(QuickReactions.instance.load());
   return showModalBottomSheet<MessageMenuResult>(
     context: context,
     backgroundColor: AppColors.surface,
@@ -89,30 +92,76 @@ Future<MessageMenuResult?> showMessageMenu(
             mainAxisSize: MainAxisSize.min,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    for (final e in kReactEmojis)
-                      GestureDetector(
-                        key: ValueKey('react-$e'),
-                        onTap: () => Navigator.pop(
-                          ctx,
-                          MessageMenuResult.react(e == myEmoji ? '' : e),
-                        ),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          padding: const EdgeInsets.all(7),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: e == myEmoji
-                                ? AppColors.surfaceHigh
-                                : Colors.transparent,
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                child: ValueListenableBuilder<List<String>>(
+                  valueListenable: QuickReactions.instance.emojis,
+                  builder: (_, quick, _) {
+                    void react(String e) => Navigator.pop(
+                      ctx,
+                      MessageMenuResult.react(e == myEmoji ? '' : e),
+                    );
+                    // "+" = any emoji; hold a quick one = change it
+                    Future<void> more({int? slot}) async {
+                      final e = await showEmojiPicker(ctx, editSlot: slot);
+                      if (e != null && ctx.mounted) react(e);
+                    }
+
+                    Widget bubble(String e, {Key? key, int? slot}) =>
+                        GestureDetector(
+                          key: key ?? ValueKey('react-$e'),
+                          onTap: () => react(e),
+                          onLongPress: slot == null
+                              ? null
+                              : () => more(slot: slot),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: e == myEmoji
+                                  ? AppColors.surfaceHigh
+                                  : Colors.transparent,
+                            ),
+                            child: Text(
+                              e,
+                              style: const TextStyle(fontSize: 27),
+                            ),
                           ),
-                          child: Text(e, style: const TextStyle(fontSize: 28)),
+                        );
+                    final mineOther = myEmoji != null &&
+                        myEmoji.isNotEmpty &&
+                        !quick.contains(myEmoji);
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        for (var i = 0; i < quick.length; i++)
+                          bubble(quick[i], slot: i),
+                        // your reaction from the "+" list (tap = remove)
+                        if (mineOther)
+                          bubble(
+                            myEmoji,
+                            key: const ValueKey('react-mine'),
+                          ),
+                        GestureDetector(
+                          key: const ValueKey('react-more'),
+                          onTap: more,
+                          child: Container(
+                            width: 38,
+                            height: 38,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: AppColors.surfaceHigh,
+                            ),
+                            child: const Icon(
+                              Icons.add,
+                              size: 22,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
                         ),
-                      ),
-                  ],
+                      ],
+                    );
+                  },
                 ),
               ),
               if (canReply)

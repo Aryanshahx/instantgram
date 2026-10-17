@@ -61,9 +61,17 @@ class ClipCover extends StatelessWidget {
 }
 
 class PostTile extends StatelessWidget {
-  const PostTile({super.key, required this.post, required this.onTap});
+  const PostTile({
+    super.key,
+    required this.post,
+    required this.onTap,
+    this.showPinned = false,
+  });
   final Post post;
   final VoidCallback onTap;
+
+  /// The pin shows only on the profile grid (not Explore / saved / ...).
+  final bool showPinned;
 
   @override
   Widget build(BuildContext context) {
@@ -76,7 +84,7 @@ class PostTile extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           ClipCover(post: post),
-          if (post.pinned)
+          if (post.pinned && showPinned)
             const Positioned(
               top: 6,
               left: 6,
@@ -155,9 +163,13 @@ class PostGrid extends StatelessWidget {
     required this.emptyIcon,
     required this.emptyTitle,
     this.emptySubtitle,
+    this.showPinned = false,
   });
 
   final List<Post> posts;
+
+  /// Profile posts / clips: pinned ones show a pin.
+  final bool showPinned;
   final void Function(int index) onTap;
   final IconData emptyIcon;
   final String emptyTitle;
@@ -192,6 +204,7 @@ class PostGrid extends StatelessWidget {
           key: ValueKey('grid-${posts[i].id}'),
           post: posts[i],
           onTap: () => onTap(i),
+          showPinned: showPinned,
         ),
       ),
     );

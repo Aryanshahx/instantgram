@@ -603,6 +603,8 @@ class Post {
     this.audioUrl = '',
     this.audioKey = '',
     this.audioName = '',
+    this.musicId = '',
+    this.audioStartMs = 0,
     this.savesCount = 0,
     this.replyTo,
     this.pinnedComment = '',
@@ -672,6 +674,12 @@ class Post {
   final String audioKey;
   final String audioName;
 
+  /// Music update: the song (music/{id}, '' = none / older posts) and
+  /// where it starts. `o_<postId>` = this post's own phone music, others
+  /// can use it too -> its file is kept when the post is deleted.
+  final String musicId;
+  final int audioStartMs;
+
   final int savesCount;
 
   /// v0.9: this post / clip answers a comment (sticker on it).
@@ -725,7 +733,8 @@ class Post {
       if (m.edits.voiceKey.isNotEmpty) m.edits.voiceKey,
     ],
     if (thumbKey.isNotEmpty) thumbKey,
-    if (audioKey.isNotEmpty) audioKey,
+    // shared "original audio" stays for the people using it
+    if (audioKey.isNotEmpty && !musicId.startsWith('o_')) audioKey,
     if (edits.voiceKey.isNotEmpty) edits.voiceKey,
   }.toList();
 
@@ -775,6 +784,8 @@ class Post {
       audioUrl: _str(m['audioUrl']),
       audioKey: _str(m['audioKey']),
       audioName: _str(m['audioName']),
+      musicId: _str(m['musicId']),
+      audioStartMs: _int(m['audioStartMs']),
       savesCount: _int(m['savesCount']),
       replyTo: ReplyRef.fromMap(m['replyTo']),
       pinnedComment: _str(m['pinnedComment']),
@@ -1076,6 +1087,7 @@ class Story {
     this.audioUrl = '',
     this.audioKey = '',
     this.audioName = '',
+    this.audioStartMs = 0,
     this.sensitive = false,
     this.modState = '',
   });
@@ -1095,6 +1107,9 @@ class Story {
   final String audioUrl;
   final String audioKey;
   final String audioName;
+
+  /// Music update: where the song starts.
+  final int audioStartMs;
   bool get hasMusic => audioUrl.isNotEmpty;
 
   final String id;
@@ -1121,7 +1136,11 @@ class Story {
     if (durationMs > 0) 'durationMs': durationMs,
     'createdAt': Timestamp.fromDate(createdAt),
     if (isVideo) ...edits.toMap(),
-    if (hasMusic) ...{'audioUrl': audioUrl, 'audioName': audioName},
+    if (hasMusic) ...{
+      'audioUrl': audioUrl,
+      'audioName': audioName,
+      if (audioStartMs > 0) 'audioStartMs': audioStartMs,
+    },
     // v0.18: a blurred moment stays blurred in the highlight
     if (sensitive) 'sensitive': true,
   };
@@ -1145,6 +1164,7 @@ class Story {
       audioUrl: _str(m['audioUrl']),
       audioKey: _str(m['audioKey']),
       audioName: _str(m['audioName']),
+      audioStartMs: _int(m['audioStartMs']),
       sensitive: _bool(m['sensitive']),
       modState: _str(m['modState']),
     );

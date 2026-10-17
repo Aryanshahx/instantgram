@@ -232,8 +232,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         caption: _isStory ? '' : _caption.text,
         options: _isStory ? _momentOptions : _options,
         coverPath: !_isStory && _hasCover ? _cover?.path : null,
-        audioPath: widget.audio?.file.path,
+        audioPath: widget.audio == null || widget.audio!.isOnline
+            ? null
+            : widget.audio!.file.path,
         audioName: widget.audio?.name ?? '',
+        // music update: library / AI / someone's song (no upload)
+        audioUrl: widget.audio?.url ?? '',
+        musicId: widget.audio?.musicId ?? '',
+        audioStartMs: widget.audio?.startMs ?? 0,
+        audioDurationMs: widget.audio?.durationMs ?? 0,
         replyTo: _isStory ? null : _reply,
       );
       if (!_isStory) SpamGuard.instance.recordPost();
@@ -511,7 +518,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               onPressed: () {
                 setState(() => _musicPlaying = !_musicPlaying);
                 _musicPlaying
-                    ? MusicPlayer.instance.play(_kMusic, a.file.path)
+                    ? MusicPlayer.instance.play(
+                        _kMusic,
+                        a.source,
+                        startMs: a.startMs,
+                      )
                     : MusicPlayer.instance.stop(_kMusic);
               },
               icon: Icon(_musicPlaying ? Icons.pause : Icons.play_arrow),

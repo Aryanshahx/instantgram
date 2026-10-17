@@ -491,6 +491,7 @@ class _StreamGridState extends State<_StreamGrid>
         return PostGrid(
           posts: posts,
           onTap: (i) => openPost(context, posts, i),
+          showPinned: true,
           emptyIcon: emptyIcon,
           emptyTitle: emptyTitle,
           emptySubtitle: emptySubtitle,

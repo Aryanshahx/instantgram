@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../core/services/chat_prefs.dart';
 import '../../core/theme/app_colors.dart';
+import 'chat_wallpapers.dart';
 
 /// v0.0.1: chat themes (background + bubble colours). Only YOU see the
 /// theme you pick for a chat; it is saved in prefs/{uid}.chatThemes.
@@ -201,11 +202,22 @@ class ChatBackground extends StatelessWidget {
 
   final ChatTheme theme;
 
-  /// Picture file on this phone ('' = none).
+  /// Picture file on this phone ('' = none), or a built-in background
+  /// (`wp:<id>`, doodles / gradients).
   final String photo;
 
   @override
   Widget build(BuildContext context) {
+    final wp = ChatWallpaper.fromValue(photo);
+    if (wp != null) return ChatWallpaperView(wallpaper: wp);
+    if (ChatWallpaper.isWallpaper(photo)) {
+      // unknown built-in (older/newer app) -> just the theme
+      return DecoratedBox(
+        key: ValueKey('chat-bg-${theme.id}'),
+        decoration: theme.background,
+        child: const SizedBox.expand(),
+      );
+    }
     return DecoratedBox(
       key: ValueKey('chat-bg-${theme.id}'),
       decoration: theme.background,
@@ -263,7 +275,24 @@ Future<String?> showChatThemePicker(
 }) async {
   final prefs = ChatPrefs.instance.value.value;
   final now = prefs.themeOf(chatId);
-  final hasPhoto = prefs.backgroundOf(chatId).isNotEmpty;
+  final bg = prefs.backgroundOf(chatId);
+  final hasBg = bg.isNotEmpty;
+  final hasPhoto = hasBg && !ChatWallpaper.isWallpaper(bg);
+  Widget wallRow(String key, List<ChatWallpaper> list, BuildContext ctx) =>
+      SizedBox(
+        height: 86,
+        child: ListView.separated(
+          key: ValueKey(key),
+          scrollDirection: Axis.horizontal,
+          itemCount: list.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 10),
+          itemBuilder: (_, i) => _WallSwatch(
+            wallpaper: list[i],
+            selected: bg == list[i].value,
+            onTap: () => Navigator.of(ctx).pop(list[i].value),
+          ),
+        ),
+      );
   final picked = await showModalBottomSheet<String>(
     context: context,
     isScrollControlled: true,
@@ -318,7 +347,7 @@ Future<String?> showChatThemePicker(
                       label: Text(hasPhoto ? 'Change photo' : 'Choose photo'),
                     ),
                   ),
-                  if (hasPhoto) ...[
+                  if (hasBg) ...[
                     const SizedBox(width: 10),
                     OutlinedButton(
                       key: const ValueKey('chat-bg-remove'),
@@ -331,6 +360,20 @@ Future<String?> showChatThemePicker(
                   ],
                 ],
               ),
+              const SizedBox(height: 12),
+              const Text(
+                'Doodles',
+                style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 6),
+              wallRow('chat-wp-doodles', ChatWallpaper.doodles, ctx),
+              const SizedBox(height: 8),
+              const Text(
+                'Gradients',
+                style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 6),
+              wallRow('chat-wp-gradients', ChatWallpaper.gradients, ctx),
             ],
           ),
         ),
@@ -341,6 +384,10 @@ Future<String?> showChatThemePicker(
   final setBg = saveBackground ?? ChatPrefs.instance.setBackground;
   if (picked == _photoRemove) {
     await setBg(chatId, null);
+    return null;
+  }
+  if (ChatWallpaper.isWallpaper(picked)) {
+    await setBg(chatId, picked);
     return null;
   }
   if (picked == _photoPick) {
@@ -355,6 +402,60 @@ Future<String?> showChatThemePicker(
   if (picked == now) return picked;
   await (save ?? ChatPrefs.instance.setTheme)(chatId, picked);
   return picked;
+}
+
+/// A built-in background in the sheet.
+class _WallSwatch extends StatelessWidget {
+  const _WallSwatch({
+    required this.wallpaper,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final ChatWallpaper wallpaper;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      key: ValueKey('chat-wp-pick-${wallpaper.id}'),
+      onTap: onTap,
+      child: SizedBox(
+        width: 58,
+        child: Column(
+          children: [
+            Container(
+              width: 58,
+              height: 66,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: selected ? AppColors.lime : AppColors.border,
+                  width: selected ? 2 : 1,
+                ),
+              ),
+              child: ChatWallpaperView(wallpaper: wallpaper),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              wallpaper.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+                color: selected
+                    ? AppColors.textPrimary
+                    : AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 const String _photoPick = '#photo';

@@ -464,12 +464,6 @@ class _ExploreTileState extends State<ExploreTile> {
                     ),
                   ),
                 ),
-                if (post.pinned)
-                  const Positioned(
-                    left: 10,
-                    top: 10,
-                    child: Icon(Icons.push_pin, size: 18, color: Colors.white),
-                  ),
                 Positioned(
                   left: 10,
                   bottom: 9,

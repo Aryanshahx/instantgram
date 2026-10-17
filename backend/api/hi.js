@@ -11,16 +11,30 @@
 // v0.20: POST /api/hi { action: 'report', reportId } -> counts a report
 //   (3 points = blurred, 6 = hidden, child safety = hidden at once).
 //   The daily job also updates the trending list (config/trending).
+// Music update: POST /api/hi { action: 'songInfo' } -> { enabled, left, perDay, fullCost }
+//   POST /api/hi { action: 'song', prompt, full?, instrumental?, title? }
+//   -> the new AI song (Google Lyria). Daily limit per person + for the app.
 import { requireUser } from '../lib/firebase-auth.js';
 import { HttpError, env, postHandler, send } from '../lib/http.js';
 import { getDoc, notSetUp, serviceAccount } from '../lib/google.js';
 import { KINDS, checkItem, decided, pathOf, sweep } from '../lib/hi.js';
 import { allowTranslate, translate } from '../lib/translate.js';
 import { handleReport, updateTrending } from '../lib/safety.js';
+import { FULL_COST, makeSong, quotaOf } from '../lib/music.js';
+import { putFile } from '../lib/tigris.js';
 
 const ID = /^[A-Za-z0-9_-]{6,64}$/;
 
-export async function handle(uid, body, { sa = serviceAccount(), fetchFn = fetch, key = env('OPENAI_API_KEY'), now = Date.now() } = {}) {
+export async function handle(uid, body, { sa = serviceAccount(), fetchFn = fetch, key = env('OPENAI_API_KEY'), now = Date.now(), geminiKey = env('GEMINI_API_KEY'), save = putFile } = {}) {
+  if (body.action === 'songInfo') {
+    if (!sa) throw notSetUp('AI songs');
+    const { left, perDay } = await quotaOf(sa, uid, { now, fetchFn });
+    return { enabled: !!geminiKey, left: geminiKey ? left : 0, perDay, fullCost: FULL_COST };
+  }
+  if (body.action === 'song') {
+    if (!sa) throw notSetUp('AI songs');
+    return makeSong(sa, uid, body, { save, fetchFn, key: geminiKey, openaiKey: key, now });
+  }
   if (body.action === 'translate') {
     if (!allowTranslate(uid, now)) throw new HttpError(429, 'Too many translations, try again in a few minutes');
     return translate(body, { fetchFn });

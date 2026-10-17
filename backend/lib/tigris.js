@@ -6,6 +6,7 @@ import {
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
   ListPartsCommand,
+  PutBucketCorsCommand,
   PutObjectCommand,
   S3Client,
   UploadPartCommand,
@@ -134,7 +135,9 @@ export async function deleteOwned({ uid, key }) {
 export async function deleteKeys(keys, send = (c) => s3().send(c)) {
   let n = 0;
   for (const key of keys) {
-    if (typeof key !== 'string' || key.includes('..') || !KINDS.some((k) => key.startsWith(`${k}/`))) continue;
+    // music/lib/... = songs of the music library (admin)
+    if (typeof key !== 'string' || key.includes('..')) continue;
+    if (!KINDS.some((k) => key.startsWith(`${k}/`)) && !key.startsWith('music/lib/')) continue;
     try {
       await send(new DeleteObjectCommand({ Bucket: requireEnv('TIGRIS_BUCKET'), Key: key }));
       n++;
@@ -158,6 +161,70 @@ export async function putNoticeImage(bytes, send = (c) => s3().send(c)) {
     }),
   );
   return { key, url: publicUrl(key) };
+}
+
+// ---------------- music (0.0.1 music update) ----------------
+
+/** Saves a file under [key] (AI songs, small library songs). */
+export async function putFile(key, bytes, contentType, send = (c) => s3().send(c)) {
+  if (typeof key !== 'string' || key.includes('..')) throw new HttpError(400, 'Bad key');
+  await send(
+    new PutObjectCommand({
+      Bucket: requireEnv('TIGRIS_BUCKET'),
+      Key: key,
+      Body: bytes,
+      ContentType: contentType,
+      CacheControl: CACHE_CONTROL,
+    }),
+  );
+  return { key, url: publicUrl(key) };
+}
+
+const MUSIC_TYPES = { 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/aac': 'aac', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/ogg': 'ogg' };
+
+/** Admin website: presigned PUT for a library song (music/lib/...). */
+export async function createMusicUpload({ contentType, size }) {
+  const ext = MUSIC_TYPES[contentType];
+  if (!ext) throw new HttpError(400, `File type not allowed: ${contentType}`);
+  const n = Number(size);
+  if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'Bad file size');
+  if (n > MAX_AUDIO) throw new HttpError(413, `File too big (max ${MAX_AUDIO / MB} MB)`);
+  const key = `music/lib/${Date.now()}-${randomUUID()}.${ext}`;
+  const command = new PutObjectCommand({
+    Bucket: requireEnv('TIGRIS_BUCKET'),
+    Key: key,
+    ContentType: contentType,
+    CacheControl: CACHE_CONTROL,
+  });
+  const uploadUrl = await getSignedUrl(s3(), command, {
+    expiresIn: 900,
+    signableHeaders: new Set(['content-type', 'cache-control']),
+  });
+  return { uploadUrl, key, url: publicUrl(key), headers: { 'Content-Type': contentType, 'Cache-Control': CACHE_CONTROL } };
+}
+
+let corsDone = false;
+/** Lets the admin website upload straight to the bucket (browser PUT).
+ *  Once per server start; false when Tigris said no. */
+export async function ensureCors(send = (c) => s3().send(c)) {
+  if (corsDone) return true;
+  try {
+    await send(
+      new PutBucketCorsCommand({
+        Bucket: requireEnv('TIGRIS_BUCKET'),
+        CORSConfiguration: {
+          CORSRules: [
+            { AllowedOrigins: ['*'], AllowedMethods: ['GET', 'HEAD', 'PUT'], AllowedHeaders: ['*'], ExposeHeaders: ['ETag'], MaxAgeSeconds: 3600 },
+          ],
+        },
+      }),
+    );
+    corsDone = true;
+    return true;
+  } catch (e) {
+    console.warn('tigris cors', e?.name || e);
+    return false;
+  }
 }
 
 // ---------------- multipart (big videos, parts in parallel) ----------------

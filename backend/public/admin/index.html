@@ -259,6 +259,7 @@
     <button data-page="posts"><svg class="i" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M3.5 15.5l4.5-4.5 4 4 3-3 5.5 5.5"/><circle cx="15.5" cy="8.5" r="1.5"/></svg><span class="lb"><span class="full">Posts &amp; clips</span><span class="short">Posts</span></span></button>
     <button data-page="reports"><svg class="i" viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg><span class="lb">Reports</span></button>
     <button data-page="hi"><svg class="i" viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.3 7.5 9.5 4.4-1.2 7.5-4.9 7.5-9.5V6L12 3z"/><path d="m9 12 2 2 4-4"/></svg><span class="lb"><span class="full">Hyper Intelligence</span><span class="short">Safety</span></span><span id="hiBadge" class="tag red hide"></span></button>
+    <button data-page="music"><svg class="i" viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg><span class="lb">Music</span></button>
     <button data-page="notice"><svg class="i" viewBox="0 0 24 24"><path d="M4 10v4h3l6 4V6L7 10H4zM16.5 8.5a5 5 0 0 1 0 7"/></svg><span class="lb"><span class="full">Send notice</span><span class="short">Notice</span></span></button>
   </nav>
   <main>
@@ -366,6 +367,36 @@
       </div>
       <div class="muted small hide" id="hiInfo" style="margin-bottom:8px"></div>
       <div class="list" id="hiList"></div>
+    </div>
+
+    <div id="page-music" class="hide">
+      <div class="bar-top"><h2>Music</h2><button id="musicRefresh" class="small">Refresh</button></div>
+      <div class="form">
+        <div class="small muted">Add free songs people can use in posts, clips and moments. Only use songs you are allowed to share (for example from pixabay.com/music). MP3, M4A, WAV or OGG, max 20 MB.</div>
+        <label for="musicFile">Song file</label>
+        <input id="musicFile" type="file" accept="audio/*">
+        <div class="row" style="flex-wrap:nowrap;gap:10px">
+          <div style="flex:1;min-width:0"><label for="musicTitle">Song name</label><input id="musicTitle" maxlength="80" placeholder="Song name"></div>
+          <div style="flex:1;min-width:0"><label for="musicArtist">Artist</label><input id="musicArtist" maxlength="80" placeholder="Artist (optional)"></div>
+        </div>
+        <label for="musicMood">Mood</label>
+        <select id="musicMood">
+          <option value="happy">Happy</option><option value="sad">Sad</option><option value="love">Love</option>
+          <option value="party">Party</option><option value="chill">Chill</option><option value="epic">Epic</option>
+          <option value="funny">Funny</option><option value="devotional">Devotional</option><option value="workout">Workout</option>
+          <option value="other" selected>Other</option>
+        </select>
+        <button class="primary" id="musicAdd" style="margin-top:14px;width:100%;height:36px">Add song</button>
+        <div class="small muted" id="musicStatus" style="margin-top:8px"></div>
+      </div>
+      <div class="tabs" id="musicTabs" style="margin-top:16px">
+        <button data-src="library" class="on">Library</button>
+        <button data-src="ai">AI songs</button>
+        <button data-src="original">From phones</button>
+      </div>
+      <div class="small muted" id="musicHint" style="margin:6px 0 8px">Hide = can't be picked any more, posts using it still play. Delete = file gone, those posts become silent.</div>
+      <audio id="musicAudio" class="hide"></audio>
+      <div class="tablebox"><div class="list" id="musicList"></div></div>
     </div>
 
     <div id="page-notice" class="hide">
@@ -485,12 +516,126 @@
   }
   $('logout').addEventListener('click', () => logout(true));
 
+  // ---------------- music (library songs, AI songs, original audio) ----------------
+  let musicSource = 'library';
+  const fmtDur = (ms) => { const t = Math.round((Number(ms) || 0) / 1000); return t ? `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}` : '–'; };
+  async function loadMusic() {
+    const box = $('musicList');
+    box.innerHTML = '<p class="muted">Loading…</p>';
+    try {
+      const { items } = await api('musicList', { source: musicSource });
+      if (!items.length) {
+        const emptyText = musicSource === 'library' ? 'No songs yet. Add a song above.' : 'Nothing yet.';
+        box.innerHTML = `<p class="muted">${esc(emptyText)}</p>`;
+        return;
+      }
+      box.innerHTML = items.map((m) => `<div class="item r" data-id="${esc(m.id)}">
+        <button class="ghost small mplay" data-url="${esc(m.url)}">Play</button>
+        <div class="grow" style="min-width:0;flex:1">
+          <div><b>${esc(m.title)}</b> <span class="muted">${esc(m.artist)}</span>${m.hidden ? ' <span class="tag amber">Hidden</span>' : ''}${m.mood ? ` <span class="tag">${esc(m.mood)}</span>` : ''}</div>
+          <div class="small muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.uses} uses · ${fmtDur(m.durationMs)}${m.prompt ? ` · “${esc(m.prompt)}”` : ''}</div>
+        </div>
+        <button class="ghost small mhide" data-hidden="${m.hidden ? 1 : 0}">${m.hidden ? 'Show' : 'Hide'}</button>
+        <button class="ghost small mdel">Delete</button>
+      </div>`).join('');
+    } catch (e) {
+      box.innerHTML = `<p class="msg">${esc(e.message)}</p>`;
+    }
+  }
+  $('musicRefresh').addEventListener('click', loadMusic);
+  $('musicTabs').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    musicSource = b.dataset.src;
+    for (const x of $('musicTabs').children) x.classList.toggle('on', x === b);
+    loadMusic();
+  });
+  $('musicList').addEventListener('click', async (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    const row = b.closest('.item'); const mid = row?.dataset.id;
+    const audio = $('musicAudio');
+    if (b.classList.contains('mplay')) {
+      if (b.textContent === 'Stop') { audio.pause(); b.textContent = 'Play'; return; }
+      for (const x of document.querySelectorAll('.mplay')) x.textContent = 'Play';
+      audio.src = b.dataset.url; audio.play().catch(fail); b.textContent = 'Stop';
+      audio.onended = () => { b.textContent = 'Play'; };
+      return;
+    }
+    try {
+      if (b.classList.contains('mhide')) {
+        await api('musicEdit', { id: mid, hidden: b.dataset.hidden !== '1' });
+        toast(b.dataset.hidden === '1' ? 'Song can be picked again' : 'Song hidden');
+      } else if (b.classList.contains('mdel')) {
+        const typed = prompt('Delete this song for ever? Posts using it become silent.\nType DELETE to confirm (or use Hide instead).');
+        if (typed !== 'DELETE') return;
+        await api('musicDelete', { id: mid, confirm: 'DELETE' });
+        toast('Song deleted');
+      }
+      loadMusic();
+    } catch (err) { fail(err); }
+  });
+  $('musicFile').addEventListener('change', () => {
+    const f = $('musicFile').files[0];
+    if (f && !$('musicTitle').value.trim()) $('musicTitle').value = f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 80);
+  });
+  const musicType = (f) => {
+    const t = (f.type || '').toLowerCase();
+    if (t === 'audio/mp3') return 'audio/mpeg';
+    if (t) return t;
+    const ext = (f.name.split('.').pop() || '').toLowerCase();
+    return ({ mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', ogg: 'audio/ogg' })[ext] || '';
+  };
+  const audioLength = (f) => new Promise((done) => {
+    const a = new Audio(); const url = URL.createObjectURL(f);
+    const end = (v) => { URL.revokeObjectURL(url); done(v); };
+    a.preload = 'metadata';
+    a.onloadedmetadata = () => end(Number.isFinite(a.duration) ? Math.round(a.duration * 1000) : 0);
+    a.onerror = () => end(0);
+    setTimeout(() => end(0), 8000);
+    a.src = url;
+  });
+  const asDataUrl = (f, type) => new Promise((done, bad) => {
+    const r = new FileReader();
+    r.onload = () => done(`data:${type};base64,${String(r.result).split(',')[1] || ''}`);
+    r.onerror = () => bad(new Error('Could not read the file'));
+    r.readAsDataURL(f);
+  });
+  $('musicAdd').addEventListener('click', async () => {
+    const f = $('musicFile').files[0];
+    const title = $('musicTitle').value.trim();
+    if (!f) return toast('Choose a song file');
+    if (!title) return toast('Write the song name');
+    const type = musicType(f);
+    if (!type) return toast('Use an MP3, M4A, WAV or OGG file');
+    if (f.size > 20 * 1024 * 1024) return toast('File too big (max 20 MB)');
+    const btn = $('musicAdd'); const st = $('musicStatus');
+    btn.disabled = true; st.textContent = 'Uploading…';
+    try {
+      const durationMs = await audioLength(f);
+      const info = { title, artist: $('musicArtist').value.trim(), mood: $('musicMood').value, durationMs };
+      if (f.size <= 3 * 1024 * 1024) {
+        await api('musicAdd', { ...info, file: await asDataUrl(f, type) });
+      } else {
+        const up = await api('musicUploadUrl', { contentType: type, size: f.size });
+        const r = await fetch(up.uploadUrl, { method: 'PUT', headers: up.headers, body: f }).catch(() => null);
+        if (!r || !r.ok) throw new Error('Upload blocked by the bucket. Use a file under 3 MB, or in Tigris open the bucket → Settings → CORS and allow PUT from any origin.');
+        await api('musicAdd', { ...info, key: up.key });
+      }
+      st.textContent = `Added “${title}”`;
+      $('musicFile').value = ''; $('musicTitle').value = ''; $('musicArtist').value = '';
+      if (musicSource !== 'library') $('musicTabs').children[0].click(); else loadMusic();
+    } catch (e) {
+      st.textContent = e.message || String(e);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   // ---------------- navigation ----------------
   const loaded = {};
   function go(page) {
     for (const b of $('nav').children) b.classList.toggle('on', b.dataset.page === page);
-    for (const p of ['dash', 'users', 'posts', 'reports', 'hi', 'notice']) $(`page-${p}`).classList.toggle('hide', p !== page);
-    if (!loaded[page]) { loaded[page] = true; ({ dash: loadDash, users: () => loadUsers(true), posts: () => loadPosts(true), reports: () => loadReports(true), hi: loadHi, notice: () => {} })[page](); }
+    for (const p of ['dash', 'users', 'posts', 'reports', 'hi', 'music', 'notice']) $(`page-${p}`).classList.toggle('hide', p !== page);
+    if (!loaded[page]) { loaded[page] = true; ({ dash: loadDash, users: () => loadUsers(true), posts: () => loadPosts(true), reports: () => loadReports(true), hi: loadHi, music: loadMusic, notice: () => {} })[page](); }
   }
   $('nav').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) go(b.dataset.page); });
 

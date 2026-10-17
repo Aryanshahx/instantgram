@@ -74,6 +74,7 @@ class StoryRepository {
     String audience = Audience.everyone,
     UploadedMedia? audio,
     String audioName = '',
+    int audioStartMs = 0,
   }) async {
     final me = await UserRepository.instance.me();
     final ref = _stories.doc(id);
@@ -90,6 +91,7 @@ class StoryRepository {
           'audioUrl': audio.url,
           'audioKey': audio.key,
           'audioName': audioName,
+          if (audioStartMs > 0) 'audioStartMs': audioStartMs,
         },
       });
     } catch (e) {
