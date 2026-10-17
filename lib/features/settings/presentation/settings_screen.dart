@@ -373,14 +373,23 @@ Future<void> confirmLogout(BuildContext context) async {
 /// Log out: this phone stops ringing / getting messages for the account.
 /// v0.12: also used by Settings -> Accounts (switch / add account).
 Future<void> signOutEverything() async {
-  await Calls.instance.signOut(); // no calls for this phone any more
-  await Presence.instance.stop();
   ChatReceipts.instance.stop();
-  ChatPrefs.instance.stop();
   PushRouter.instance.stop();
   AccountStatus.instance.stop();
+  // network clean-up at the SAME time (one after another was slow):
+  // no calls / pushes for this phone, offline, no channel pushes.
+  // Max 3 s: a slow network must not keep you waiting.
+  try {
+    await Future.wait([
+      Calls.instance.signOut(),
+      Presence.instance.stop(),
+      ChannelTopics.instance.stop(),
+    ]).timeout(const Duration(seconds: 3));
+  } catch (e) {
+    debugPrint('sign out: $e');
+  }
+  ChatPrefs.instance.stop();
   AccountFamily.instance.clear(); // v0.0.2: same-login accounts list
-  await ChannelTopics.instance.stop(); // v0.0.2: no channel pushes
   await AuthService.instance.signOut();
 }
 

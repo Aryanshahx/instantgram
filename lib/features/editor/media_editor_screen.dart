@@ -948,6 +948,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                     child: ColoredBox(
                       color: Colors.black,
                       child: Stack(
+                        fit: StackFit.expand,
                         children: [
                           Positioned.fill(
                             child: InteractiveViewer(
@@ -1407,7 +1408,11 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
 
   /// Link stickers on the photo / video: drag = move, tap = edit.
   Widget _linksOnCanvas(EditItem item) {
-    if (item.links.isEmpty) return const SizedBox.shrink();
+    // ALWAYS a Positioned: a plain child would make the photo's Stack
+    // shrink to 0 x 0 (= black editor)
+    if (item.links.isEmpty) {
+      return const Positioned.fill(child: SizedBox.shrink());
+    }
     return Positioned.fill(
       child: LayoutBuilder(
         builder: (context, box) {
@@ -2905,8 +2910,11 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                               // v0.15: stickers open big, at once
                               if (t == _Tool.stickers) _openStickerSheet();
                             },
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
+                            // big phone font: shrink, never overflow
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Column(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
                                   _toolIcon(t),
@@ -2929,6 +2937,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                                   ),
                                 ),
                               ],
+                            ),
                             ),
                           ),
                         ),

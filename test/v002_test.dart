@@ -343,9 +343,15 @@ void main() {
       expect(find.text('3 members'), findsOneWidget);
       expect(find.byKey(const ValueKey('call-voice')), findsNothing);
       expect(find.byKey(const ValueKey('call-video')), findsNothing);
-      expect(find.byKey(const ValueKey('disappear-btn')), findsNothing);
+      expect(find.byKey(const ValueKey('chat-more')), findsOneWidget);
       expect(find.byKey(const ValueKey('group-info-btn')), findsOneWidget);
+      // ⋯ menu: chat theme, no disappearing messages in groups
+      await t.tap(find.byKey(const ValueKey('chat-more')));
+      await t.pumpAndSettle();
       expect(find.byKey(const ValueKey('chat-theme-btn')), findsOneWidget);
+      expect(find.byKey(const ValueKey('disappear-btn')), findsNothing);
+      await t.tapAt(const Offset(10, 10));
+      await t.pumpAndSettle();
       // the name once per run of messages from one person
       expect(find.byKey(const ValueKey('sender-b1')), findsOneWidget);
       expect(find.byKey(const ValueKey('sender-b2')), findsNothing);

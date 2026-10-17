@@ -84,8 +84,46 @@ class AccountFamily {
     return list;
   }
 
+  /// Sign-in tokens fetched early (uid -> token, when). Firebase accepts
+  /// them for 1 hour; we use them for 45 minutes.
+  final Map<String, (String, DateTime)> _tokens = {};
+  static const Duration tokenLife = Duration(minutes: 45);
+
+  /// Clock (tests).
+  DateTime Function() now = DateTime.now;
+
+  /// Gets the sign-in tokens of [uids] now (the account switcher opened),
+  /// so tapping an account switches at once. Errors are ignored.
+  Future<void> prefetch(Iterable<String> uids, {required String me}) async {
+    final want = {
+      for (final u in uids)
+        if (u.isNotEmpty && u != me && !_fresh(u)) u,
+    };
+    await Future.wait([
+      for (final u in want)
+        _fetchToken(u).then(
+          (t) => _tokens[u] = (t, now()),
+          onError: (Object e) {
+            debugPrint('prefetch $u: $e');
+            return ('', now());
+          },
+        ),
+    ]);
+  }
+
+  bool _fresh(String uid) {
+    final c = _tokens[uid];
+    return c != null && c.$1.isNotEmpty && now().difference(c.$2) < tokenLife;
+  }
+
   /// One-time sign-in token for [uid] (must be one of your accounts).
   Future<String> tokenFor(String uid) async {
+    if (_fresh(uid)) return _tokens.remove(uid)!.$1;
+    _tokens.remove(uid);
+    return _fetchToken(uid);
+  }
+
+  Future<String> _fetchToken(String uid) async {
     final r = await call({'action': 'switch', 'uid': uid});
     final t = r['token'];
     if (t is! String || t.isEmpty) {
@@ -114,6 +152,7 @@ class AccountFamily {
   /// Logout of everything.
   void clear() {
     accounts.value = const [];
+    _tokens.clear();
   }
 
   /// Forget the login flags (failed login) and the list.

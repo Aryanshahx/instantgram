@@ -248,7 +248,7 @@
 <section id="app" class="hide">
   <header>
     <div class="row">
-      <div class="logo grow">Instant<b>Gram</b> <span id="ver" class="muted" title="Version (page · server)">v0.0.2</span></div>
+      <div class="logo grow">Instant<b>Gram</b> <span id="ver" class="muted" title="Version (page · server)">v0.0.1</span></div>
       <span id="who" class="muted small"></span>
       <button class="ghost small" id="logout"><svg class="i" viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11"/></svg><span>Log out</span></button>
     </div>
@@ -336,7 +336,7 @@
     </div>
 
     <div id="page-hi" class="hide">
-      <div class="bar-top"><h2>Hyper Intelligence<span class="hiv" id="hiVer">v0.0.2</span></h2><button id="hiSweep" class="small">Check now</button><button id="hiLimits" class="small">Limits</button><button id="hiRefresh" class="small">Refresh</button></div>
+      <div class="bar-top"><h2>Hyper Intelligence<span class="hiv" id="hiVer">v0.0.1</span></h2><button id="hiSweep" class="small">Check now</button><button id="hiLimits" class="small">Limits</button><button id="hiRefresh" class="small">Refresh</button></div>
       <div class="note">Checks every new post, clip, moment and comment with OpenAI (chats are never checked).
         <b>Blurred</b> = people see "Tap to view". <b>Hidden</b> = only the owner sees it. <b>Unchecked</b> = OpenAI did not answer (tried again every day).</div>
       <details class="help" id="hiHelp">
@@ -496,7 +496,7 @@
 
   // v0.15: shows if Vercel serves an old deployment
   // v0.18: the label always shows the server version (from /api/health)
-  const PAGE_VERSION = '0.0.2';
+  const PAGE_VERSION = '0.0.1';
   async function checkVersion() {
     try {
       const r = await fetch('/api/health', { cache: 'no-store' });

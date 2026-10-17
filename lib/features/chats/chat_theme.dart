@@ -1,4 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../core/services/chat_prefs.dart';
 import '../../core/theme/app_colors.dart';
@@ -190,54 +194,171 @@ class ChatThemeScope extends InheritedWidget {
       oldWidget.theme.id != theme.id;
 }
 
-/// "Chat theme" sheet. Returns the picked id (also saved) or null.
+/// Chat background: the theme colours, and your photo on top (a bit
+/// darker so the messages stay easy to read). Only you see it.
+class ChatBackground extends StatelessWidget {
+  const ChatBackground({super.key, required this.theme, this.photo = ''});
+
+  final ChatTheme theme;
+
+  /// Picture file on this phone ('' = none).
+  final String photo;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      key: ValueKey('chat-bg-${theme.id}'),
+      decoration: theme.background,
+      child: photo.isEmpty
+          ? const SizedBox.expand()
+          : Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.file(
+                  File(photo),
+                  key: const ValueKey('chat-bg-photo'),
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  // file gone (phone cleaned) -> just the theme
+                  errorBuilder: (context, error, stack) =>
+                      const SizedBox.shrink(),
+                ),
+                const ColoredBox(color: Color(0x66000000)),
+              ],
+            ),
+    );
+  }
+}
+
+/// Picks a photo from the gallery and keeps a copy for this chat
+/// (null = cancelled).
+Future<String?> pickChatBackground(String chatId) async {
+  final x = await ImagePicker().pickImage(
+    source: ImageSource.gallery,
+    maxWidth: 1600,
+    maxHeight: 1600,
+    imageQuality: 85,
+  );
+  if (x == null) return null;
+  final dir = Directory(
+    '${(await getApplicationDocumentsDirectory()).path}/chat_bg',
+  );
+  await dir.create(recursive: true);
+  final safe = chatId.replaceAll(RegExp(r'[^A-Za-z0-9_]'), '_');
+  final out = File(
+    '${dir.path}/${safe}_${DateTime.now().millisecondsSinceEpoch}.jpg',
+  );
+  await File(x.path).copy(out.path);
+  return out.path;
+}
+
+/// "Chat theme" sheet: colours + background photo. Returns the picked
+/// theme id (also saved) or null.
 Future<String?> showChatThemePicker(
   BuildContext context,
   String chatId, {
   Future<void> Function(String chatId, String themeId)? save,
+  Future<String?> Function(String chatId)? pickPhoto,
+  Future<void> Function(String chatId, String? path)? saveBackground,
 }) async {
-  final now = ChatPrefs.instance.value.value.themeOf(chatId);
+  final prefs = ChatPrefs.instance.value.value;
+  final now = prefs.themeOf(chatId);
+  final hasPhoto = prefs.backgroundOf(chatId).isNotEmpty;
   final picked = await showModalBottomSheet<String>(
     context: context,
+    isScrollControlled: true,
     backgroundColor: AppColors.surface,
     builder: (ctx) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Chat theme',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 2),
-            const Text(
-              'Only you see it',
-              style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                for (final t in ChatTheme.all)
-                  _Swatch(
-                    theme: t,
-                    selected: t.id == now,
-                    onTap: () => Navigator.of(ctx).pop(t.id),
+      // scrolls on small screens (themes + background)
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Chat theme',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 2),
+              const Text(
+                'Only you see it',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  for (final t in ChatTheme.all)
+                    _Swatch(
+                      theme: t,
+                      selected: t.id == now,
+                      onTap: () => Navigator.of(ctx).pop(t.id),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Background',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const ValueKey('chat-bg-pick'),
+                      onPressed: () => Navigator.of(ctx).pop(_photoPick),
+                      icon: const Icon(Icons.image_outlined, size: 18),
+                      label: Text(hasPhoto ? 'Change photo' : 'Choose photo'),
+                    ),
                   ),
-              ],
-            ),
-          ],
+                  if (hasPhoto) ...[
+                    const SizedBox(width: 10),
+                    OutlinedButton(
+                      key: const ValueKey('chat-bg-remove'),
+                      onPressed: () => Navigator.of(ctx).pop(_photoRemove),
+                      child: const Text(
+                        'Remove',
+                        style: TextStyle(color: AppColors.like),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     ),
   );
-  if (picked == null || picked == now) return picked;
+  if (picked == null) return null;
+  final setBg = saveBackground ?? ChatPrefs.instance.setBackground;
+  if (picked == _photoRemove) {
+    await setBg(chatId, null);
+    return null;
+  }
+  if (picked == _photoPick) {
+    try {
+      final path = await (pickPhoto ?? pickChatBackground)(chatId);
+      if (path != null) await setBg(chatId, path);
+    } catch (e) {
+      debugPrint('chat background: $e');
+    }
+    return null;
+  }
+  if (picked == now) return picked;
   await (save ?? ChatPrefs.instance.setTheme)(chatId, picked);
   return picked;
 }
+
+const String _photoPick = '#photo';
+const String _photoRemove = '#remove';
 
 class _Swatch extends StatelessWidget {
   const _Swatch({

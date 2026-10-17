@@ -1303,19 +1303,13 @@ class _ClipPlayerState extends State<ClipPlayer>
             ),
             if (!_ready && !_failed && !kDisableVideoPlayback)
               const Center(child: CircularProgressIndicator()),
-            if (_items.length > 1) ...[
+            // only "1/3" (no dots on clips)
+            if (_items.length > 1)
               Positioned(
                 right: 12,
                 top: MediaQuery.of(context).padding.top + 14,
                 child: MediaPill(text: '${_item + 1}/${_items.length}'),
               ),
-              Positioned(
-                left: 0,
-                right: 0,
-                top: MediaQuery.of(context).padding.top + 20,
-                child: PageDots(count: _items.length, index: _item),
-              ),
-            ],
 
             if (_ready && _ctrl != null && !_ctrl!.value.isPlaying && !_fast)
               Center(
@@ -1455,8 +1449,9 @@ class _ClipPlayerState extends State<ClipPlayer>
     final screen = MediaQuery.of(context).size;
     final screenAspect =
         screen.width / (screen.height <= 0 ? 1 : screen.height);
-    // fill the screen when the shape is close, else show it whole
-    final close = (m.aspectRatio - screenAspect).abs() / screenAspect < 0.2;
+    // fill the screen when the shape is close (9:16 on tall phones too),
+    // else show it whole
+    final close = ClipLayout.fillsScreen(m.aspectRatio, screenAspect);
     final ctrl = _ctrl;
     final live = i == _item && _ready ? ctrl : null;
     if (live == null && m.thumbUrl.isEmpty) {
@@ -2009,6 +2004,14 @@ abstract final class ClipLayout {
   static double bigness(double? top, double h) {
     if (top == null || h <= 0) return 1;
     return ((top - 0.4 * h) / (0.6 * h)).clamp(0.0, 1.0);
+  }
+
+  /// Fill the screen (crop a little) instead of black bars: tall videos
+  /// close to the phone's shape. 9:16 on a 20:9 phone is 25% off -> fill.
+  static bool fillsScreen(double videoAspect, double screenAspect) {
+    if (videoAspect <= 0 || screenAspect <= 0) return false;
+    if (videoAspect >= 1) return false; // square / wide: show it whole
+    return (videoAspect - screenAspect).abs() / screenAspect < 0.35;
   }
 
   /// How much a "contain" picture must grow to "cover" a w x h box.

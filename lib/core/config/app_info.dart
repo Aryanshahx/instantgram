@@ -2,7 +2,7 @@
 class AppInfo {
   AppInfo._();
 
-  static const String version = '0.0.2';
+  static const String version = '0.0.1';
 
   /// v0.0.1: Hyper Intelligence has the same version as the app.
   static const String hiVersion = version;

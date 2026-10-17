@@ -308,6 +308,9 @@ void main() {
       await t.pump();
       await t.pump();
       expect(find.byKey(const ValueKey('disappear-bar')), findsNothing);
+      // v0.0.1 fix: in the ⋯ menu now
+      await t.tap(find.byKey(const ValueKey('chat-more')));
+      await t.pumpAndSettle();
       await t.tap(find.byKey(const ValueKey('disappear-btn')));
       await t.pumpAndSettle();
       for (final m in Disappear.all) {

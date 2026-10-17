@@ -81,11 +81,16 @@ class ChannelTopics {
   Future<void> _apply(Set<String> want) async {
     final p = await SharedPreferences.getInstance();
     final have = (p.getStringList(_key) ?? const <String>[]).toSet();
-    for (final t in have.difference(want)) {
-      if (await _set(t, false)) have.remove(t);
+    // all at once (one by one made logout / switching slow)
+    final off = have.difference(want).toList();
+    final on = want.difference(have).toList();
+    final offOk = await Future.wait([for (final t in off) _set(t, false)]);
+    final onOk = await Future.wait([for (final t in on) _set(t, true)]);
+    for (var i = 0; i < off.length; i++) {
+      if (offOk[i]) have.remove(off[i]);
     }
-    for (final t in want.difference(have)) {
-      if (await _set(t, true)) have.add(t);
+    for (var i = 0; i < on.length; i++) {
+      if (onOk[i]) have.add(on[i]);
     }
     await p.setStringList(_key, have.toList()..sort());
   }

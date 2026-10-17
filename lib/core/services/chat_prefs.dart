@@ -2,6 +2,7 @@ import '../../shared/models/post.dart';
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -19,6 +20,7 @@ class ChatPrefsData {
     this.pushOff = const {},
     this.vanish = const {},
     this.themes = const {},
+    this.backgrounds = const {},
   });
 
   static const empty = ChatPrefsData();
@@ -49,8 +51,18 @@ class ChatPrefsData {
 
   String themeOf(String chatId) => themes[chatId] ?? 'lime';
 
-  /// v0.0.2: same settings, other themes.
-  ChatPrefsData withThemes(Map<String, String> t) => ChatPrefsData(
+  /// Chat background photos: chat id -> picture file on THIS phone
+  /// (only you see it, never uploaded).
+  final Map<String, String> backgrounds;
+
+  /// '' = no photo.
+  String backgroundOf(String chatId) => backgrounds[chatId] ?? '';
+
+  /// v0.0.2: same settings, other themes (and background photos).
+  ChatPrefsData withThemes(
+    Map<String, String> t, {
+    Map<String, String>? backgrounds,
+  }) => ChatPrefsData(
     pinned: pinned,
     mutedChats: mutedChats,
     mutedCalls: mutedCalls,
@@ -58,6 +70,7 @@ class ChatPrefsData {
     pushOff: pushOff,
     vanish: vanish,
     themes: t,
+    backgrounds: backgrounds ?? this.backgrounds,
   );
 
   /// v0.0.2: themes saved on this phone win over the database copy
@@ -145,21 +158,35 @@ class ChatPrefs {
   ChatPrefsData _server = ChatPrefsData.empty;
   static String _themesKey(String uid) => 'chat_themes_$uid';
 
-  ChatPrefsData _withLocal(ChatPrefsData d) =>
-      d.withThemes(ChatPrefsData.mergeThemes(d.themes, _localThemes));
+  /// Chat background photos (only on this phone).
+  Map<String, String> _localBgs = {};
+  static String _bgsKey(String uid) => 'chat_bgs_$uid';
+
+  ChatPrefsData _withLocal(ChatPrefsData d) => d.withThemes(
+    ChatPrefsData.mergeThemes(d.themes, _localThemes),
+    backgrounds: Map.unmodifiable(_localBgs),
+  );
+
+  static Map<String, String> _stringMap(String? raw) {
+    if (raw == null) return {};
+    final j = jsonDecode(raw);
+    if (j is! Map) return {};
+    return {
+      for (final e in j.entries)
+        if (e.key is String && e.value is String)
+          e.key as String: e.value as String,
+    };
+  }
 
   Future<void> _loadLocalThemes(String uid) async {
     try {
       final p = await SharedPreferences.getInstance();
-      final raw = p.getString(_themesKey(uid));
-      if (raw == null || _uid != uid) return;
-      final j = jsonDecode(raw);
-      if (j is! Map) return;
-      _localThemes = {
-        for (final e in j.entries)
-          if (e.key is String && e.value is String)
-            e.key as String: e.value as String,
-      };
+      if (_uid != uid) return;
+      final themes = _stringMap(p.getString(_themesKey(uid)));
+      final bgs = _stringMap(p.getString(_bgsKey(uid)));
+      // chosen while loading: keep those
+      _localThemes = {...themes, ..._localThemes};
+      _localBgs = {...bgs, ..._localBgs}..removeWhere((k, v) => v.isEmpty);
       value.value = _withLocal(_server);
     } catch (e) {
       debugPrint('chat themes: $e');
@@ -172,6 +199,7 @@ class ChatPrefs {
     try {
       final p = await SharedPreferences.getInstance();
       await p.setString(_themesKey(uid), jsonEncode(_localThemes));
+      await p.setString(_bgsKey(uid), jsonEncode(_localBgs));
     } catch (e) {
       debugPrint('chat themes: $e');
     }
@@ -186,6 +214,7 @@ class ChatPrefs {
     _sub?.cancel();
     _uid = uid;
     _localThemes = {};
+    _localBgs = {};
     _server = ChatPrefsData.empty;
     unawaited(_loadLocalThemes(uid));
     _sub = _doc(uid).snapshots().listen(
@@ -202,6 +231,7 @@ class ChatPrefs {
     _sub = null;
     _uid = null;
     _localThemes = {};
+    _localBgs = {};
     _server = ChatPrefsData.empty;
     value.value = ChatPrefsData.empty;
   }
@@ -273,6 +303,7 @@ class ChatPrefs {
       pushOff: v.pushOff,
       vanish: next,
       themes: v.themes,
+      backgrounds: v.backgrounds,
     );
     return _save({
       'vanishChats': {
@@ -297,6 +328,29 @@ class ChatPrefs {
       });
     } catch (e) {
       debugPrint('chat theme not saved online: $e');
+    }
+  }
+
+  /// Chat background photo for this chat ('' / null = none). Only on this
+  /// phone; the old picture file is deleted.
+  Future<void> setBackground(String chatId, String? path) async {
+    final old = _localBgs[chatId] ?? '';
+    final next = {..._localBgs};
+    if (path == null || path.isEmpty) {
+      next.remove(chatId);
+    } else {
+      next[chatId] = path;
+    }
+    _localBgs = next;
+    value.value = _withLocal(value.value);
+    await _saveLocalThemes();
+    if (old.isNotEmpty && old != path) {
+      try {
+        final f = File(old);
+        if (await f.exists()) await f.delete();
+      } catch (e) {
+        debugPrint('chat background: $e');
+      }
     }
   }
 

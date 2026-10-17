@@ -50,7 +50,13 @@ class _AccountsScreenState extends State<AccountsScreen> {
     unawaited(
       AccountFamily.instance
           .refresh(email: widget.profile.email)
-          .then<void>((_) {}, onError: (Object e) => debugPrint('accounts: $e')),
+          .then<void>(
+            (list) => AccountFamily.instance.prefetch(
+              [for (final a in list) a.uid],
+              me: widget.profile.uid,
+            ),
+            onError: (Object e) => debugPrint('accounts: $e'),
+          ),
     );
   }
 
@@ -275,28 +281,89 @@ Future<void> switchToAccount(BuildContext context, SavedAccount a) async {
     if (a.linked) return _linkedWithPassword(context, a);
   }
   final store = SavedAccounts.instance;
-  var pw = await store.password(a.uid);
-  String? error;
-  while (true) {
-    if (pw == null) {
+  // a saved password is used at once (checking it online first made
+  // switching slow); a typed one is checked, so a typo keeps you here
+  final String pw;
+  final saved = await store.password(a.uid);
+  if (saved != null) {
+    pw = saved;
+  } else {
+    String? error;
+    String? typed;
+    while (true) {
       if (!context.mounted) return;
-      pw = await askAccountPassword(context, a, error: error);
-      if (pw == null) return;
+      typed = await askAccountPassword(context, a, error: error);
+      if (typed == null) return;
+      error = await AuthService.instance.checkPassword(a.email, typed);
+      if (error == null) break;
     }
-    error = await AuthService.instance.checkPassword(a.email, pw);
-    if (error == null) break;
-    await store.forgetPassword(a.uid);
-    pw = null;
+    pw = typed;
   }
   if (!context.mounted) return;
   final messenger = ScaffoldMessenger.maybeOf(context);
-  Navigator.of(context).popUntil((r) => r.isFirst);
+  final done = showSwitching(context, a.username);
   await signOutEverything();
   try {
     await AuthService.instance.signIn(identifier: a.email, password: pw);
   } on AuthFailure catch (e) {
+    // password changed on another phone: log in again
+    await store.forgetPassword(a.uid);
     messenger?.showSnackBar(SnackBar(content: Text(e.message)));
+  } finally {
+    done();
   }
+}
+
+/// Sign-in tokens of the saved accounts of this login, early.
+Future<void> _prefetchSaved(List<SavedAccount> list, String me) async {
+  final fam = AccountFamily.instance;
+  await fam.prefetch([
+    for (final a in list)
+      if (a.linked || fam.contains(a.uid)) a.uid,
+  ], me: me);
+}
+
+/// Full screen "Switching to @name…" while the account changes (closes
+/// the open screens). Call the returned function when done.
+VoidCallback showSwitching(BuildContext context, String username) {
+  final nav = Navigator.of(context, rootNavigator: true);
+  nav.popUntil((r) => r.isFirst);
+  final route = PageRouteBuilder<void>(
+    opaque: false,
+    barrierDismissible: false,
+    barrierColor: Colors.black87,
+    transitionDuration: Duration.zero,
+    reverseTransitionDuration: Duration.zero,
+    pageBuilder: (context, animation, secondary) => PopScope(
+      canPop: false,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Center(
+          child: Column(
+            key: const ValueKey('switching'),
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(color: AppColors.lime),
+              const SizedBox(height: 16),
+              Text(
+                username.isEmpty
+                    ? 'Switching account…'
+                    : 'Switching to @$username…',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+  nav.push(route);
+  return () {
+    if (route.isActive) nav.removeRoute(route);
+  };
 }
 
 /// Add account: go to the login screen; this account stays saved.
@@ -341,6 +408,8 @@ Future<void> showAccountSwitcher(
   await store.load();
   await store.updateProfile(me);
   if (!context.mounted) return;
+  // switching is instant if the sign-in tokens are already here
+  if (onSwitch == null) unawaited(_prefetchSaved(store.accounts.value, me.uid));
   final picked = await showModalBottomSheet<Object>(
     context: context,
     isScrollControlled: true,
@@ -452,27 +521,41 @@ Future<bool> switchFamilyAccount(
   bool quietDenied = false,
 }) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
+  final fam = AccountFamily.instance;
+  var name = '';
+  for (final a in fam.accounts.value) {
+    if (a.uid == uid) name = a.username;
+  }
+  if (name.isEmpty) {
+    for (final a in SavedAccounts.instance.accounts.value) {
+      if (a.uid == uid) name = a.username;
+    }
+  }
+  // shown at once (the token is usually already here: see prefetch)
+  final done = showSwitching(context, name);
   final String token;
   try {
-    token = await AccountFamily.instance.tokenFor(uid);
+    token = await fam.tokenFor(uid);
   } on ApiException catch (e) {
+    done();
     if (!(quietDenied && e.statusCode == 403)) {
       messenger?.showSnackBar(SnackBar(content: Text(e.message)));
     }
     return false;
   } catch (e) {
+    done();
     messenger?.showSnackBar(SnackBar(content: Text('$e')));
     return false;
   }
-  if (!context.mounted) return false;
-  Navigator.of(context).popUntil((r) => r.isFirst);
-  await signOutEverything();
   try {
-    await AccountFamily.instance.signInWithToken(token);
+    await signOutEverything();
+    await fam.signInWithToken(token);
   } catch (e) {
     messenger?.showSnackBar(
       const SnackBar(content: Text('Could not switch. Please log in again.')),
     );
+  } finally {
+    done();
   }
   return true;
 }
@@ -692,6 +775,9 @@ Future<void> afterLoginChoice(
     return;
   }
   if (!gone && (!ask || list.length < 2)) return;
+  if (choose == null) {
+    unawaited(fam.prefetch([for (final a in list) a.uid], me: uid));
+  }
   final picked = await (choose ??
       (l) => showChooseAccountSheet(context, l, current: uid))(list);
   if (picked == null || picked == uid || !context.mounted) return;

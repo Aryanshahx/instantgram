@@ -335,6 +335,67 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     return msgs;
   }
 
+  /// ⋯ menu: disappearing messages (1:1 chats) and chat theme.
+  Widget _moreMenu() {
+    return PopupMenuButton<String>(
+      key: const ValueKey('chat-more'),
+      tooltip: 'More',
+      icon: const Icon(Icons.more_vert),
+      color: AppColors.surfaceHigh,
+      onSelected: (v) {
+        if (v == 'disappear') _chooseMode();
+        if (v == 'theme') showChatThemePicker(context, _chatId);
+      },
+      itemBuilder: (context) => [
+        if (!_multi)
+          PopupMenuItem<String>(
+            key: const ValueKey('disappear-btn'),
+            value: 'disappear',
+            child: _menuRow(
+              Icons.timer_outlined,
+              'Disappearing messages',
+              Disappear.label(_mode),
+              on: _mode != Disappear.off,
+            ),
+          ),
+        PopupMenuItem<String>(
+          key: const ValueKey('chat-theme-btn'),
+          value: 'theme',
+          child: _menuRow(
+            Icons.palette_outlined,
+            'Chat theme',
+            'Colours and background',
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _menuRow(IconData icon, String title, String sub, {bool on = false}) {
+    return Row(
+      children: [
+        Icon(icon, size: 21, color: on ? AppColors.lime : null),
+        const SizedBox(width: 12),
+        Flexible(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(fontSize: 14.5)),
+              Text(
+                sub,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _chooseMode() async {
     final picked = await showModalBottomSheet<String>(
       context: context,
@@ -1094,22 +1155,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ),
         ),
         actions: [
-          if (!_multi)
-          IconButton(
-            key: const ValueKey('disappear-btn'),
-            tooltip: 'Disappearing messages',
-            onPressed: _chooseMode,
-            icon: Icon(
-              Icons.timer_outlined,
-              color: _mode == Disappear.off ? null : AppColors.lime,
-            ),
-          ),
-          IconButton(
-            key: const ValueKey('chat-theme-btn'),
-            tooltip: 'Chat theme',
-            onPressed: () => showChatThemePicker(context, _chatId),
-            icon: const Icon(Icons.palette_outlined),
-          ),
           if (_multi)
             IconButton(
               key: const ValueKey('group-info-btn'),
@@ -1131,7 +1176,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             onPressed: () => _call(video: true),
             icon: const Icon(Icons.videocam_outlined),
           ),
-          const SizedBox(width: 4),
+          _moreMenu(),
         ],
       ),
       // v0.0.1: chat theme (only you see it)
@@ -1139,10 +1184,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         valueListenable: ChatPrefs.instance.value,
         builder: (context, prefs, child) {
           final ct = ChatTheme.byId(prefs.themeOf(_chatId));
-          return DecoratedBox(
-            key: ValueKey('chat-bg-${ct.id}'),
-            decoration: ct.background,
-            child: ChatThemeScope(theme: ct, child: child!),
+          // the background is its OWN layer: a new theme / photo must not
+          // rebuild the chat (that listened to the messages again and
+          // broke the chat until it was opened again)
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(
+                child: ChatBackground(
+                  theme: ct,
+                  photo: prefs.backgroundOf(_chatId),
+                ),
+              ),
+              ChatThemeScope(theme: ct, child: child!),
+            ],
           );
         },
         child: Column(

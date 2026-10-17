@@ -653,7 +653,8 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
                     top: 10,
                     child: MediaPill(text: '${_index + 1}/${items.length}'),
                   ),
-                if (items.length > 1)
+                // dots for photo posts; clips only show "1/3"
+                if (items.length > 1 && !p.isClip)
                   Positioned(
                     left: 0,
                     right: 0,
@@ -665,7 +666,7 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
                 if (p.hasMusic)
                   Positioned(
                     left: 10,
-                    bottom: items.length > 1 ? 26 : 10,
+                    bottom: items.length > 1 && !p.isClip ? 26 : 10,
                     right: 60,
                     child: Align(
                       alignment: Alignment.centerLeft,
