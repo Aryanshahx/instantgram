@@ -16,8 +16,8 @@ void _stopPreview() {
 }
 
 /// Music update: choose a song for a post / clip / moment.
-/// Library (songs the admin added), AI song (made with Google Lyria,
-/// a few per day), Phone (a music file). null = nothing chosen.
+/// Phone (a music file) and AI song ("Coming soon" until
+/// [MusicPickerSheet.aiSongsReady] is true). null = nothing chosen.
 Future<PickedAudio?> showMusicPicker(BuildContext context) async {
   final picked = await showModalBottomSheet<PickedAudio>(
     context: context,
@@ -35,6 +35,10 @@ Future<PickedAudio?> showMusicPicker(BuildContext context) async {
 
 class MusicPickerSheet extends StatefulWidget {
   const MusicPickerSheet({super.key});
+
+  /// AI songs are switched off for now: the tab shows "Coming soon".
+  /// Set to true to turn them on again (the server part is ready).
+  static bool aiSongsReady = false;
 
   @override
   State<MusicPickerSheet> createState() => _MusicPickerSheetState();
@@ -65,7 +69,7 @@ class _MusicPickerSheetState extends State<MusicPickerSheet> {
     return SizedBox(
       height: h * 0.86,
       child: DefaultTabController(
-        length: 3,
+        length: 2,
         child: Column(
           children: [
             const SizedBox(height: 8),
@@ -85,17 +89,18 @@ class _MusicPickerSheetState extends State<MusicPickerSheet> {
               dividerColor: AppColors.border,
               labelStyle: TextStyle(fontWeight: FontWeight.w700),
               tabs: [
-                Tab(key: ValueKey('music-tab-library'), text: 'Library'),
-                Tab(key: ValueKey('music-tab-ai'), text: 'AI song'),
                 Tab(key: ValueKey('music-tab-phone'), text: 'Phone'),
+                Tab(key: ValueKey('music-tab-ai'), text: 'AI song'),
               ],
             ),
             Expanded(
               child: TabBarView(
                 children: [
-                  _LibraryTab(onUse: _use),
-                  _AiTab(onUse: _use),
                   const _PhoneTab(),
+                  if (MusicPickerSheet.aiSongsReady)
+                    _AiTab(onUse: _use)
+                  else
+                    const _AiSoon(),
                 ],
               ),
             ),
@@ -253,120 +258,6 @@ class _Empty extends StatelessWidget {
       ],
     ),
   );
-}
-
-// ---------------------------------------------------------------- library
-
-class _LibraryTab extends StatefulWidget {
-  const _LibraryTab({required this.onUse});
-  final ValueChanged<MusicTrack> onUse;
-
-  @override
-  State<_LibraryTab> createState() => _LibraryTabState();
-}
-
-class _LibraryTabState extends State<_LibraryTab>
-    with AutomaticKeepAliveClientMixin {
-  List<MusicTrack>? _all;
-  bool _failed = false;
-  String _q = '';
-
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load({bool fresh = false}) async {
-    try {
-      final l = await MusicRepository.instance.library(fresh: fresh);
-      if (mounted) {
-        setState(() {
-          _all = l;
-          _failed = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _failed = true);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    final all = _all;
-    if (all == null) {
-      return Center(
-        child: _failed
-            ? TextButton(
-                key: const ValueKey('music-retry'),
-                onPressed: () {
-                  setState(() => _failed = false);
-                  _load(fresh: true);
-                },
-                child: const Text("Couldn't load. Tap to try again"),
-              )
-            : const CircularProgressIndicator(),
-      );
-    }
-    final shown = searchTracks(all, _q);
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
-          child: TextField(
-            key: const ValueKey('music-search'),
-            onChanged: (v) => setState(() => _q = v),
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: 'Search songs, artists, moods',
-              prefixIcon: const Icon(Icons.search, size: 20),
-              filled: true,
-              fillColor: AppColors.surface,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-        ),
-        Expanded(
-          child: RefreshIndicator(
-            color: AppColors.lime,
-            onRefresh: () => _load(fresh: true),
-            child: shown.isEmpty
-                ? ListView(
-                    children: [
-                      all.isEmpty
-                          ? const _Empty(
-                              Icons.library_music_outlined,
-                              'No songs yet',
-                              'New songs come soon. Try an AI song or a song '
-                                  'from your phone.',
-                            )
-                          : const _Empty(
-                              Icons.search_off,
-                              'No song found',
-                              'Try other words.',
-                            ),
-                    ],
-                  )
-                : ListView.builder(
-                    key: const ValueKey('music-list'),
-                    itemCount: shown.length,
-                    itemBuilder: (_, i) => TrackRow(
-                      track: shown[i],
-                      onUse: () => widget.onUse(shown[i]),
-                    ),
-                  ),
-          ),
-        ),
-      ],
-    );
-  }
 }
 
 // --------------------------------------------------------------- AI songs
@@ -614,6 +505,38 @@ class _AiTabState extends State<_AiTab> with AutomaticKeepAliveClientMixin {
       ],
     );
   }
+}
+
+// ------------------------------------------------------------ coming soon
+
+/// AI song tab while AI songs are switched off.
+class _AiSoon extends StatelessWidget {
+  const _AiSoon();
+
+  @override
+  Widget build(BuildContext context) => const Center(
+    key: ValueKey('ai-soon'),
+    child: Padding(
+      padding: EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.auto_awesome, size: 40, color: AppColors.lime),
+          SizedBox(height: 12),
+          Text(
+            'Coming soon',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          SizedBox(height: 6),
+          Text(
+            'Make your own song with AI.\nWe are working on it.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 // ------------------------------------------------------------------ phone

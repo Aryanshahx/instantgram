@@ -371,28 +371,9 @@
 
     <div id="page-music" class="hide">
       <div class="bar-top"><h2>Music</h2><button id="musicRefresh" class="small">Refresh</button></div>
-      <div class="form">
-        <div class="small muted">Add free songs people can use in posts, clips and moments. Only use songs you are allowed to share (for example from pixabay.com/music). MP3, M4A, WAV or OGG, max 20 MB.</div>
-        <label for="musicFile">Song file</label>
-        <input id="musicFile" type="file" accept="audio/*">
-        <div class="row" style="flex-wrap:nowrap;gap:10px">
-          <div style="flex:1;min-width:0"><label for="musicTitle">Song name</label><input id="musicTitle" maxlength="80" placeholder="Song name"></div>
-          <div style="flex:1;min-width:0"><label for="musicArtist">Artist</label><input id="musicArtist" maxlength="80" placeholder="Artist (optional)"></div>
-        </div>
-        <label for="musicMood">Mood</label>
-        <select id="musicMood">
-          <option value="happy">Happy</option><option value="sad">Sad</option><option value="love">Love</option>
-          <option value="party">Party</option><option value="chill">Chill</option><option value="epic">Epic</option>
-          <option value="funny">Funny</option><option value="devotional">Devotional</option><option value="workout">Workout</option>
-          <option value="other" selected>Other</option>
-        </select>
-        <button class="primary" id="musicAdd" style="margin-top:14px;width:100%;height:36px">Add song</button>
-        <div class="small muted" id="musicStatus" style="margin-top:8px"></div>
-      </div>
-      <div class="tabs" id="musicTabs" style="margin-top:16px">
-        <button data-src="library" class="on">Library</button>
+      <div class="tabs" id="musicTabs">
+        <button data-src="original" class="on">From phones</button>
         <button data-src="ai">AI songs</button>
-        <button data-src="original">From phones</button>
       </div>
       <div class="small muted" id="musicHint" style="margin:6px 0 8px">Hide = can't be picked any more, posts using it still play. Delete = file gone, those posts become silent.</div>
       <audio id="musicAudio" class="hide"></audio>
@@ -516,8 +497,8 @@
   }
   $('logout').addEventListener('click', () => logout(true));
 
-  // ---------------- music (library songs, AI songs, original audio) ----------------
-  let musicSource = 'library';
+  // ---------------- music (sounds from phones, AI songs) ----------------
+  let musicSource = 'original';
   const fmtDur = (ms) => { const t = Math.round((Number(ms) || 0) / 1000); return t ? `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}` : '–'; };
   async function loadMusic() {
     const box = $('musicList');
@@ -525,7 +506,7 @@
     try {
       const { items } = await api('musicList', { source: musicSource });
       if (!items.length) {
-        const emptyText = musicSource === 'library' ? 'No songs yet. Add a song above.' : 'Nothing yet.';
+        const emptyText = 'Nothing yet.';
         box.innerHTML = `<p class="muted">${esc(emptyText)}</p>`;
         return;
       }
@@ -572,62 +553,6 @@
       }
       loadMusic();
     } catch (err) { fail(err); }
-  });
-  $('musicFile').addEventListener('change', () => {
-    const f = $('musicFile').files[0];
-    if (f && !$('musicTitle').value.trim()) $('musicTitle').value = f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 80);
-  });
-  const musicType = (f) => {
-    const t = (f.type || '').toLowerCase();
-    if (t === 'audio/mp3') return 'audio/mpeg';
-    if (t) return t;
-    const ext = (f.name.split('.').pop() || '').toLowerCase();
-    return ({ mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', ogg: 'audio/ogg' })[ext] || '';
-  };
-  const audioLength = (f) => new Promise((done) => {
-    const a = new Audio(); const url = URL.createObjectURL(f);
-    const end = (v) => { URL.revokeObjectURL(url); done(v); };
-    a.preload = 'metadata';
-    a.onloadedmetadata = () => end(Number.isFinite(a.duration) ? Math.round(a.duration * 1000) : 0);
-    a.onerror = () => end(0);
-    setTimeout(() => end(0), 8000);
-    a.src = url;
-  });
-  const asDataUrl = (f, type) => new Promise((done, bad) => {
-    const r = new FileReader();
-    r.onload = () => done(`data:${type};base64,${String(r.result).split(',')[1] || ''}`);
-    r.onerror = () => bad(new Error('Could not read the file'));
-    r.readAsDataURL(f);
-  });
-  $('musicAdd').addEventListener('click', async () => {
-    const f = $('musicFile').files[0];
-    const title = $('musicTitle').value.trim();
-    if (!f) return toast('Choose a song file');
-    if (!title) return toast('Write the song name');
-    const type = musicType(f);
-    if (!type) return toast('Use an MP3, M4A, WAV or OGG file');
-    if (f.size > 20 * 1024 * 1024) return toast('File too big (max 20 MB)');
-    const btn = $('musicAdd'); const st = $('musicStatus');
-    btn.disabled = true; st.textContent = 'Uploading…';
-    try {
-      const durationMs = await audioLength(f);
-      const info = { title, artist: $('musicArtist').value.trim(), mood: $('musicMood').value, durationMs };
-      if (f.size <= 3 * 1024 * 1024) {
-        await api('musicAdd', { ...info, file: await asDataUrl(f, type) });
-      } else {
-        const up = await api('musicUploadUrl', { contentType: type, size: f.size });
-        const r = await fetch(up.uploadUrl, { method: 'PUT', headers: up.headers, body: f }).catch(() => null);
-        if (!r || !r.ok) throw new Error('Upload blocked by the bucket. Use a file under 3 MB, or in Tigris open the bucket → Settings → CORS and allow PUT from any origin.');
-        await api('musicAdd', { ...info, key: up.key });
-      }
-      st.textContent = `Added “${title}”`;
-      $('musicFile').value = ''; $('musicTitle').value = ''; $('musicArtist').value = '';
-      if (musicSource !== 'library') $('musicTabs').children[0].click(); else loadMusic();
-    } catch (e) {
-      st.textContent = e.message || String(e);
-    } finally {
-      btn.disabled = false;
-    }
   });
 
   // ---------------- navigation ----------------

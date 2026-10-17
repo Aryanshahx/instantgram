@@ -1,4 +1,4 @@
-// Music update + fixes: songs ("use this audio", library, AI songs),
+// Music update + fixes: songs ("use this audio", AI songs coming soon),
 // pin only on the profile, built-in chat backgrounds, reactions "+",
 // more comment emojis.
 import 'dart:async';
@@ -77,12 +77,11 @@ void main() {
   setUp(() {
     MusicPlayer.disabled = true;
     NetImage.disableCache = true;
-    MusicRepository.debugLibrary = null;
+    MusicPickerSheet.aiSongsReady = false;
     MusicRepository.debugMySongs = null;
     MusicRepository.debugTrack = null;
     MusicRepository.debugPostsWith = null;
     MusicScreen.debugUse = null;
-    MusicRepository.instance.debugReset();
   });
 
   // ------------------------------------------------------------- models
@@ -101,27 +100,6 @@ void main() {
       expect(ai.isAi, isTrue);
       expect(ai.label, 'Rain');
       expect(ai.createdAt, isNotNull);
-    });
-
-    test('library order: most used, then newest; hidden left out', () {
-      final list = sortTracks([
-        _track('a', uses: 1, created: 1),
-        _track('b', uses: 5),
-        _track('c', uses: 1, created: 9),
-        _track('d', uses: 99, hidden: true),
-      ]);
-      expect(list.map((t) => t.id), ['b', 'c', 'a']);
-    });
-
-    test('search in name, artist and mood', () {
-      final all = [
-        _track('a', title: 'Sunny Day', artist: 'Kay', mood: 'happy'),
-        _track('b', title: 'Night', artist: 'Lofi Boy', mood: 'chill'),
-      ];
-      expect(searchTracks(all, 'sunny').map((t) => t.id), ['a']);
-      expect(searchTracks(all, 'lofi chill').map((t) => t.id), ['b']);
-      expect(searchTracks(all, '  ').length, 2);
-      expect(searchTracks(all, 'rock'), isEmpty);
     });
 
     test('times', () {
@@ -220,44 +198,21 @@ void main() {
 
   // ----------------------------------------------------------- picker
   group('music picker', () {
-    testWidgets('library: list, search, Use', (t) async {
-      MusicRepository.debugLibrary = () async => [
-        _track('lib_1', title: 'Sunny Day', artist: 'Kay', uses: 3),
-        _track('lib_2', title: 'Night Drive', artist: 'Lofi', mood: 'chill'),
-      ];
-      MusicRepository.instance.call = (body, timeout) async =>
-          {'enabled': false, 'left': 0, 'perDay': 3};
-      late BuildContext ctx;
-      await t.pumpWidget(
-        _app(
-          Builder(
-            builder: (c) {
-              ctx = c;
-              return const SizedBox.expand();
-            },
-          ),
-        ),
-      );
-      PickedAudio? got;
-      unawaited(showMusicPicker(ctx).then((a) => got = a));
-      await _frames(t);
-      expect(find.text('Sunny Day'), findsOneWidget);
-      expect(find.text('Night Drive'), findsOneWidget);
-      await t.enterText(find.byKey(const ValueKey('music-search')), 'chill');
-      await _frames(t, 2);
-      expect(find.text('Sunny Day'), findsNothing);
-      await t.tap(find.byKey(const ValueKey('track-use-lib_2')));
-      await _frames(t);
-      expect(got, isNotNull);
-      expect(got!.isOnline, isTrue);
-      expect(got!.musicId, 'lib_2');
-      expect(got!.name, 'Night Drive · Lofi');
-      expect(got!.durationMs, 65000);
-      await _finish(t);
+    testWidgets('Phone + AI song "Coming soon", no Library', (t) async {
+      await t.pumpWidget(_app(const MusicPickerSheet()));
+      await t.pumpAndSettle();
+      expect(find.byKey(const ValueKey('music-tab-library')), findsNothing);
+      expect(find.text('Library'), findsNothing);
+      expect(find.byKey(const ValueKey('music-phone')), findsOneWidget);
+      await t.tap(find.byKey(const ValueKey('music-tab-ai')));
+      await t.pumpAndSettle();
+      expect(find.byKey(const ValueKey('ai-soon')), findsOneWidget);
+      expect(find.text('Coming soon'), findsOneWidget);
+      expect(find.byKey(const ValueKey('ai-make')), findsNothing);
     });
 
     testWidgets('AI song: N left today, make, then use it', (t) async {
-      MusicRepository.debugLibrary = () async => const [];
+      MusicPickerSheet.aiSongsReady = true;
       MusicRepository.debugMySongs = () async => const [];
       final calls = <Map<String, dynamic>>[];
       MusicRepository.instance.call = (body, timeout) async {
@@ -316,7 +271,7 @@ void main() {
     });
 
     testWidgets('AI song: limit message from the server', (t) async {
-      MusicRepository.debugLibrary = () async => const [];
+      MusicPickerSheet.aiSongsReady = true;
       MusicRepository.debugMySongs = () async => const [];
       MusicRepository.instance.call = (body, timeout) async {
         if (body['action'] == 'songInfo') {

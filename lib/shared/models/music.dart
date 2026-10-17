@@ -73,34 +73,6 @@ class MusicTrack {
       MusicTrack.fromMap(d.id, d.data() ?? const <String, dynamic>{});
 }
 
-/// Library order: most used first, then newest (no ties: id last).
-List<MusicTrack> sortTracks(Iterable<MusicTrack> all) {
-  final list = all.where((t) => !t.hidden && t.url.isNotEmpty).toList();
-  list.sort((a, b) {
-    final u = b.uses.compareTo(a.uses);
-    if (u != 0) return u;
-    final at = a.createdAt?.millisecondsSinceEpoch ?? 0;
-    final bt = b.createdAt?.millisecondsSinceEpoch ?? 0;
-    final t = bt.compareTo(at);
-    return t != 0 ? t : a.id.compareTo(b.id);
-  });
-  return list;
-}
-
-/// Search in name, artist and mood (all words must match).
-List<MusicTrack> searchTracks(List<MusicTrack> all, String query) {
-  final words = query
-      .toLowerCase()
-      .split(RegExp(r'\s+'))
-      .where((w) => w.isNotEmpty)
-      .toList();
-  if (words.isEmpty) return all;
-  return all.where((t) {
-    final hay = '${t.title} ${t.artist} ${t.mood}'.toLowerCase();
-    return words.every(hay.contains);
-  }).toList();
-}
-
 /// "1:05" (0 = '').
 String trackTime(int ms) {
   if (ms <= 0) return '';

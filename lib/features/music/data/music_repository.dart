@@ -29,7 +29,7 @@ class SongInfo {
   }
 }
 
-/// Songs: the music library, AI songs (Google Lyria), "use this audio".
+/// Songs: "use this audio" and AI songs (Google Lyria, coming soon).
 class MusicRepository {
   MusicRepository._();
   static final MusicRepository instance = MusicRepository._();
@@ -47,34 +47,9 @@ class MusicRepository {
       ApiClient.instance.post('/api/hi', body, timeout: timeout);
 
   /// Tests: lists without Firestore.
-  static Future<List<MusicTrack>> Function()? debugLibrary;
   static Future<List<MusicTrack>> Function()? debugMySongs;
   static Future<MusicTrack?> Function(String id)? debugTrack;
   static Future<List<Post>> Function(String id)? debugPostsWith;
-
-  List<MusicTrack>? _library;
-  DateTime? _libraryAt;
-
-  /// Library songs (most used first). Kept for 10 minutes.
-  /// Single-field query -> no extra Firestore index.
-  Future<List<MusicTrack>> library({bool fresh = false}) async {
-    final dl = debugLibrary;
-    if (dl != null) return sortTracks(await dl());
-    final at = _libraryAt;
-    if (!fresh &&
-        _library != null &&
-        at != null &&
-        DateTime.now().difference(at) < const Duration(minutes: 10)) {
-      return _library!;
-    }
-    final s = await _music
-        .where('source', isEqualTo: MusicTrack.library)
-        .limit(500)
-        .get();
-    _library = sortTracks(s.docs.map(MusicTrack.fromDoc));
-    _libraryAt = DateTime.now();
-    return _library!;
-  }
 
   /// My AI songs (newest first).
   Future<List<MusicTrack>> mySongs() async {
@@ -141,10 +116,4 @@ class MusicRepository {
   }
 
   static const Duration _short = Duration(seconds: 20);
-
-  /// Tests.
-  void debugReset() {
-    _library = null;
-    _libraryAt = null;
-  }
 }
