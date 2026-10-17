@@ -13,7 +13,7 @@
 //   The daily job also updates the trending list (config/trending).
 // Music update: POST /api/hi { action: 'songInfo' } -> { enabled, left, perDay, fullCost }
 //   POST /api/hi { action: 'song', prompt, full?, instrumental?, title? }
-//   -> the new AI song (Google Lyria). Daily limit per person + for the app.
+//   -> the new AI song (Google Lyria via OpenRouter or Gemini). Daily limit per person + for the app.
 import { requireUser } from '../lib/firebase-auth.js';
 import { HttpError, env, postHandler, send } from '../lib/http.js';
 import { getDoc, notSetUp, serviceAccount } from '../lib/google.js';
@@ -25,15 +25,16 @@ import { putFile } from '../lib/tigris.js';
 
 const ID = /^[A-Za-z0-9_-]{6,64}$/;
 
-export async function handle(uid, body, { sa = serviceAccount(), fetchFn = fetch, key = env('OPENAI_API_KEY'), now = Date.now(), geminiKey = env('GEMINI_API_KEY'), save = putFile } = {}) {
+export async function handle(uid, body, { sa = serviceAccount(), fetchFn = fetch, key = env('OPENAI_API_KEY'), now = Date.now(), geminiKey = env('GEMINI_API_KEY'), openrouterKey = env('OPENROUTER_API_KEY'), save = putFile } = {}) {
   if (body.action === 'songInfo') {
     if (!sa) throw notSetUp('AI songs');
     const { left, perDay } = await quotaOf(sa, uid, { now, fetchFn });
-    return { enabled: !!geminiKey, left: geminiKey ? left : 0, perDay, fullCost: FULL_COST };
+    const on = !!(geminiKey || openrouterKey);
+    return { enabled: on, left: on ? left : 0, perDay, fullCost: FULL_COST };
   }
   if (body.action === 'song') {
     if (!sa) throw notSetUp('AI songs');
-    return makeSong(sa, uid, body, { save, fetchFn, key: geminiKey, openaiKey: key, now });
+    return makeSong(sa, uid, body, { save, fetchFn, key: geminiKey, openrouterKey, openaiKey: key, now });
   }
   if (body.action === 'translate') {
     if (!allowTranslate(uid, now)) throw new HttpError(429, 'Too many translations, try again in a few minutes');
