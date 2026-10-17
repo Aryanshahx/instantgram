@@ -15,8 +15,9 @@ import '../../../core/utils/errors.dart';
 import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/widgets/ig_buttons.dart';
+import '../../../shared/widgets/media_links.dart';
 import '../../../shared/widgets/media_view.dart';
-import '../../editor/bake_filter.dart';
+import '../../editor/cover_render.dart';
 import '../../editor/edit_models.dart';
 import '../../editor/filters.dart';
 import '../../editor/video_frames.dart';
@@ -118,7 +119,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (ms == null || !mounted) return;
     setState(() => _makingCover = true);
     final f = await VideoFrames.file(item.file.path, ms, maxWidth: 1080);
-    final baked = f == null ? null : await bakeFilter(f, item.edits.filter);
+    // v0.0.2: the cover has the filter AND the texts / stickers
+    final baked = f == null
+        ? null
+        : await bakeCover(f, item.edits, ms: ms, aspect: item.aspectRatio);
     if (!mounted) return;
     setState(() {
       _makingCover = false;
@@ -198,7 +202,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         final m = items[i];
         File? thumb;
         if (!_isStory && m.isVideo && m.preview != null) {
-          thumb = await bakeFilter(m.preview!, m.edits.filter);
+          thumb = await bakeCover(
+            m.preview!,
+            m.edits,
+            ms: m.edits.trimStartMs,
+            aspect: m.aspectRatio,
+          );
         }
         onProgress((i + 1) / items.length);
         queued.add(
@@ -209,6 +218,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             edits: m.edits,
             durationMs: m.durationMs,
             thumbPath: thumb?.path,
+            links: _isStory ? const [] : m.links,
           ),
         );
       }
@@ -304,12 +314,38 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   };
 
   Widget _previewItem(EditedMedia m, {BoxFit fit = BoxFit.contain}) {
-    if (!m.isVideo) return Image.file(m.file, fit: fit, gaplessPlayback: true);
+    if (!m.isVideo) {
+      final photo = Image.file(m.file, fit: fit, gaplessPlayback: true);
+      if (m.links.isEmpty) return photo;
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          photo,
+          IgnorePointer(
+            child: MediaLinksLayer(
+              links: m.links,
+              aspect: m.aspectRatio,
+              fit: fit,
+            ),
+          ),
+        ],
+      );
+    }
     return Stack(
       fit: StackFit.expand,
       children: [
+        // v0.0.2: exactly as posted: real shape, filter, texts, stickers
         if (m.preview != null)
-          applyMatrix(m.edits.filter, Image.file(m.preview!, fit: fit))
+          Center(
+            child: EditedFrame(
+              key: const ValueKey('share-edited-frame'),
+              frame: FileImage(m.preview!),
+              edits: m.edits,
+              aspect: m.aspectRatio,
+              ms: m.edits.trimStartMs,
+              links: m.links,
+            ),
+          )
         else
           const ColoredBox(color: AppColors.surface),
         Center(
@@ -337,11 +373,28 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final v = items.first;
       final Widget img;
       if (_cover != null) {
-        img = Image.file(_cover!, fit: BoxFit.cover, gaplessPlayback: true);
+        // v0.0.2: a cover from the video already has texts / stickers
+        img = ColoredBox(
+          color: Colors.black,
+          child: Image.file(
+            _cover!,
+            fit: _coverFromGallery ? BoxFit.cover : BoxFit.contain,
+            gaplessPlayback: true,
+          ),
+        );
       } else if (v.preview != null) {
-        img = applyMatrix(
-          v.edits.filter,
-          Image.file(v.preview!, fit: BoxFit.cover, gaplessPlayback: true),
+        img = ColoredBox(
+          color: Colors.black,
+          child: Center(
+            child: EditedFrame(
+              key: const ValueKey('share-edited-frame'),
+              frame: FileImage(v.preview!),
+              edits: v.edits,
+              aspect: v.aspectRatio,
+              ms: v.edits.trimStartMs,
+              links: v.links,
+            ),
+          ),
         );
       } else {
         img = const ColoredBox(
@@ -1013,17 +1066,35 @@ class _CoverPickerScreenState extends State<CoverPickerScreen> {
 
   Widget _bigPreview() {
     final c = _c;
+    final e = widget.item.edits;
     if (c != null && _videoReady) {
+      // v0.0.2: texts / stickers of this moment too
       return AspectRatio(
-        aspectRatio: c.value.aspectRatio,
-        child: applyMatrix(widget.item.edits.filter, VideoPlayer(c)),
+        aspectRatio: safeAspect(widget.item.aspectRatio),
+        child: ClipRect(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // same as the editor: the video fills its own shape
+              applyMatrix(e.filter, VideoPlayer(c)),
+              StillOverlays(
+                key: const ValueKey('cover-overlays'),
+                overlays: e.overlays,
+                ms: _ms,
+              ),
+            ],
+          ),
+        ),
       );
     }
     final b = _thumbs[_selected];
     if (b != null) {
-      return applyMatrix(
-        widget.item.edits.filter,
-        Image.memory(b, fit: BoxFit.contain, gaplessPlayback: true),
+      return EditedFrame(
+        key: const ValueKey('cover-edited-frame'),
+        frame: MemoryImage(b),
+        edits: e,
+        aspect: widget.item.aspectRatio,
+        ms: _ms,
       );
     }
     return const CircularProgressIndicator();
@@ -1069,9 +1140,20 @@ class _CoverPickerScreenState extends State<CoverPickerScreen> {
                   )
                 : Opacity(
                     opacity: on ? 1 : 0.75,
-                    child: applyMatrix(
-                      widget.item.edits.filter,
-                      Image.memory(b, fit: BoxFit.cover, gaplessPlayback: true),
+                    // v0.0.2: filter + texts / stickers of that moment
+                    child: FittedBox(
+                      fit: BoxFit.cover,
+                      clipBehavior: Clip.hardEdge,
+                      child: SizedBox(
+                        width: 100 * safeAspect(widget.item.aspectRatio),
+                        height: 100,
+                        child: EditedFrame(
+                          frame: MemoryImage(b),
+                          edits: widget.item.edits,
+                          aspect: widget.item.aspectRatio,
+                          ms: _times[i],
+                        ),
+                      ),
                     ),
                   ),
           ),

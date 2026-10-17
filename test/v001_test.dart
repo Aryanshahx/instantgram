@@ -58,8 +58,8 @@ void main() {
   setUpAll(() => NetImage.disableCache = true);
 
   // ------------------------------------------------------------ version
-  test('version 0.0.1 for the app and Hyper Intelligence', () {
-    expect(AppInfo.version, '0.0.1');
+  test('version 0.0.x for the app and Hyper Intelligence', () {
+    expect(AppInfo.version, matches(RegExp(r'^0\.0\.\d+$')));
     expect(AppInfo.hiVersion, AppInfo.version);
   });
 

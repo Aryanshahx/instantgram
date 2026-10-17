@@ -233,13 +233,36 @@ async function deleteUserStep(step, uid, { sa, fetchFn, deleteFiles }) {
   ];
   const name = typeof d?.username === 'string' ? d.username.toLowerCase() : '';
   if (name && ID.test(name)) writes.push({ delete: `usernames/${name}` });
+  // v0.0.2: accounts with one login (see api/accounts.js)
+  const link = await getDoc(sa, `accountLinks/${uid}`, fetchFn).catch(() => null);
+  const owner = typeof link?.owner === 'string' && ID.test(link.owner) ? link.owner : '';
+  let keepLogin = false;
+  if (owner && owner !== uid) {
+    // a linked account: leave the group
+    writes.push({ delete: `accountLinks/${uid}` });
+    writes.push({
+      transform: `accountFamilies/${owner}`,
+      transforms: [{ fieldPath: 'members', removeAllFromArray: { values: [F.s(uid)] } }],
+    });
+  } else if (owner === uid) {
+    // the login's own account: other accounts still log in with it
+    const fam = await getDoc(sa, `accountFamilies/${uid}`, fetchFn).catch(() => null);
+    const others = Array.isArray(fam?.members) ? fam.members.filter((m) => typeof m === 'string' && m !== uid && ID.test(m)) : [];
+    const alive = [];
+    await pool(others, 5, async (o) => {
+      if (await getDoc(sa, `users/${o}`, fetchFn).catch(() => null)) alive.push(o);
+    });
+    keepLogin = alive.length > 0;
+    if (!keepLogin) writes.push({ delete: `accountLinks/${uid}` }, { delete: `accountFamilies/${uid}` });
+  }
   await commitAll(writes);
   // profile picture + banner (chat files stay: the other person keeps the chat)
   const own = [d?.photoKey, d?.coverKey].filter(
     (k) => typeof k === 'string' && !k.includes('..') && (k.startsWith(`avatar/${uid}/`) || k.startsWith(`cover/${uid}/`)),
   );
   const files = await deleteFiles([...fileKeys(d || {}, uid), ...own]);
-  const login = await authDelete(sa, uid, fetchFn);
+  // kept when other accounts use this email + password (v0.0.2)
+  const login = keepLogin ? 'kept' : await authDelete(sa, uid, fetchFn);
   return { n: 1, files, login, more: false };
 }
 

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../../shared/models/post.dart';
+import 'channel_topics.dart';
 import 'chat_repository.dart';
 
 /// v0.10: tells the sender "delivered" (✓✓ grey) as soon as new messages
@@ -18,7 +19,11 @@ class ChatReceipts {
   void start(String uid) {
     _sub?.cancel();
     _sub = ChatRepository.instance.myChats().listen(
-      (chats) => check(uid, chats, ChatRepository.instance.markDelivered),
+      (chats) {
+        check(uid, chats, ChatRepository.instance.markDelivered);
+        // v0.0.2: pushes for the channels you follow
+        ChannelTopics.instance.update(uid, chats);
+      },
       onError: (Object e) => debugPrint('receipts: $e'),
     );
   }
@@ -38,11 +43,14 @@ class ChatReceipts {
   ) {
     for (final c in chats) {
       if (c.lastSenderId.isEmpty || c.lastSenderId == me) continue;
+      if (c.isChannel) continue; // v0.0.2: no ticks in channels
       final d = c.deliveredAt(me);
       if (d != null && !d.isBefore(c.updatedAt)) continue;
       if (_done[c.id] == c.updatedAt) continue; // already asked
       _done[c.id] = c.updatedAt;
-      mark(c.id).catchError((Object e) => debugPrint('delivered: $e'));
+      mark(c.id).catchError((Object e) {
+        debugPrint('delivered: $e');
+      });
     }
   }
 }

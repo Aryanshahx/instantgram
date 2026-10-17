@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../shared/models/user_profile.dart';
+import 'account_family.dart';
 
 /// One account saved on this phone (Settings -> Accounts).
 @immutable
@@ -15,6 +16,7 @@ class SavedAccount {
     this.username = '',
     this.name = '',
     this.photoUrl = '',
+    this.linked = false,
   });
 
   final String uid;
@@ -23,6 +25,10 @@ class SavedAccount {
   final String name;
   final String photoUrl;
 
+  /// v0.0.2: an account of the same login (no own password; switching
+  /// goes through our server, see AccountFamily).
+  final bool linked;
+
   String get label => username.isNotEmpty ? '@$username' : email;
 
   SavedAccount copyWith({
@@ -30,12 +36,14 @@ class SavedAccount {
     String? username,
     String? name,
     String? photoUrl,
+    bool? linked,
   }) => SavedAccount(
     uid: uid,
     email: email ?? this.email,
     username: username ?? this.username,
     name: name ?? this.name,
     photoUrl: photoUrl ?? this.photoUrl,
+    linked: linked ?? this.linked,
   );
 
   Map<String, dynamic> toJson() => {
@@ -44,6 +52,7 @@ class SavedAccount {
     'username': username,
     'name': name,
     'photoUrl': photoUrl,
+    if (linked) 'linked': true,
   };
 
   static SavedAccount? fromJson(Object? j) {
@@ -58,6 +67,7 @@ class SavedAccount {
       username: s(j['username']),
       name: s(j['name']),
       photoUrl: s(j['photoUrl']),
+      linked: j['linked'] == true,
     );
   }
 }
@@ -124,6 +134,61 @@ class SavedAccounts {
     await _write(kept);
     final p = await _prefs;
     await p.setString(_pwKey(uid), scramble(password, await _key()));
+  }
+
+  /// v0.0.2: the accounts of your login ([AccountFamily]) for the switcher.
+  /// Accounts saved with a password stay as they are.
+  Future<void> rememberFamily(
+    List<FamilyAccount> family, {
+    String email = '',
+  }) async {
+    final list = [...await load()];
+    // the login's email: given, else from a saved account of this login
+    var mail = email;
+    if (mail.isEmpty) {
+      for (final a in list) {
+        if (a.email.isNotEmpty && family.any((f) => f.uid == a.uid)) {
+          mail = a.email;
+          break;
+        }
+      }
+    }
+    for (final f in family) {
+      final uid = f.uid;
+      final i = list.indexWhere((a) => a.uid == uid);
+      if (i >= 0) {
+        list[i] = list[i].copyWith(
+          username: f.username,
+          name: f.name,
+          photoUrl: f.photoUrl,
+        );
+        continue;
+      }
+      if (list.length >= max) continue;
+      list.add(
+        SavedAccount(
+          uid: uid,
+          email: mail,
+          username: f.username,
+          name: f.name,
+          photoUrl: f.photoUrl,
+          linked: true,
+        ),
+      );
+    }
+    await _write(list);
+  }
+
+  /// v0.0.2: a saved password for [email] (any account of that login).
+  Future<String?> passwordForEmail(String email) async {
+    final e = email.trim().toLowerCase();
+    if (e.isEmpty) return null;
+    for (final a in await load()) {
+      if (a.email.trim().toLowerCase() != e) continue;
+      final pw = await password(a.uid);
+      if (pw != null) return pw;
+    }
+    return null;
   }
 
   /// Keeps name / photo up to date (Settings -> Accounts opens).

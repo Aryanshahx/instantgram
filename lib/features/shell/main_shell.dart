@@ -34,6 +34,7 @@ import '../../core/config/app_info.dart';
 import '../../core/services/account_status.dart';
 import '../../core/theme/app_colors.dart';
 import '../settings/presentation/settings_screen.dart' show signOutEverything;
+import '../settings/presentation/accounts_screen.dart' show afterLoginChoice;
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key, required this.uid});
@@ -89,6 +90,10 @@ class _MainShellState extends State<MainShell> {
       if (mounted) openUsername(context, name);
     });
     unawaited(_startCalls());
+    // v0.0.2: one login, many accounts -> "Choose account"
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(afterLoginChoice(context, widget.uid));
+    });
   }
 
   /// Voice + video calls (receive calls, open an accepted one), plus

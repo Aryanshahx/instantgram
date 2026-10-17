@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../../core/services/account_family.dart';
 import '../../../core/services/saved_accounts.dart';
 import '../../../shared/models/user_profile.dart';
 import '../../profile/data/user_repository.dart';
@@ -33,11 +34,19 @@ class AuthService {
   User? get currentUser => _auth.currentUser;
 
   /// Log in with email OR username.
+  /// v0.0.2: email -> "Choose account" (when the login has more than one);
+  /// username -> straight to that account. [openUid] = open this account
+  /// of the login (saved account chips).
   Future<void> signIn({
     required String identifier,
     required String password,
+    String openUid = '',
   }) async {
     final id = identifier.trim();
+    final family = AccountFamily.instance;
+    family
+      ..askAfterLogin = false
+      ..wantUid = openUid;
     try {
       var email = id;
       if (!id.contains('@')) {
@@ -50,16 +59,25 @@ class AuthService {
           throw const AuthFailure('No account found with that username.');
         }
         email = data['email'] as String;
+        final uid = data['uid'];
+        if (openUid.isEmpty && uid is String) family.wantUid = uid;
       }
+      // set before logging in: the home screen reads it when it opens
+      family.askAfterLogin = family.wantUid.isEmpty;
       final cred = await _auth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
       await _remember(cred.user, email, password);
     } on FirebaseAuthException catch (e) {
+      family.resetLogin();
       throw AuthFailure(_message(e));
     } on FirebaseException catch (e) {
+      family.resetLogin();
       throw AuthFailure(e.message ?? 'Something went wrong. Try again.');
+    } catch (_) {
+      family.resetLogin();
+      rethrow;
     }
   }
 

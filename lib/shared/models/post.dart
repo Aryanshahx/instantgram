@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 DateTime _date(Object? v) => v is Timestamp
@@ -380,6 +381,99 @@ class VideoTime {
   }
 }
 
+/// v0.0.2: a link sticker on a photo / video (tap = open the website).
+@immutable
+class MediaLink {
+  const MediaLink({
+    required this.url,
+    this.label = '',
+    this.x = 0.5,
+    this.y = 0.5,
+  });
+
+  /// Max links on one photo / video.
+  static const int max = 3;
+  static const int maxLabel = 40;
+
+  /// Always http(s).
+  final String url;
+
+  /// Text on the sticker ('' = the website name).
+  final String label;
+
+  /// Center position, 0..1 of the photo / video.
+  final double x;
+  final double y;
+
+  /// "instagram.com" from "https://www.instagram.com/x".
+  String get host {
+    final h = Uri.tryParse(url)?.host ?? '';
+    return h.startsWith('www.') ? h.substring(4) : h;
+  }
+
+  String get shown => label.isNotEmpty ? label : host;
+
+  /// What you typed -> a safe website address, or null.
+  /// "example.com/a" -> "https://example.com/a". Only http / https.
+  static String? clean(String raw) {
+    var t = raw.trim();
+    if (t.isEmpty || t.length > 500 || t.contains(RegExp(r'\s'))) return null;
+    if (!RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*://').hasMatch(t)) {
+      if (t.contains(':') && !RegExp(r'^[^/]+:\d+').hasMatch(t)) {
+        return null; // javascript:, mailto:, intent: ...
+      }
+      t = 'https://$t';
+    }
+    final u = Uri.tryParse(t);
+    if (u == null) return null;
+    final scheme = u.scheme.toLowerCase();
+    if (scheme != 'http' && scheme != 'https') return null;
+    final host = u.host;
+    if (host.isEmpty || !host.contains('.') || host.startsWith('.') ||
+        host.endsWith('.')) {
+      return null;
+    }
+    return t;
+  }
+
+  MediaLink copyWith({String? url, String? label, double? x, double? y}) =>
+      MediaLink(
+        url: url ?? this.url,
+        label: label ?? this.label,
+        x: x ?? this.x,
+        y: y ?? this.y,
+      );
+
+  Map<String, dynamic> toMap() => {
+    'u': url,
+    if (label.isNotEmpty) 'l': label,
+    'x': double.parse(x.toStringAsFixed(4)),
+    'y': double.parse(y.toStringAsFixed(4)),
+  };
+
+  static MediaLink? fromMap(Object? v) {
+    if (v is! Map) return null;
+    final u = v['u'];
+    if (u is! String) return null;
+    final url = clean(u);
+    if (url == null) return null;
+    final l = v['l'];
+    double d(Object? n) => n is num ? n.toDouble().clamp(0.0, 1.0) : 0.5;
+    return MediaLink(
+      url: url,
+      label: l is String
+          ? (l.length > maxLabel ? l.substring(0, maxLabel) : l).trim()
+          : '',
+      x: d(v['x']),
+      y: d(v['y']),
+    );
+  }
+
+  static List<MediaLink> listFrom(Object? v) => v is List
+      ? v.map(fromMap).whereType<MediaLink>().take(max).toList()
+      : const [];
+}
+
 /// One photo or video inside a post or clip.
 /// Old posts stored only photos here (no `type`).
 class MediaItem {
@@ -394,6 +488,7 @@ class MediaItem {
     this.edits = const VideoEdits(),
     this.lowUrl = '',
     this.lowKey = '',
+    this.links = const [],
   });
 
   static const String photo = 'photo';
@@ -421,6 +516,9 @@ class MediaItem {
   final String lowUrl;
   final String lowKey;
 
+  /// v0.0.2: link stickers (tap = open).
+  final List<MediaLink> links;
+
   /// Image to show in grids / while a video loads.
   String get coverUrl => isVideo ? thumbUrl : url;
 
@@ -435,6 +533,7 @@ class MediaItem {
     if (isVideo && edits.toMap().isNotEmpty) 'edits': edits.toMap(),
     if (lowUrl.isNotEmpty) 'lowUrl': lowUrl,
     if (lowKey.isNotEmpty) 'lowKey': lowKey,
+    if (links.isNotEmpty) 'links': [for (final l in links) l.toMap()],
   };
 
   static MediaItem? fromMap(Object? v) {
@@ -452,6 +551,7 @@ class MediaItem {
       durationMs: _int(v['durationMs']),
       lowUrl: _str(v['lowUrl']),
       lowKey: _str(v['lowKey']),
+      links: MediaLink.listFrom(v['links']),
       edits: e is Map
           ? VideoEdits.fromMap(Map<String, dynamic>.from(e))
           : const VideoEdits(),
@@ -1113,7 +1213,44 @@ class Chat {
     this.delivered = const {},
     this.disappear = Disappear.off,
     this.typing = const {},
+    this.type = '',
+    this.name = '',
+    this.photoUrl = '',
+    this.description = '',
+    this.admins = const [],
+    this.createdBy = '',
+    this.lastSenderName = '',
   });
+
+  /// v0.0.2: '' = chat with one person, [group] or [channel].
+  final String type;
+  static const String group = 'group';
+  static const String channel = 'channel';
+
+  /// v0.0.2 groups / channels: name, photo, about text, admins.
+  final String name;
+  final String photoUrl;
+  final String description;
+  final List<String> admins;
+  final String createdBy;
+
+  /// v0.0.2: who wrote the last message (groups: "alice: hi").
+  final String lastSenderName;
+
+  bool get isGroup => type == group;
+  bool get isChannel => type == channel;
+
+  /// A group or a channel (not a chat with one person).
+  bool get isMulti => type.isNotEmpty;
+  bool isAdmin(String uid) => admins.contains(uid);
+  bool isMember(String uid) => members.contains(uid);
+
+  /// Group id = "g_" + 20 letters, channel id = "ch_" + 20 letters.
+  static String typeOfId(String id) => id.startsWith('g_')
+      ? group
+      : id.startsWith('ch_')
+      ? channel
+      : '';
 
   final String id;
   final List<String> members;
@@ -1206,6 +1343,15 @@ class Chat {
       delivered: _times(m['delivered']),
       disappear: Disappear.normalize(m['disappear']),
       typing: _times(m['typing']),
+      type: typeOfId(id),
+      name: _str(m['name']),
+      photoUrl: _str(m['photoUrl']),
+      description: _str(m['description']),
+      admins: List<String>.from(
+        ((m['admins'] as List?) ?? const []).whereType<String>(),
+      ),
+      createdBy: _str(m['createdBy']),
+      lastSenderName: _str(m['lastSenderName']),
     );
   }
 }

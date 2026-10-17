@@ -29,6 +29,7 @@ class QueuedMedia {
     this.edits = const VideoEdits(),
     this.durationMs = 0,
     this.thumbPath,
+    this.links = const [],
   });
 
   final String path;
@@ -37,6 +38,9 @@ class QueuedMedia {
   final VideoEdits edits;
   final int durationMs;
   final String? thumbPath;
+
+  /// v0.0.2: link stickers.
+  final List<MediaLink> links;
 
   // ---- progress that survives an app restart
   bool hdDone = false;
@@ -61,6 +65,7 @@ class QueuedMedia {
     'edits': edits.toMap(),
     'durationMs': durationMs,
     'thumbPath': thumbPath,
+    if (links.isNotEmpty) 'links': [for (final l in links) l.toMap()],
     'hdDone': hdDone,
     'hdPath': hdPath,
     'lowDone': lowDone,
@@ -92,6 +97,7 @@ class QueuedMedia {
             : const VideoEdits(),
         durationMs: (m['durationMs'] as num?)?.toInt() ?? 0,
         thumbPath: m['thumbPath'] as String?,
+        links: MediaLink.listFrom(m['links']),
       )
       ..hdDone = m['hdDone'] == true
       ..hdPath = m['hdPath'] as String?
@@ -727,6 +733,7 @@ class UploadQueue extends ChangeNotifier {
               edits: m.isVideo ? m.publishEdits : const VideoEdits(),
               lowUrl: m.low?.url ?? '',
               lowKey: m.low?.key ?? '',
+              links: m.links,
             ),
         ],
       );

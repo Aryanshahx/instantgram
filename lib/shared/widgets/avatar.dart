@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/services/live_photos.dart';
 import '../../core/theme/app_colors.dart';
 import '../../features/stories/data/moments_index.dart';
 import 'net_image.dart';
@@ -20,6 +21,7 @@ class Avatar extends StatelessWidget {
     this.onPlusTap,
     this.uid,
     this.openMoment = true,
+    this.photoUid,
   });
 
   final String url;
@@ -40,11 +42,26 @@ class Avatar extends StatelessWidget {
   /// Tap opens the moment when the ring is shown.
   final bool openMoment;
 
+  /// v0.0.2: only the live photo of this user (no moment ring).
+  /// [uid] also shows the live photo.
+  final String? photoUid;
+
   @override
   Widget build(BuildContext context) {
+    final live = (uid != null && uid!.isNotEmpty) ? uid! : (photoUid ?? '');
+    if (live.isEmpty) return _withRing(context, url);
+    // v0.0.2: the person's CURRENT photo (saved one until it is known)
+    return ListenableBuilder(
+      listenable: LivePhotos.instance.listenable,
+      builder: (context, _) =>
+          _withRing(context, LivePhotos.instance.urlFor(live, url)),
+    );
+  }
+
+  Widget _withRing(BuildContext context, String url) {
     final id = uid;
     if (id == null || id.isEmpty) {
-      return _build(context, ring: ring, seen: seen, inside: false);
+      return _build(context, url, ring: ring, seen: seen, inside: false);
     }
     final index = MomentsIndex.instance;
     return ListenableBuilder(
@@ -52,10 +69,11 @@ class Avatar extends StatelessWidget {
       builder: (context, _) {
         final g = index.of(id);
         if (g == null) {
-          return _build(context, ring: ring, seen: seen, inside: false);
+          return _build(context, url, ring: ring, seen: seen, inside: false);
         }
         final child = _build(
           context,
+          url,
           ring: true,
           seen: index.allSeen(g),
           inside: !ring,
@@ -71,7 +89,8 @@ class Avatar extends StatelessWidget {
 
   /// [inside] = keep the total size == [size] (ring drawn inside it).
   Widget _build(
-    BuildContext context, {
+    BuildContext context,
+    String url, {
     required bool ring,
     required bool seen,
     required bool inside,

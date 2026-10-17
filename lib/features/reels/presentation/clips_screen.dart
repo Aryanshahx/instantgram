@@ -24,6 +24,7 @@ import '../../../shared/navigation.dart';
 import '../../../shared/widgets/async_views.dart';
 import '../../../shared/widgets/see_translation.dart';
 import '../../../shared/widgets/avatar.dart';
+import '../../../shared/widgets/media_links.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/follow_chip.dart';
 import '../../../shared/widgets/hi_blur.dart';
@@ -1449,7 +1450,8 @@ class _ClipPlayerState extends State<ClipPlayer>
   /// One photo or video of this clip.
   Widget _media(Post c, int i, {bool small = false}) {
     final m = _items[i];
-    if (!m.isVideo) return MediaPhoto(url: m.url);
+    // v0.0.2: link stickers on top (tap = open)
+    if (!m.isVideo) return withMediaLinks(MediaPhoto(url: m.url), m);
     final screen = MediaQuery.of(context).size;
     final screenAspect =
         screen.width / (screen.height <= 0 ? 1 : screen.height);
@@ -1478,6 +1480,8 @@ class _ClipPlayerState extends State<ClipPlayer>
               : SizedBox.expand(
                   child: NetImage(m.thumbUrl, fit: BoxFit.contain),
                 );
+          // v0.0.2: links grow with the video (stay on their spot)
+          child = withMediaLinks(child, m, aspect: aspect);
           final k = ClipLayout.coverScale(box.maxWidth, box.maxHeight, aspect);
           final scale = 1 + (k - 1) * grow;
           if (scale > 1.001) {

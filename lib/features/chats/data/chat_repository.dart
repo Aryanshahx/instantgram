@@ -15,6 +15,7 @@ import '../../../core/services/media_service.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/models/user_profile.dart';
 import '../../profile/data/user_repository.dart';
+import 'channel_seen.dart';
 
 class ChatRepository {
   ChatRepository._();
@@ -25,27 +26,111 @@ class ChatRepository {
       _db.collection('chats');
   String get myUid => FirebaseAuth.instance.currentUser!.uid;
 
-  /// Same id for both people: smallerUid_biggerUid
+  /// Same id for both people: smallerUid_biggerUid.
+  /// v0.0.2: a group / channel id stays as it is.
   String chatIdWith(String otherUid) {
+    if (isGroupId(otherUid)) return otherUid;
     final ids = [myUid, otherUid]..sort();
     return ids.join('_');
   }
 
-  Stream<List<Chat>> myChats() => _chats
-      .where('members', arrayContains: myUid)
-      .orderBy('updatedAt', descending: true)
-      .limit(100)
-      .snapshots()
-      .map((s) => s.docs.map(Chat.fromDoc).toList());
+  /// v0.0.2: "g_..." = group, "ch_..." = channel.
+  static bool isGroupId(String id) =>
+      id.startsWith('g_') || id.startsWith('ch_');
+  static bool isChannelId(String id) => id.startsWith('ch_');
+
+  /// v0.0.2: groups/{id}, channels/{id} or chats/{id}.
+  DocumentReference<Map<String, dynamic>> ref(String chatId) =>
+      _db.collection(collectionOf(chatId)).doc(chatId);
+
+  static String collectionOf(String chatId) => chatId.startsWith('g_')
+      ? 'groups'
+      : chatId.startsWith('ch_')
+      ? 'channels'
+      : 'chats';
+
+  /// Chats with one person + groups + channels you are in (newest first).
+  /// v0.0.2: groups / channels need the new rules; until then only chats.
+  Stream<List<Chat>> myChats() {
+    Stream<List<Chat>> q(String col, {bool ordered = false}) {
+      Query<Map<String, dynamic>> query = _db
+          .collection(col)
+          .where('members', arrayContains: myUid);
+      // groups / channels: no extra database index needed (sorted here)
+      if (ordered) query = query.orderBy('updatedAt', descending: true);
+      return query
+          .limit(100)
+          .snapshots()
+          .map((s) => s.docs.map(Chat.fromDoc).toList());
+    }
+
+    return mergeChatLists(q('chats', ordered: true), [
+      q('groups'),
+      q('channels'),
+    ]);
+  }
+
+  /// [main] decides when the list is ready; [extra] lists that fail are
+  /// left out (e.g. new rules not pasted yet).
+  @visibleForTesting
+  static Stream<List<Chat>> mergeChatLists(
+    Stream<List<Chat>> main,
+    List<Stream<List<Chat>>> extra,
+  ) {
+    late StreamController<List<Chat>> out;
+    final subs = <StreamSubscription<List<Chat>>>[];
+    List<Chat>? first;
+    final rest = List<List<Chat>>.generate(extra.length, (_) => const []);
+    void emit() {
+      final f = first;
+      if (f == null || out.isClosed) return;
+      final all = [...f, for (final r in rest) ...r]
+        ..sort((a, b) {
+          final c = b.updatedAt.compareTo(a.updatedAt);
+          return c != 0 ? c : a.id.compareTo(b.id);
+        });
+      out.add(all);
+    }
+
+    out = StreamController<List<Chat>>(
+      onListen: () {
+        subs.add(
+          main.listen((v) {
+            first = v;
+            emit();
+          }, onError: out.addError),
+        );
+        for (var i = 0; i < extra.length; i++) {
+          subs.add(
+            extra[i].listen(
+              (v) {
+                rest[i] = v;
+                emit();
+              },
+              onError: (Object e) {
+                debugPrint('chats ($i): $e');
+                rest[i] = const [];
+                emit();
+              },
+            ),
+          );
+        }
+      },
+      onCancel: () async {
+        for (final s in subs) {
+          await s.cancel();
+        }
+      },
+    );
+    return out.stream;
+  }
 
   /// One chat (pinned message…). null = no messages yet.
-  Stream<Chat?> chat(String chatId) => _chats
-      .doc(chatId)
+  Stream<Chat?> chat(String chatId) => ref(chatId)
       .snapshots()
       .map((d) => d.exists ? Chat.fromDoc(d) : null);
 
-  Stream<List<Message>> messages(String chatId) => _chats
-      .doc(chatId)
+  Stream<List<Message>> messages(String chatId) => ref(chatId)
       .collection('messages')
       .orderBy('createdAt', descending: true)
       .limit(200)
@@ -56,15 +141,25 @@ class ChatRepository {
   // ------------------------------------------------------------ v0.10 ticks
 
   /// You saw the chat (green ticks for the other person).
-  Future<void> markSeen(String chatId) => _chats.doc(chatId).update({
-    'seen.$myUid': FieldValue.serverTimestamp(),
-    'delivered.$myUid': FieldValue.serverTimestamp(),
-  });
+  /// v0.0.2: channels remember it on this phone only (no ticks).
+  Future<void> markSeen(String chatId) async {
+    if (isChannelId(chatId)) {
+      await ChannelSeen.instance.mark(chatId);
+      return;
+    }
+    await ref(chatId).update({
+      'seen.$myUid': FieldValue.serverTimestamp(),
+      'delivered.$myUid': FieldValue.serverTimestamp(),
+    });
+  }
 
   /// New messages reached your phone (double grey ticks).
-  Future<void> markDelivered(String chatId) => _chats.doc(chatId).update({
-    'delivered.$myUid': FieldValue.serverTimestamp(),
-  });
+  Future<void> markDelivered(String chatId) async {
+    if (isChannelId(chatId)) return;
+    await ref(chatId).update({
+      'delivered.$myUid': FieldValue.serverTimestamp(),
+    });
+  }
 
   Future<void> send(
     UserProfile other,
@@ -190,7 +285,7 @@ class ChatRepository {
   };
 
   DocumentReference<Map<String, dynamic>> _msg(String chatId, String id) =>
-      _chats.doc(chatId).collection('messages').doc(id);
+      ref(chatId).collection('messages').doc(id);
 
   /// Your emoji on a message (null = remove yours).
   Future<void> react(String chatId, String messageId, String? emoji) => _msg(
@@ -211,7 +306,7 @@ class ChatRepository {
       MediaService.instance.delete(m.mediaKey).ignore();
     }
     try {
-      final chatRef = _chats.doc(chatId);
+      final chatRef = ref(chatId);
       final chat = await chatRef.get();
       final pinned = chat.data()?['pinned'];
       final last = await chatRef
@@ -226,6 +321,7 @@ class ChatRepository {
             ? preview.substring(0, 200)
             : preview,
         'lastSenderId': next?.senderId ?? '',
+        if (isGroupId(chatId)) 'lastSenderName': '',
         if (pinned is Map && pinned['id'] == m.id)
           'pinned': FieldValue.delete(),
       });
@@ -235,13 +331,13 @@ class ChatRepository {
   /// Pins [m] at the top of the chat (one at a time).
   Future<void> pin(String chatId, Message m) {
     final t = m.preview;
-    return _chats.doc(chatId).update({
+    return ref(chatId).update({
       'pinned': {'id': m.id, 'text': t.length > 120 ? t.substring(0, 120) : t},
     });
   }
 
   Future<void> unpin(String chatId) =>
-      _chats.doc(chatId).update({'pinned': FieldValue.delete()});
+      ref(chatId).update({'pinned': FieldValue.delete()});
 
   /// Sends a post / clip into the chat (shown as a card that opens it).
   Future<void> sendPost(ChatPerson other, Post post) {
@@ -275,6 +371,8 @@ class ChatRepository {
   void rememberMode(String chatId, String mode) => _modes[chatId] = mode;
 
   Future<String> _modeOf(String chatId) async {
+    // v0.0.2: no disappearing messages in groups / channels
+    if (isGroupId(chatId)) return Disappear.off;
     final known = _modes[chatId];
     if (known != null) return known;
     try {
@@ -307,8 +405,9 @@ class ChatRepository {
   /// "typing…" for the other person (call again every few seconds while
   /// typing; [on] = false when you stop or send).
   Future<void> setTyping(String chatId, bool on) async {
+    if (isChannelId(chatId)) return; // v0.0.2: no "typing…" in channels
     try {
-      await _chats.doc(chatId).update({
+      await ref(chatId).update({
         'typing.$myUid': on
             ? FieldValue.serverTimestamp()
             : FieldValue.delete(),
@@ -414,9 +513,13 @@ class ChatRepository {
   }) async {
     // v0.19 Hyper Intelligence: people you chat with come first in the
     // feed (only WHO, never what - chats are not read)
-    if (push) HyperFeed.instance.chatted(other.uid);
+    final group = isGroupId(other.uid);
+    if (push && !group) HyperFeed.instance.chatted(other.uid);
     final me = await UserRepository.instance.me();
     final chatId = chatIdWith(other.uid);
+    if (group) {
+      return _writeGroup(chatId, me, message, preview, push: push);
+    }
     final chatRef = _chats.doc(chatId);
     final members = [me.uid, other.uid]..sort();
     final kind = message['kind'];
@@ -452,6 +555,51 @@ class ChatRepository {
     return ref.id;
   }
 
+  /// v0.0.2: message in a group / channel (the chat document exists).
+  Future<String> _writeGroup(
+    String chatId,
+    UserProfile me,
+    Map<String, dynamic> message,
+    String preview, {
+    bool push = true,
+  }) async {
+    final chatRef = ref(chatId);
+    final batch = _db.batch();
+    batch.update(chatRef, groupChatFields(chatId, me, preview));
+    final msg = chatRef.collection('messages').doc();
+    batch.set(msg, {
+      ...message,
+      'senderId': me.uid,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+    if (push) unawaited(_notify(chatId, msg.id));
+    return msg.id;
+  }
+
+  /// Fields of the group / channel after a new message.
+  static Map<String, dynamic> groupChatFields(
+    String chatId,
+    UserProfile me,
+    String preview,
+  ) {
+    final channel = isChannelId(chatId);
+    return {
+      'lastMessage': preview.length > 200 ? preview.substring(0, 200) : preview,
+      'lastSenderId': me.uid,
+      'lastSenderName': channel ? '' : me.username,
+      'updatedAt': FieldValue.serverTimestamp(),
+      if (!channel) ...{
+        'typing.${me.uid}': FieldValue.delete(),
+        // names in the group stay fresh
+        'memberInfo.${me.uid}': {
+          'username': me.username,
+          'photoUrl': me.photoUrl,
+        },
+      },
+    };
+  }
+
   /// v0.11: "username: message" notification on the other phone.
   Future<void> _notify(String chatId, String messageId) async {
     if (debugNoPush) return;
@@ -478,6 +626,27 @@ class ChatRepository {
           .orderBy('updatedAt', descending: true)
           .limit(40)
           .get();
+      // v0.0.2: your groups (and channels you post in) first
+      for (final col in const ['groups', 'channels']) {
+        try {
+          final gs = await _db
+              .collection(col)
+              .where('members', arrayContains: me)
+              .limit(50)
+              .get();
+          final list = gs.docs.map(Chat.fromDoc).toList()
+            ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+          for (final g in list) {
+            if (g.isChannel && !g.isAdmin(me)) continue;
+            out[g.id] = ChatPerson(
+              uid: g.id,
+              username: g.name,
+              photoUrl: g.photoUrl,
+              recent: true,
+            );
+          }
+        } catch (_) {}
+      }
       for (final c in chats.docs.map(Chat.fromDoc)) {
         final o = c.otherUid(me);
         if (o == me) continue;
@@ -527,6 +696,9 @@ class ChatPerson {
 
   factory ChatPerson.of(UserProfile u) =>
       ChatPerson(uid: u.uid, username: u.username, photoUrl: u.photoUrl);
+
+  /// v0.0.2: a group / channel you can send to.
+  bool get isGroup => ChatRepository.isGroupId(uid);
 
   bool matches(String q) {
     final w = q.trim().toLowerCase().replaceFirst('@', '');

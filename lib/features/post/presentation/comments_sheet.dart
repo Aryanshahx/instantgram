@@ -717,6 +717,10 @@ class _CommentsSheetState extends State<CommentsSheet> {
       }
       final open = _expanded.contains(c.id);
       final shown = open ? replies.length : _repliesShown;
+      // v0.0.2: opened -> "Hide" also at the TOP of the replies
+      if (open && replies.length > 1) {
+        out.add(_MoreReplies(c.id, 0, top: true));
+      }
       out.addAll(replies.take(shown));
       out.add(_MoreReplies(c.id, replies.length - shown));
     }
@@ -732,6 +736,10 @@ class _CommentsSheetState extends State<CommentsSheet> {
       fontSize: 13,
     );
     final word = r.count == 1 ? 'reply' : 'replies';
+    void hide() => setState(() {
+      _closed.add(r.parentId);
+      _expanded.remove(r.parentId);
+    });
     Widget button(Key key, String text, IconData icon, VoidCallback onTap) =>
         TextButton(
           key: key,
@@ -750,6 +758,21 @@ class _CommentsSheetState extends State<CommentsSheet> {
             ],
           ),
         );
+    if (r.top) {
+      return Padding(
+        padding: const EdgeInsets.only(left: 54),
+        child: Row(
+          children: [
+            button(
+              ValueKey('hide-replies-top-${r.parentId}'),
+              'Hide replies',
+              Icons.keyboard_arrow_up_rounded,
+              hide,
+            ),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(left: 54, bottom: 4),
       child: Row(
@@ -776,10 +799,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
               ValueKey('hide-replies-${r.parentId}'),
               'Hide',
               Icons.keyboard_arrow_up_rounded,
-              () => setState(() {
-                _closed.add(r.parentId);
-                _expanded.remove(r.parentId);
-              }),
+              hide,
             ),
           ],
         ],
@@ -1094,8 +1114,16 @@ class _CommentsSheetState extends State<CommentsSheet> {
 }
 
 class _MoreReplies {
-  const _MoreReplies(this.parentId, this.count, {this.closed = false});
+  const _MoreReplies(
+    this.parentId,
+    this.count, {
+    this.closed = false,
+    this.top = false,
+  });
   final String parentId;
+
+  /// v0.0.2: the "Hide replies" button above opened replies.
+  final bool top;
 
   /// Replies not shown.
   final int count;

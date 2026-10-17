@@ -515,6 +515,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                           },
                           child: Avatar(
                             url: _group.photoUrl,
+                            photoUid: _group.authorId,
                             name: _group.username,
                             size: 36,
                           ),

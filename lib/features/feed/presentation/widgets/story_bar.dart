@@ -78,6 +78,7 @@ class StoryBar extends StatelessWidget {
                 ),
                 child: Avatar(
                   url: g.photoUrl,
+                  photoUid: g.authorId,
                   name: g.username,
                   size: 62,
                   ring: true,

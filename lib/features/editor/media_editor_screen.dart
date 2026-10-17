@@ -18,6 +18,7 @@ import '../../core/services/gesture_exclusion.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/time_ago.dart';
+import '../../shared/widgets/media_links.dart';
 import '../../shared/models/post.dart';
 import '../../shared/widgets/video_extras.dart';
 import '../../shared/widgets/stickers.dart';
@@ -49,6 +50,8 @@ enum _Tool {
   voice,
   text,
   stickers,
+  // v0.0.2: link sticker (tap = open the website)
+  link,
   filters,
   adjust,
   crop,
@@ -156,6 +159,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
           if (_voiceAllowed) _Tool.voice,
           _Tool.text,
           _Tool.stickers,
+          if (_linksAllowed) _Tool.link,
           _Tool.filters,
           _Tool.adjust,
           _Tool.sound,
@@ -166,8 +170,13 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
           _Tool.crop,
           _Tool.text,
           _Tool.stickers,
+          if (_linksAllowed) _Tool.link,
           if (_musicAllowed) _Tool.music,
         ];
+
+  /// v0.0.2: links on posts and clips (not moments / comment photos).
+  bool get _linksAllowed =>
+      widget.mode != ComposeMode.story && widget.onDone == null;
 
   @override
   void initState() {
@@ -704,6 +713,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
               edits: item.videoEdits,
               durationMs: item.playedMs,
               preview: preview,
+              links: List.unmodifiable(item.links),
             ),
           );
           continue;
@@ -715,6 +725,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
               file: item.file,
               isVideo: false,
               aspectRatio: n.width / n.height,
+              links: List.unmodifiable(item.links),
             ),
           );
           continue;
@@ -859,6 +870,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
       file: file,
       isVideo: false,
       aspectRatio: layout.frame.width / layout.frame.height,
+      links: List.unmodifiable(item.links),
     );
   }
 
@@ -955,6 +967,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                           ),
                           for (final t in item.texts)
                             _textLayer(item, t, fw, fh),
+                          _linksOnCanvas(item),
                         ],
                       ),
                     ),
@@ -1222,6 +1235,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                     VideoPlayer(c),
                   ),
                   _overlaysOnCanvas(item, c),
+                  _linksOnCanvas(item),
                   // v0.15: play / pause is next to the timeline (not here)
                   if (item.muted)
                     const Positioned(
@@ -1335,7 +1349,96 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
         return _voicePanel();
       case _Tool.stickers:
         return _stickersPanel();
+      case _Tool.link:
+        return _linkPanel();
     }
+  }
+
+  // ---------------------------------------------------------------- links
+
+  /// v0.0.2: add / edit / remove a link sticker.
+  Future<void> _editLink(EditItem item, int? i) async {
+    final res = await showMediaLinkEditor(
+      context,
+      link: i == null ? null : item.links[i],
+    );
+    if (res == null || !mounted) return;
+    setState(() {
+      if (res.delete) {
+        if (i != null) item.links.removeAt(i);
+        return;
+      }
+      final l = res.link;
+      if (l == null) return;
+      if (i == null) {
+        if (item.links.length < MediaLink.max) {
+          // new links go a bit lower each time (not on top of each other)
+          item.links.add(l.copyWith(x: 0.5, y: 0.62 + item.links.length * 0.1));
+        }
+      } else {
+        item.links[i] = l;
+      }
+    });
+  }
+
+  Widget _linkPanel() {
+    final item = _item;
+    final full = item.links.length >= MediaLink.max;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        FilledButton.icon(
+          key: const ValueKey('editor-add-link'),
+          onPressed: full ? null : () => _editLink(item, null),
+          style: _limeButton,
+          icon: const Icon(Icons.link_rounded),
+          label: const Text('Add link'),
+        ),
+        const SizedBox(height: 6),
+        _hint(
+          full
+              ? 'Max ${MediaLink.max} links · tap one to edit or remove'
+              : 'People tap it to open the website · drag to move · tap '
+                    'to edit',
+        ),
+      ],
+    );
+  }
+
+  /// Link stickers on the photo / video: drag = move, tap = edit.
+  Widget _linksOnCanvas(EditItem item) {
+    if (item.links.isEmpty) return const SizedBox.shrink();
+    return Positioned.fill(
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final fw = box.maxWidth, fh = box.maxHeight;
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              for (var i = 0; i < item.links.length; i++)
+                OverlayPlace(
+                  key: ValueKey('editor-link-$i'),
+                  x: item.links[i].x,
+                  y: item.links[i].y,
+                  width: fw,
+                  height: fh,
+                  child: GestureDetector(
+                    onTap: () => _editLink(item, i),
+                    onPanUpdate: (d) => setState(() {
+                      final l = item.links[i];
+                      item.links[i] = l.copyWith(
+                        x: (l.x + d.delta.dx / fw).clamp(0.05, 0.95),
+                        y: (l.y + d.delta.dy / fh).clamp(0.04, 0.96),
+                      );
+                    }),
+                    child: MediaLinkChip(link: item.links[i], frameWidth: fw),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   ButtonStyle get _limeButton => FilledButton.styleFrom(
@@ -1852,6 +1955,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
     _Tool.music => 'Music',
     _Tool.voice => 'Voice',
     _Tool.stickers => 'Stickers',
+    _Tool.link => 'Link',
   };
 
   IconData _toolIcon(_Tool t) => switch (t) {
@@ -1863,6 +1967,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
     _Tool.music => Icons.music_note_outlined,
     _Tool.voice => Icons.mic_none,
     _Tool.stickers => Icons.emoji_emotions_outlined,
+    _Tool.link => Icons.link_rounded,
   };
 
   // ---------------------------------------------------------------- timeline

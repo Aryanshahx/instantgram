@@ -26,6 +26,9 @@ import '../../../shared/widgets/post_grid.dart';
 import '../../../shared/widgets/user_tile.dart';
 import '../../post/data/post_repository.dart';
 import '../../profile/data/user_repository.dart';
+import '../../chats/data/group_repository.dart';
+import '../../chats/presentation/group_screens.dart';
+import '../../chats/presentation/group_widgets.dart';
 import '../../../core/services/net_quality.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/navigation/page_cover.dart';
@@ -51,6 +54,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
   Timer? _debounce;
   String _query = '';
   List<UserProfile> _people = const [];
+  List<Chat> _channels = const []; // v0.0.2
   List<Post> _tagClips = const [];
   bool _searching = false;
 
@@ -117,6 +121,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
     if (q.replaceFirst('#', '').isEmpty) {
       setState(() {
         _people = const [];
+        _channels = const [];
         _tagClips = const [];
         _searching = false;
       });
@@ -132,11 +137,18 @@ class _ExploreScreenState extends State<ExploreScreen> {
               ? Future.value(<UserProfile>[])
               : UserRepository.instance.search(word),
           PostRepository.instance.clipsByTag(word),
+          // v0.0.2: channels too (nothing if the new rules are missing)
+          isTag
+              ? Future.value(<Chat>[])
+              : GroupRepository.instance
+                    .searchChannels(word)
+                    .catchError((Object _) => <Chat>[]),
         ]);
         if (mounted && _query == q) {
           setState(() {
             _people = results[0] as List<UserProfile>;
             _tagClips = results[1] as List<Post>;
+            _channels = (results[2] as List<Chat>).take(5).toList();
             _searching = false;
           });
         }
@@ -251,6 +263,39 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   ),
                 ),
               ],
+              if (_channels.isNotEmpty) ...[
+                const SliverToBoxAdapter(child: _SectionTitle('Channels')),
+                SliverList.builder(
+                  itemCount: _channels.length,
+                  itemBuilder: (context, i) {
+                    final c = _channels[i];
+                    return ListTile(
+                      key: ValueKey('explore-channel-${c.id}'),
+                      onTap: () => openGroupChat(
+                        context,
+                        c.id,
+                        name: c.name,
+                        photoUrl: c.photoUrl,
+                      ),
+                      leading: GroupAvatar(
+                        url: c.photoUrl,
+                        channel: true,
+                        size: 44,
+                      ),
+                      title: Text(
+                        c.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      subtitle: Text(
+                        memberCountText(c.members.length, channel: true),
+                        style: const TextStyle(color: AppColors.textSecondary),
+                      ),
+                    );
+                  },
+                ),
+              ],
               if (clips.isNotEmpty) ...[
                 SliverToBoxAdapter(
                   child: _SectionTitle(_isTag ? 'Clips with #$_word' : 'Clips'),
@@ -259,7 +304,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
               ],
               if (_searching)
                 const SliverToBoxAdapter(child: LoadingView(padding: 16))
-              else if (_people.isEmpty && clips.isEmpty)
+              else if (_people.isEmpty && _channels.isEmpty && clips.isEmpty)
                 SliverToBoxAdapter(
                   child: EmptyState(
                     icon: Icons.search_off,

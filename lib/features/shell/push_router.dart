@@ -76,8 +76,10 @@ class PushRouter {
   }
 
   void _openChat(Map<String, dynamic> d) {
-    final uid = '${d['fromUid'] ?? ''}';
     final chatId = '${d['chatId'] ?? ''}';
+    // v0.0.2: groups / channels open by their id
+    final group = chatId.startsWith('g_') || chatId.startsWith('ch_');
+    final uid = group ? chatId : '${d['fromUid'] ?? ''}';
     final nav = Calls.instance.navigatorKey.currentState;
     if (uid.isEmpty || nav == null) return;
     if (ChatDetailScreen.openChatId == chatId) return; // already open

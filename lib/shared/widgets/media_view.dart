@@ -16,6 +16,7 @@ import '../../core/theme/app_colors.dart';
 import '../../features/editor/filters.dart';
 import '../models/post.dart';
 import 'hi_blur.dart';
+import 'media_links.dart';
 import 'net_image.dart';
 import 'video_extras.dart';
 import '../../core/services/video_cache.dart';
@@ -581,15 +582,19 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
   }
 
   Widget _item(MediaItem m, int i) {
-    if (!m.isVideo) return MediaPhoto(url: m.url);
-    return MediaVideo(
-      item: m,
-      active: _visible && i == _index,
-      // music replaces the video sound
-      muted: AppSettings.instance.feedMuted.value || p.hasMusic,
-      mixWithOthers: p.hasMusic,
-      onWatched: widget.onWatched,
-      onViewReached: widget.onView == null ? null : _sendView,
+    // v0.0.2: link stickers on top (tap = open)
+    if (!m.isVideo) return withMediaLinks(MediaPhoto(url: m.url), m);
+    return withMediaLinks(
+      MediaVideo(
+        item: m,
+        active: _visible && i == _index,
+        // music replaces the video sound
+        muted: AppSettings.instance.feedMuted.value || p.hasMusic,
+        mixWithOthers: p.hasMusic,
+        onWatched: widget.onWatched,
+        onViewReached: widget.onView == null ? null : _sendView,
+      ),
+      m,
     );
   }
 

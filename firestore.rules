@@ -526,59 +526,194 @@ service cloud.firestore {
               && (resource.data.get('vanish', false) == true
                   || (resource.data.get('expireAt', null) is timestamp
                       && resource.data.expireAt < request.time))));
-
-        function messageOk(d) {
-          let kind = d.get('kind', 'text');
-          let media = kind in ['image', 'gif', 'voice'];
-          return d.keys().hasOnly(['senderId', 'createdAt', 'text', 'kind',
-                  'postId', 'postType', 'postThumb', 'postAuthor', 'postCaption',
-                  'mediaUrl', 'mediaKey', 'width', 'height', 'durationMs',
-                  'lat', 'lng', 'address', 'replyTo', 'forwarded',
-                  'expireAt', 'vanish', 'callStatus', 'video', 'durationSec',
-                  'font'])
-            // v0.16: font of a text message (see BioFont ids)
-            && d.get('font', '') is string && d.get('font', '').size() <= 20
-            && kind in ['text', 'post', 'image', 'gif', 'voice', 'location',
-                        'call', 'system']
-            // v0.11: disappearing messages (max 7 days + a little)
-            && (!('expireAt' in d) || (d.expireAt is timestamp
-                  && d.expireAt > request.time
-                  && d.expireAt < request.time + duration.value(8, 'd')))
-            && d.get('vanish', false) is bool
-            // v0.11: call log in the chat ("Missed voice call", "Video call 2:31")
-            && (kind != 'call' || (d.callStatus in ['ended', 'missed', 'declined', 'busy', 'failed']
-                  && d.video is bool
-                  && d.durationSec is int && d.durationSec >= 0 && d.durationSec <= 86400))
-            // v0.11: "alice turned on disappearing messages"
-            && (kind != 'system' || (d.text.size() > 0 && d.text.size() <= 200))
-            && d.text is string && d.text.size() <= 2000
-            && (kind != 'text' || d.text.size() > 0)
-            && (!media || (d.mediaUrl is string && d.mediaUrl.matches('https://.*')
-                           && d.mediaUrl.size() <= 600))
-            && (kind != 'location' || (d.lat is number && d.lng is number
-                  && d.lat >= -90 && d.lat <= 90 && d.lng >= -180 && d.lng <= 180))
-            && d.get('address', '') is string && d.get('address', '').size() <= 300
-            && (!('replyTo' in d) || (d.replyTo is map
-                  && d.replyTo.keys().hasOnly(['id', 'senderId', 'text'])
-                  && d.replyTo.text is string && d.replyTo.text.size() <= 300))
-            && d.get('forwarded', false) is bool;
-        }
-        function reactOk() {
-          let old = resource.data.get('reactions', {});
-          let now = request.resource.data.get('reactions', {});
-          return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
-            && now is map
-            && now.diff(old).affectedKeys().hasOnly([me()])
-            && (!(me() in now) || (now[me()] is string && now[me()].size() <= 16));
-        }
-        function hideOk() {
-          let old = resource.data.get('hiddenFor', []);
-          let now = request.resource.data.get('hiddenFor', []);
-          return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hiddenFor'])
-            && now is list && now.size() == old.size() + 1
-            && now.hasAll(old) && now.hasAll([me()]) && !old.hasAll([me()]);
-        }
       }
+    }
+
+    // ---------------- Message checks (chats, groups, channels) ----------------
+    function messageOk(d) {
+      let kind = d.get('kind', 'text');
+      let media = kind in ['image', 'gif', 'voice'];
+      return d.keys().hasOnly(['senderId', 'createdAt', 'text', 'kind',
+              'postId', 'postType', 'postThumb', 'postAuthor', 'postCaption',
+              'mediaUrl', 'mediaKey', 'width', 'height', 'durationMs',
+              'lat', 'lng', 'address', 'replyTo', 'forwarded',
+              'expireAt', 'vanish', 'callStatus', 'video', 'durationSec',
+              'font'])
+        // v0.16: font of a text message (see BioFont ids)
+        && d.get('font', '') is string && d.get('font', '').size() <= 20
+        && kind in ['text', 'post', 'image', 'gif', 'voice', 'location',
+                    'call', 'system']
+        // v0.11: disappearing messages (max 7 days + a little)
+        && (!('expireAt' in d) || (d.expireAt is timestamp
+              && d.expireAt > request.time
+              && d.expireAt < request.time + duration.value(8, 'd')))
+        && d.get('vanish', false) is bool
+        // v0.11: call log in the chat ("Missed voice call", "Video call 2:31")
+        && (kind != 'call' || (d.callStatus in ['ended', 'missed', 'declined', 'busy', 'failed']
+              && d.video is bool
+              && d.durationSec is int && d.durationSec >= 0 && d.durationSec <= 86400))
+        // v0.11: "alice turned on disappearing messages"
+        && (kind != 'system' || (d.text.size() > 0 && d.text.size() <= 200))
+        && d.text is string && d.text.size() <= 2000
+        && (kind != 'text' || d.text.size() > 0)
+        && (!media || (d.mediaUrl is string && d.mediaUrl.matches('https://.*')
+                       && d.mediaUrl.size() <= 600))
+        && (kind != 'location' || (d.lat is number && d.lng is number
+              && d.lat >= -90 && d.lat <= 90 && d.lng >= -180 && d.lng <= 180))
+        && d.get('address', '') is string && d.get('address', '').size() <= 300
+        && (!('replyTo' in d) || (d.replyTo is map
+              && d.replyTo.keys().hasOnly(['id', 'senderId', 'text'])
+              && d.replyTo.text is string && d.replyTo.text.size() <= 300))
+        && d.get('forwarded', false) is bool;
+    }
+    function reactOk() {
+      let old = resource.data.get('reactions', {});
+      let now = request.resource.data.get('reactions', {});
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+        && now is map
+        && now.diff(old).affectedKeys().hasOnly([me()])
+        && (!(me() in now) || (now[me()] is string && now[me()].size() <= 16));
+    }
+    function hideOk() {
+      let old = resource.data.get('hiddenFor', []);
+      let now = request.resource.data.get('hiddenFor', []);
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hiddenFor'])
+        && now is list && now.size() == old.size() + 1
+        && now.hasAll(old) && now.hasAll([me()]) && !old.hasAll([me()]);
+    }
+
+    // ---------------- v0.0.2: Groups and channels ----------------
+    // groups/{g_...}: only members read; members write messages; admins
+    // manage name / photo / members / admins (max 256 people).
+    // channels/{ch_...}: everyone reads, anyone follows, admins post.
+    function grpPath(col, id) {
+      return /databases/$(database)/documents/$(col)/$(id);
+    }
+    // only your own key of a map field changed
+    function onlyMine(f) {
+      return !changed().hasAny([f])
+        || (request.resource.data[f] is map
+            && request.resource.data[f].diff(resource.data.get(f, {}))
+                 .affectedKeys().hasOnly([me()]));
+    }
+    function grpOk(d, maxMembers) {
+      return d.keys().hasOnly(['name', 'nameLower', 'description', 'photoUrl',
+              'photoKey', 'createdBy', 'admins', 'members', 'memberInfo',
+              'lastMessage', 'lastSenderId', 'lastSenderName', 'createdAt',
+              'updatedAt', 'seen', 'delivered', 'typing', 'pinned'])
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 60
+        && d.get('nameLower', '') is string && d.get('nameLower', '').size() <= 60
+        && d.get('description', '') is string && d.get('description', '').size() <= 300
+        && d.get('photoUrl', '') is string && d.get('photoUrl', '').size() <= 600
+        && (d.get('photoUrl', '') == '' || d.photoUrl.matches('https://.*'))
+        && d.members is list && d.members.size() >= 1
+        && d.members.size() <= maxMembers
+        && d.admins is list && d.admins.size() >= 1 && d.admins.size() <= 20
+        && d.members.hasAll(d.admins)
+        && d.get('memberInfo', {}) is map
+        && d.get('lastMessage', '') is string && d.get('lastMessage', '').size() <= 200
+        && d.get('lastSenderName', '') is string && d.get('lastSenderName', '').size() <= 60;
+    }
+    function grpCreateOk(d, maxMembers) {
+      return d.createdBy == me() && d.admins == [me()]
+        && d.lastSenderId == me() && grpOk(d, maxMembers);
+    }
+    // admins change anything (but not who created it)
+    function grpAdminEdit(maxMembers) {
+      return me() in resource.data.admins
+        && request.resource.data.createdBy == resource.data.createdBy
+        && grpOk(request.resource.data, maxMembers);
+    }
+    // members: ticks, "typing…", own name, last message, pinned message
+    function grpActivity() {
+      return me() in resource.data.members
+        && changed().hasOnly(['lastMessage', 'lastSenderId', 'lastSenderName',
+             'updatedAt', 'seen', 'delivered', 'typing', 'memberInfo', 'pinned'])
+        && onlyMine('seen') && onlyMine('delivered') && onlyMine('typing')
+        && onlyMine('memberInfo')
+        && request.resource.data.get('lastMessage', '') is string
+        && request.resource.data.get('lastMessage', '').size() <= 200
+        && request.resource.data.get('lastSenderName', '') is string
+        && request.resource.data.get('lastSenderName', '').size() <= 60;
+    }
+    // leave (not admins: they use grpAdminEdit)
+    function grpLeave() {
+      return me() in resource.data.members
+        && !(me() in resource.data.admins)
+        && changed().hasOnly(['members', 'memberInfo', 'typing', 'lastMessage',
+             'lastSenderId', 'lastSenderName', 'updatedAt'])
+        && request.resource.data.members == resource.data.members.removeAll([me()])
+        && onlyMine('memberInfo') && onlyMine('typing')
+        && request.resource.data.get('lastMessage', '') is string
+        && request.resource.data.get('lastMessage', '').size() <= 200;
+    }
+    // follow a channel (only add yourself at the end)
+    function chJoin() {
+      return !(me() in resource.data.members)
+        && changed().hasOnly(['members'])
+        && request.resource.data.members == resource.data.members.concat([me()])
+        && request.resource.data.members.size() <= 10000;
+    }
+    // group / channel messages: no calls, no disappearing
+    function grpMessageOk(d) {
+      return d.senderId == me() && messageOk(d)
+        && d.get('kind', 'text') != 'call'
+        && !('expireAt' in d) && !('vanish' in d);
+    }
+
+    match /groups/{gid} {
+      allow get, list: if signedIn() && me() in resource.data.members;
+      allow create: if signedIn() && gid.matches('g_[A-Za-z0-9]{20}')
+        && grpCreateOk(request.resource.data, 256);
+      allow update: if signedIn()
+        && (grpAdminEdit(256) || grpActivity() || grpLeave());
+      allow delete: if false;
+
+      match /messages/{mid} {
+        allow read: if signedIn()
+          && me() in get(grpPath('groups', gid)).data.members;
+        // getAfter: new group / added people in the same save;
+        // get: "alice left" is written while leaving
+        allow create: if signedIn() && grpMessageOk(request.resource.data)
+          && (me() in getAfter(grpPath('groups', gid)).data.members
+              || me() in get(grpPath('groups', gid)).data.members);
+        allow update: if signedIn()
+          && me() in get(grpPath('groups', gid)).data.members
+          && (reactOk() || hideOk());
+        // the sender or an admin deletes it
+        allow delete: if signedIn() && (resource.data.senderId == me()
+          || me() in get(grpPath('groups', gid)).data.admins);
+      }
+    }
+
+    match /channels/{chid} {
+      allow read: if signedIn();
+      allow create: if signedIn() && chid.matches('ch_[A-Za-z0-9]{20}')
+        && request.resource.data.members == [me()]
+        && grpCreateOk(request.resource.data, 10000);
+      allow update: if signedIn()
+        && (grpAdminEdit(10000) || chJoin() || grpLeave());
+      allow delete: if false;
+
+      match /messages/{mid} {
+        allow read: if signedIn();
+        allow create: if signedIn() && grpMessageOk(request.resource.data)
+          && me() in getAfter(grpPath('channels', chid)).data.admins;
+        // followers react
+        allow update: if signedIn()
+          && me() in get(grpPath('channels', chid)).data.members
+          && (reactOk() || hideOk());
+        allow delete: if signedIn()
+          && me() in get(grpPath('channels', chid)).data.admins;
+      }
+    }
+
+    // v0.0.2: same-login accounts (only the server reads / writes them)
+    match /accountFamilies/{id} {
+      allow read, write: if false;
+    }
+    match /accountLinks/{id} {
+      allow read, write: if false;
     }
 
     // ---------------- v0.10: Active status ----------------

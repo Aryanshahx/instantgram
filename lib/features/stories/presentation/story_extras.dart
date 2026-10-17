@@ -521,6 +521,7 @@ class _StoryPreviewCardState extends State<StoryPreviewCard> {
                                 children: [
                                   Avatar(
                                     url: g.photoUrl,
+                                    photoUid: g.authorId,
                                     name: g.username,
                                     size: 28,
                                   ),

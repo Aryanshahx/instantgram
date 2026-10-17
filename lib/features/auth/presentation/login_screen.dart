@@ -33,16 +33,24 @@ class _LoginScreenState extends State<LoginScreen> {
   /// v0.12: tap a saved account -> log in (password saved on this phone)
   /// or fill the email and ask for the password.
   Future<void> _quick(SavedAccount a) async {
-    final pw = await SavedAccounts.instance.password(a.uid);
+    final store = SavedAccounts.instance;
+    // v0.0.2: accounts of one login share its password
+    final pw =
+        await store.password(a.uid) ??
+        (a.linked ? await store.passwordForEmail(a.email) : null);
     if (!mounted) return;
     if (pw == null) {
-      _idCtrl.text = a.email;
+      _idCtrl.text = a.username.isNotEmpty && a.linked ? a.username : a.email;
       _passFocus.requestFocus();
       return;
     }
     setState(() => _loading = true);
     try {
-      await AuthService.instance.signIn(identifier: a.email, password: pw);
+      await AuthService.instance.signIn(
+        identifier: a.email,
+        password: pw,
+        openUid: a.linked ? a.uid : '',
+      );
     } on AuthFailure catch (e) {
       await SavedAccounts.instance.forgetPassword(a.uid);
       _idCtrl.text = a.email;

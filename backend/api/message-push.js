@@ -1,4 +1,6 @@
 // POST /api/message-push  { chatId, messageId }   (v0.11)
+// v0.0.2: also groups (every member who did not mute it) and channels
+// (one push to the channel's topic; the poster's phone is left out).
 // -> { sent: number, muted?: bool }
 // After you send a chat message the app calls this: the other person gets
 // a notification "username: message" (also when the app is closed), unless
@@ -68,9 +70,103 @@ export function buildMessages({ chatId, fromUid, fromName, fromPhoto, preview },
   }));
 }
 
+// v0.0.2: groups/{g_...} and channels/{ch_...}
+export const GROUP_RE = /^g_[A-Za-z0-9]{20}$/;
+export const CHANNEL_RE = /^ch_[A-Za-z0-9]{20}$/;
+
+/** Runs [fn] for every item, [n] at a time. */
+export async function pool(items, n, fn) {
+  let next = 0;
+  const workers = Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (next < items.length) {
+      const item = items[next++];
+      try {
+        await fn(item);
+      } catch (e) {
+        console.warn('push', e?.message || e);
+      }
+    }
+  });
+  await Promise.all(workers);
+}
+
+/** One push to every follower of a channel (push topic), not to the poster. */
+export function channelMessage({ chatId, fromUid, name, photo, preview }) {
+  const body = preview.length > 180 ? `${preview.slice(0, 180)}…` : preview;
+  return {
+    condition: `'${chatId}' in topics && !('u_${fromUid}' in topics)`,
+    data: {
+      type: 'message',
+      chatId,
+      fromUid,
+      fromName: name.slice(0, 60),
+      fromPhoto: photo.slice(0, 600),
+    },
+    android: {
+      priority: 'HIGH',
+      ttl: '86400s',
+      notification: {
+        channel_id: 'messages',
+        icon: 'ic_stat_instantgram',
+        color: '#C6FF3D',
+        tag: `chat_${chatId}`,
+        title: name || 'Channel',
+        body,
+      },
+    },
+  };
+}
+
+/** Group: everyone else who did not mute it. Channel: one topic push. */
+export async function handleGroup(uid, chatId, messageId, { sa, fetchFn }) {
+  const channel = CHANNEL_RE.test(chatId);
+  const col = channel ? 'channels' : 'groups';
+  const g = await getDoc(sa, `${col}/${chatId}`, fetchFn);
+  if (!g) throw new HttpError(404, 'Not found');
+  const members = Array.isArray(g.members) ? g.members.filter((x) => typeof x === 'string') : [];
+  const admins = Array.isArray(g.admins) ? g.admins : [];
+  if (channel ? !admins.includes(uid) : !members.includes(uid)) {
+    throw new HttpError(403, channel ? 'Only admins can post' : 'Not in this group');
+  }
+  const m = checkMessage(await getDoc(sa, `${col}/${chatId}/messages/${messageId}`, fetchFn), uid);
+  const name = String(g.name || '');
+  const photo = String(g.photoUrl || '');
+  const preview = previewOf(m);
+  if (channel) {
+    const ok = await sendFcm(sa, channelMessage({ chatId, fromUid: uid, name, photo, preview }), fetchFn);
+    return { sent: ok ? 1 : 0, topic: true };
+  }
+  const sender = String((g.memberInfo && g.memberInfo[uid] && g.memberInfo[uid].username) || '');
+  const text = sender ? `${sender}: ${preview}` : preview;
+  const others = members.filter((x) => x !== uid).slice(0, 256);
+  let sent = 0;
+  let muted = 0;
+  await pool(others, 16, async (other) => {
+    const prefs = await prefsOf(sa, other, fetchFn);
+    if (Array.isArray(prefs.mutedChats) && prefs.mutedChats.includes(chatId)) {
+      muted++;
+      return;
+    }
+    const tokens = await tokensOf(sa, other, fetchFn);
+    const msgs = buildMessages(
+      { chatId, fromUid: uid, fromName: name, fromPhoto: photo, preview: text },
+      tokens,
+    );
+    for (const msg of msgs) {
+      if (await sendFcm(sa, msg, fetchFn)) sent++;
+    }
+  });
+  return { sent, muted };
+}
+
 export async function handle(uid, body, { sa = serviceAccount(), fetchFn = fetch } = {}) {
   const chatId = typeof body.chatId === 'string' ? body.chatId : '';
   const messageId = typeof body.messageId === 'string' ? body.messageId : '';
+  if (GROUP_RE.test(chatId) || CHANNEL_RE.test(chatId)) {
+    if (!/^[A-Za-z0-9]{10,40}$/.test(messageId)) throw new HttpError(400, 'Bad request');
+    if (!sa) throw notSetUp('Notifications');
+    return handleGroup(uid, chatId, messageId, { sa, fetchFn });
+  }
   const parts = chatId.split('_');
   if (
     parts.length !== 2 ||

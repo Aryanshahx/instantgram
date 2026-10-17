@@ -24,6 +24,8 @@ import 'settings_pages.dart';
 import 'settings_widgets.dart';
 import 'time_screen.dart';
 import '../../../core/services/account_status.dart';
+import '../../../core/services/account_family.dart';
+import '../../chats/data/channel_topics.dart';
 
 /// One searchable row in Settings.
 class _Item {
@@ -377,6 +379,8 @@ Future<void> signOutEverything() async {
   ChatPrefs.instance.stop();
   PushRouter.instance.stop();
   AccountStatus.instance.stop();
+  AccountFamily.instance.clear(); // v0.0.2: same-login accounts list
+  await ChannelTopics.instance.stop(); // v0.0.2: no channel pushes
   await AuthService.instance.signOut();
 }
 

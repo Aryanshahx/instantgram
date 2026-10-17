@@ -11,6 +11,7 @@ import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/ig_text_field.dart';
 import '../../post/data/post_repository.dart';
 import '../data/chat_repository.dart';
+import 'group_widgets.dart';
 import '../../../shared/widgets/verified_badge.dart';
 
 /// Loads who you can share with (tests replace this).
@@ -206,7 +207,14 @@ class _ShareSheetState extends State<ShareSheet> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
       child: Row(
         children: [
-          Avatar(url: p.photoUrl, name: p.username, size: 40, uid: p.uid),
+          if (p.isGroup)
+            GroupAvatar(
+              url: p.photoUrl,
+              channel: p.uid.startsWith('ch_'),
+              size: 40,
+            )
+          else
+            Avatar(url: p.photoUrl, name: p.username, size: 40, uid: p.uid),
           const SizedBox(width: 12),
           Expanded(
             child: Column(

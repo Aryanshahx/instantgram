@@ -16,6 +16,7 @@ import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/net_image.dart';
 import '../chat_theme.dart';
 import '../data/chat_repository.dart';
+import 'group_widgets.dart';
 import '../../../shared/widgets/verified_badge.dart';
 import '../../../shared/widgets/bio_font.dart';
 
@@ -46,7 +47,13 @@ Future<MessageMenuResult?> showMessageMenu(
   required bool mine,
   required bool pinned,
   String? myEmoji,
+  // v0.0.2 groups / channels: admins delete anyone's message; channel
+  // followers can't reply or pin.
+  bool? canDeleteAll,
+  bool canReply = true,
+  bool canPin = true,
 }) {
+  final deleteAll = canDeleteAll ?? mine;
   HapticFeedback.mediumImpact();
   return showModalBottomSheet<MessageMenuResult>(
     context: context,
@@ -108,16 +115,17 @@ Future<MessageMenuResult?> showMessageMenu(
                   ],
                 ),
               ),
-              item(MessageAction.reply, Icons.reply_rounded, 'Reply'),
+              if (canReply)
+                item(MessageAction.reply, Icons.reply_rounded, 'Reply'),
               if (!message.isCall)
                 item(MessageAction.forward, Icons.shortcut_rounded, 'Forward'),
               if (message.text.isNotEmpty || message.isLocation)
                 item(MessageAction.copy, Icons.copy_rounded, 'Copy'),
-              if (pinned)
+              if (canPin && pinned)
                 item(MessageAction.unpin, Icons.push_pin_outlined, 'Unpin')
-              else
+              else if (canPin)
                 item(MessageAction.pin, Icons.push_pin_outlined, 'Pin'),
-              if (mine)
+              if (deleteAll)
                 item(
                   MessageAction.deleteAll,
                   Icons.delete_forever_outlined,
@@ -1171,12 +1179,18 @@ class _ForwardSheetState extends State<ForwardSheet> {
                       final sent = _sent.contains(p.uid);
                       final busy = _sending.contains(p.uid);
                       return ListTile(
-                        leading: Avatar(
-                          url: p.photoUrl,
-                          name: p.username,
-                          size: 40,
-                          uid: p.uid,
-                        ),
+                        leading: p.isGroup
+                            ? GroupAvatar(
+                                url: p.photoUrl,
+                                channel: p.uid.startsWith('ch_'),
+                                size: 40,
+                              )
+                            : Avatar(
+                                url: p.photoUrl,
+                                name: p.username,
+                                size: 40,
+                                uid: p.uid,
+                              ),
                         title: NameBadge(
                           p.username,
                           uid: p.uid,

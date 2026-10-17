@@ -93,6 +93,9 @@ class EditItem {
   CropAspect aspect;
   final List<TextLayer> texts = [];
 
+  /// v0.0.2: link stickers (photos + videos).
+  final List<MediaLink> links = [];
+
   /// Pixel size of the photo (null until loaded).
   Size? natural;
 
@@ -284,6 +287,7 @@ class EditedMedia {
     this.edits = const VideoEdits(),
     this.durationMs = 0,
     this.preview,
+    this.links = const [],
   });
 
   final File file;
@@ -294,4 +298,7 @@ class EditedMedia {
 
   /// For videos: first frame (if it could be made).
   final File? preview;
+
+  /// v0.0.2: link stickers (tap = open), not drawn into the picture.
+  final List<MediaLink> links;
 }

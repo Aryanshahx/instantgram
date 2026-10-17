@@ -248,12 +248,23 @@ async function gfetch(sa, url, init, what, fetchFn) {
     const msg = String(j?.error?.message || '');
     // missing index: Google sends a link to create it
     const link = /https:\/\/console\.firebase\.google\.com\S+/.exec(msg);
-    throw new HttpError(r.status === 404 ? 404 : 500, link ? `Needs a database index. Open: ${link[0]}` : `Google: ${what} failed (${r.status}) ${msg}`.trim());
+    const err = new HttpError(r.status === 404 ? 404 : 500, link ? `Needs a database index. Open: ${link[0]}` : `Google: ${what} failed (${r.status}) ${msg}`.trim());
+    // v0.0.2: lets callers spot a failed precondition (already exists / changed)
+    err.googleStatus = r.status;
+    err.googleCode = String(j?.error?.status || '');
+    throw err;
   }
   return j;
 }
 
 /** Document id from a REST "name". */
+/** v0.0.2: true when a write failed because a document already existed
+ *  or changed meanwhile (commitWrites preconditions). */
+export function isPreconditionError(e) {
+  const code = String(e?.googleCode || '');
+  return e?.googleStatus === 409 || code === 'FAILED_PRECONDITION' || code === 'ALREADY_EXISTS' || code === 'ABORTED';
+}
+
 export function idOf(name) {
   return String(name || '').split('/').pop();
 }
@@ -290,8 +301,9 @@ export async function countQuery(sa, collectionId, where = null, { allDescendant
   return Number(row?.result?.aggregateFields?.n?.integerValue || 0);
 }
 
-/** Several writes at once (max 500). Write = { delete: path } |
- *  { update: path, fields, mask?: [..] } | { transform: path, transforms: [...] } */
+/** Several writes at once (max 500), all or nothing. Write = { delete: path } |
+ *  { update: path, fields, mask?: [..], mustExist?, mustNotExist?, updateTime? } |
+ *  { transform: path, transforms: [...] } */
 export async function commitWrites(sa, writes, fetchFn = fetch) {
   if (!writes.length) return;
   const name = (p) => `projects/${sa.project_id}/databases/(default)/documents/${p}`;
@@ -303,6 +315,9 @@ export async function commitWrites(sa, writes, fetchFn = fetch) {
         update: { name: name(w.update), fields: toFields(w.fields) },
         updateMask: { fieldPaths: w.mask || Object.keys(w.fields) },
         ...(w.mustExist ? { currentDocument: { exists: true } } : {}),
+        // v0.0.2: create only / unchanged since read
+        ...(w.mustNotExist ? { currentDocument: { exists: false } } : {}),
+        ...(w.updateTime ? { currentDocument: { updateTime: w.updateTime } } : {}),
       };
     }),
   };

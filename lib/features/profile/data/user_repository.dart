@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../../core/services/content_filter.dart';
+import '../../../core/services/live_photos.dart';
 import '../../../core/services/media_service.dart';
 import '../../../core/services/spam_guard.dart';
 import '../../../shared/models/post.dart';
@@ -248,6 +249,8 @@ class UserRepository {
       'photoUrl': media.url,
       'photoKey': media.key,
     });
+    // v0.0.2: new photo everywhere at once (comments, chats, ...)
+    LivePhotos.instance.put(myUid, media.url);
     // refresh avatar on your recent posts
     final posts = await _db
         .collection('posts')

@@ -91,6 +91,9 @@ class CallSession extends ChangeNotifier {
   bool _switching = false;
   final List<MediaStream> _extraStreams = [];
 
+  /// v0.0.2: sends our camera; the new camera goes here after a flip.
+  RTCRtpSender? _videoSender;
+
   static FirebaseFirestore get _db => FirebaseFirestore.instance;
   DocumentReference<Map<String, dynamic>> get _doc =>
       _db.collection('calls').doc(id);
@@ -241,7 +244,8 @@ class CallSession extends ChangeNotifier {
       'sdpSemantics': 'unified-plan',
     });
     for (final t in _local!.getTracks()) {
-      await pc.addTrack(t, _local!);
+      final sender = await pc.addTrack(t, _local!);
+      if (t.kind == 'video') _videoSender = sender;
     }
     pc.onIceCandidate = (c) {
       if (c.candidate == null) return;
@@ -407,22 +411,41 @@ class CallSession extends ChangeNotifier {
     if (t == null || t.isEmpty || _switching || _closed) return;
     _switching = true;
     try {
-      var ok = false;
-      try {
-        ok = await Helper.switchCamera(
-          t.first,
-        ).timeout(const Duration(seconds: 4), onTimeout: () => false);
-      } catch (e) {
-        debugPrint('switch camera: $e');
-      }
-      if (ok) {
-        frontCamera = !frontCamera;
-      } else {
+      // v0.0.2: the phone answers "is the FRONT camera on now?" (not
+      // "did it work"). v0.11 read false (front -> back) as a failure and
+      // restarted the camera, so the other person saw a black / frozen
+      // picture. Only a real error uses the restart now.
+      final r = await quickSwitchResult(
+        () => Helper.switchCamera(t.first),
+        wasFront: frontCamera,
+      );
+      if (r == null) {
         await _replaceCamera(!frontCamera);
+      } else {
+        frontCamera = r;
       }
       notifyListeners();
     } finally {
       _switching = false;
+    }
+  }
+
+  /// v0.0.2: result of the phone's quick switch: the side now in use,
+  /// or null when it failed (then the camera is restarted). A slow phone
+  /// (no answer in 8 s) is still switching: never restart over it.
+  @visibleForTesting
+  static Future<bool?> quickSwitchResult(
+    Future<bool> Function() run, {
+    required bool wasFront,
+    Duration wait = const Duration(seconds: 8),
+  }) async {
+    try {
+      return await run().timeout(wait);
+    } on TimeoutException {
+      return !wasFront;
+    } catch (e) {
+      debugPrint('switch camera: $e');
+      return null;
     }
   }
 
@@ -458,8 +481,24 @@ class CallSession extends ChangeNotifier {
     _extraStreams.add(fresh);
     final track = fresh.getVideoTracks().first;
     track.enabled = cameraOn;
-    for (final sender in await pc.getSenders()) {
-      if (sender.track?.kind == 'video') await sender.replaceTrack(track);
+    // v0.0.2: the video sender kept from the start (getSenders() on some
+    // phones gives senders without their track, so nothing was replaced)
+    final senders = <RTCRtpSender>[];
+    final kept = _videoSender;
+    if (kept != null) {
+      senders.add(kept);
+    } else {
+      for (final tr in await pc.getTransceivers()) {
+        final k = tr.sender.track?.kind ?? tr.receiver.track?.kind;
+        if (k == 'video') senders.add(tr.sender);
+      }
+    }
+    for (final sender in senders) {
+      try {
+        await sender.replaceTrack(track);
+      } catch (e) {
+        debugPrint('replace track: $e');
+      }
     }
     for (final o in old) {
       try {

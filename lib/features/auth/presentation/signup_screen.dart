@@ -14,13 +14,17 @@ import '../../../shared/widgets/ig_logo.dart';
 import '../../../shared/widgets/ig_text_field.dart';
 import '../data/auth_service.dart';
 import '../../../shared/widgets/hi_text_check.dart';
+import '../../../shared/widgets/username_status.dart';
 
 /// Create account, step 2 (after [ChooseLanguageScreen]).
 class SignupScreen extends StatefulWidget {
-  const SignupScreen({super.key, this.language = ''});
+  const SignupScreen({super.key, this.language = '', this.usernameCheck});
 
   /// Language chosen on the first screen.
   final String language;
+
+  /// Tests: is a username free (default: the database).
+  final Future<bool> Function(String name)? usernameCheck;
 
   @override
   State<SignupScreen> createState() => _SignupScreenState();
@@ -28,6 +32,9 @@ class SignupScreen extends StatefulWidget {
 
 class _SignupScreenState extends State<SignupScreen> {
   final _formKey = GlobalKey<FormState>();
+
+  /// v0.0.2: live "available / taken" answer for the username.
+  UsernameState _nameState = UsernameState.empty;
   final _nameCtrl = TextEditingController();
   final _userCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
@@ -198,8 +205,16 @@ class _SignupScreenState extends State<SignupScreen> {
                         if (!AuthService.usernamePattern.hasMatch(u)) {
                           return '3-30 chars: letters, numbers, . and _';
                         }
+                        if (_nameState == UsernameState.taken) {
+                          return 'That username is taken';
+                        }
                         return null;
                       },
+                    ),
+                    UsernameStatus(
+                      controller: _userCtrl,
+                      check: widget.usernameCheck,
+                      onState: (s) => _nameState = s,
                     ),
                     const SizedBox(height: 10),
                     IgTextField(

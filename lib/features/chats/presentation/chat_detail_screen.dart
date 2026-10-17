@@ -26,8 +26,11 @@ import '../../../shared/widgets/avatar.dart';
 import '../../post/presentation/gif_picker.dart';
 import '../chat_theme.dart';
 import '../data/chat_repository.dart';
+import '../data/group_repository.dart';
 import 'message_widgets.dart';
 import '../data/typing_tracker.dart';
+import 'group_screens.dart';
+import 'group_widgets.dart';
 import '../../../shared/widgets/verified_badge.dart';
 import '../../../shared/widgets/bio_font.dart';
 
@@ -35,6 +38,8 @@ export 'message_widgets.dart' show SharedPostCard;
 
 /// One chat (v0.9): text, photos, GIFs, voice, location, reactions,
 /// reply (long-press or swipe right), forward, pin, delete, calls.
+/// v0.0.2: also groups and channels: [other] then has the group id
+/// ("g_..." / "ch_...") as uid and its name as username.
 class ChatDetailScreen extends StatefulWidget {
   const ChatDetailScreen({
     super.key,
@@ -122,7 +127,41 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   Timer? _recTimer;
   Duration _recFor = Duration.zero;
 
+  /// v0.0.2: a group or a channel (not one person).
+  late final bool _multi = ChatRepository.isGroupId(widget.other.uid);
+  late final bool _channel = ChatRepository.isChannelId(widget.other.uid);
+  bool _noAccess = false; // removed from the group
+
+  /// You can write here (channels: admins only).
+  bool get _canPost {
+    if (!_multi) return true;
+    final c = _chatNow;
+    if (c == null || !c.isMember(_me)) return false;
+    return !_channel || c.isAdmin(_me);
+  }
+
+  bool get _amAdmin => _chatNow?.isAdmin(_me) ?? false;
+
+  String get _title {
+    final n = _chatNow?.name ?? '';
+    return _multi && n.isNotEmpty ? n : widget.other.username;
+  }
+
+  String get _photo {
+    final c = _chatNow;
+    return _multi && c != null ? c.photoUrl : widget.other.photoUrl;
+  }
+
+  /// Name of a person in this chat ('' = unknown).
+  String _nameOf(String uid) {
+    if (uid == _me) return 'You';
+    if (!_multi) return widget.other.username;
+    final n = _chatNow?.usernameOf(uid) ?? '';
+    return n.isEmpty ? (_channel ? _title : 'Someone') : n;
+  }
+
   static String _chatIdFor(String a, String b) {
+    if (ChatRepository.isGroupId(b)) return b;
     final ids = [a, b]..sort();
     return ids.join('_');
   }
@@ -143,11 +182,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       setState(() {
         _chatNow = c;
         _modeNow = null;
+        _noAccess = false;
       });
       // v0.14: hide "typing…" when no new signal comes
       _armTyping();
       _checkSeen();
-    }, onError: (Object e) => debugPrint('chat: $e'));
+    }, onError: (Object e) {
+      debugPrint('chat: $e');
+      // v0.0.2: removed from a group = no access any more
+      if (_multi && mounted) setState(() => _noAccess = true);
+    });
     _life = AppLifecycleListener(onResume: _checkSeen, onHide: _stopTyping);
     // 24 h / 7 day messages go away while you look
     _expiryTick = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -158,7 +202,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   // ------------------------------------------------ v0.11 disappearing
 
   /// v0.14: the chat's mode again (the same for both people).
-  String get _mode => _modeNow ?? _chatNow?.disappear ?? Disappear.off;
+  String get _mode => _multi
+      ? Disappear.off // v0.0.2: not in groups / channels
+      : _modeNow ?? _chatNow?.disappear ?? Disappear.off;
 
   Future<void> _setMode(String mode) async {
     if (mode == _mode) return;
@@ -174,21 +220,35 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   // ------------------------------------------------------- v0.13 typing
 
-  bool get _otherTyping {
+  bool get _otherTyping => _typingUids.isNotEmpty;
+
+  /// Who is typing now (v0.0.2: groups can have several).
+  List<String> get _typingUids {
     final c = _chatNow;
-    if (c == null) return false;
-    return TypingTracker.instance.isTyping(
-      c,
-      widget.other.uid,
-      serverNow: ServerClock.now(),
-    );
+    if (c == null || _channel) return const [];
+    final now = ServerClock.now();
+    final who = _multi
+        ? c.typing.keys.where((u) => u != _me).toList()
+        : [widget.other.uid];
+    return [
+      for (final u in who)
+        if (TypingTracker.instance.isTyping(c, u, serverNow: now)) u,
+    ];
   }
+
+  String get _typingText => _multi
+      ? groupTypingText([for (final u in _typingUids) _nameOf(u)])
+      : 'typing…';
 
   void _armTyping() {
     _typingExpiry?.cancel();
     final c = _chatNow;
     if (c == null || !_otherTyping) return;
-    final left = TypingTracker.instance.left(c, widget.other.uid);
+    Duration? left;
+    for (final u in _typingUids) {
+      final l = TypingTracker.instance.left(c, u);
+      if (l != null && (left == null || l < left)) left = l;
+    }
     if (left == null) return;
     _typingExpiry = Timer(left + const Duration(milliseconds: 50), () {
       if (mounted) setState(() {});
@@ -211,7 +271,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   bool _onScroll(ScrollNotification n) {
-    if (n.metrics.axis != Axis.vertical) return false;
+    if (n.metrics.axis != Axis.vertical || _multi) return false;
     final atBottom = n.metrics.pixels <= n.metrics.minScrollExtent + 0.5;
     if (n is OverscrollNotification && n.dragDetails != null && atBottom) {
       // reversed list: sliding up past the newest message = negative
@@ -363,6 +423,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   MessageTick _tickFor(Message m) {
     if (m.senderId != _me) return MessageTick.none;
     if (m.pending) return MessageTick.pending;
+    if (_channel) return MessageTick.none;
+    if (_multi) return groupTick(_chatNow, _me, m.createdAt);
     final other = widget.other.uid;
     final seen = _chatNow?.seenAt(other);
     if (seen != null && !seen.isBefore(m.createdAt)) return MessageTick.seen;
@@ -420,6 +482,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  /// v0.0.2: blue ticks when everyone else in the group saw it.
+  static MessageTick groupTick(Chat? c, String me, DateTime at) {
+    if (c == null) return MessageTick.sent;
+    final others = c.members.where((u) => u != me).toList();
+    if (others.isEmpty) return MessageTick.sent;
+    bool all(DateTime? Function(String) f) => others.every((u) {
+      final t = f(u);
+      return t != null && !t.isBefore(at);
+    });
+    if (all(c.seenAt)) return MessageTick.seen;
+    if (all(c.deliveredAt)) return MessageTick.delivered;
+    return MessageTick.sent;
   }
 
   MessageQuote? get _quote {
@@ -664,6 +740,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       mine: mine,
       pinned: _chatNow?.pinnedId == m.id,
       myEmoji: m.reactions[_me],
+      // v0.0.2: group admins remove anyone's message
+      canDeleteAll: mine || (_multi && _amAdmin),
+      canReply: _canPost,
+      canPin: !_channel || _amAdmin,
     );
     if (r == null || !mounted) return;
     try {
@@ -689,7 +769,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         case MessageAction.deleteAll:
           final ok = await _confirm(
             'Delete for everyone?',
-            'This message will be removed for both of you.',
+            _multi
+                ? 'This message will be removed for everyone.'
+                : 'This message will be removed for both of you.',
           );
           if (ok) await _repo.deleteForEveryone(_chatId, m);
         case MessageAction.deleteMe:
@@ -810,13 +892,166 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   // ----------------------------------------------------------------- UI
 
+  void _openInfo() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => GroupInfoScreen(chatId: _chatId, chat: widget.chat),
+      ),
+    );
+  }
+
+  /// v0.0.2: header of a group / channel.
+  Widget _groupTitle() {
+    final c = _chatNow;
+    final sub = _otherTyping
+        ? _typingText
+        : c == null
+        ? (_channel ? 'Channel' : 'Group')
+        : memberCountText(c.members.length, channel: _channel);
+    return GestureDetector(
+      key: const ValueKey('group-header'),
+      onTap: _openInfo,
+      child: Row(
+        children: [
+          GroupAvatar(url: _photo, channel: _channel, size: 34),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  sub,
+                  key: ValueKey(_otherTyping ? 'chat-typing' : 'group-count'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: _otherTyping
+                        ? AppColors.lime
+                        : AppColors.textSecondary,
+                    fontWeight: _otherTyping
+                        ? FontWeight.w600
+                        : FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// v0.0.2: what shows instead of the message box.
+  Widget _groupBottom() {
+    final c = _chatNow;
+    Widget note(String text, {Widget? action, Key? key}) => SafeArea(
+      top: false,
+      child: Padding(
+        key: key,
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.textSecondary),
+            ),
+            if (action != null) ...[const SizedBox(height: 8), action],
+          ],
+        ),
+      ),
+    );
+    if (_noAccess || (c != null && !c.isMember(_me) && !_channel)) {
+      return note(
+        "You're no longer a member of this group.",
+        key: const ValueKey('group-not-member'),
+      );
+    }
+    if (c == null) return const SizedBox(height: 12);
+    if (_channel && !c.isMember(_me)) {
+      return note(
+        'Follow this channel to get its posts.',
+        key: const ValueKey('channel-follow-bar'),
+        action: FilledButton(
+          key: const ValueKey('channel-join'),
+          onPressed: _joining ? null : () => _join(c),
+          child: Text(_joining ? 'Following…' : 'Follow'),
+        ),
+      );
+    }
+    if (_channel && !c.isAdmin(_me)) {
+      return note(
+        'Only admins can post in this channel.',
+        key: const ValueKey('channel-only-admins'),
+      );
+    }
+    return _composer();
+  }
+
+  bool _joining = false;
+  Future<void> _join(Chat c) async {
+    if (!_live) return;
+    setState(() => _joining = true);
+    try {
+      await GroupRepository.instance.join(c);
+    } catch (e) {
+      _snack(friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _joining = false);
+    }
+  }
+
+  /// v0.0.2: sender name above group messages (first of a run).
+  Widget _withSender(List<Message> msgs, int i, Widget bubble) {
+    final m = msgs[i];
+    if (!_multi || _channel || m.senderId == _me) return bubble;
+    final older = i + 1 < msgs.length ? msgs[i + 1] : null;
+    if (older != null && older.senderId == m.senderId && !older.isSystem) {
+      return bubble;
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+          child: GestureDetector(
+            onTap: () => openProfile(context, m.senderId),
+            child: Text(
+              _nameOf(m.senderId),
+              key: ValueKey('sender-${m.id}'),
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppColors.mint,
+              ),
+            ),
+          ),
+        ),
+        bubble,
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final o = widget.other;
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
-        title: GestureDetector(
+        title: _multi ? _groupTitle() : GestureDetector(
           onTap: () => openProfile(context, o.uid),
           child: Row(
             children: [
@@ -859,6 +1094,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ),
         ),
         actions: [
+          if (!_multi)
           IconButton(
             key: const ValueKey('disappear-btn'),
             tooltip: 'Disappearing messages',
@@ -874,12 +1110,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             onPressed: () => showChatThemePicker(context, _chatId),
             icon: const Icon(Icons.palette_outlined),
           ),
+          if (_multi)
+            IconButton(
+              key: const ValueKey('group-info-btn'),
+              tooltip: _channel ? 'Channel info' : 'Group info',
+              onPressed: _openInfo,
+              icon: const Icon(Icons.info_outline),
+            ),
+          if (!_multi)
           IconButton(
             key: const ValueKey('call-voice'),
             tooltip: 'Voice call',
             onPressed: () => _call(video: false),
             icon: const Icon(Icons.call_outlined),
           ),
+          if (!_multi)
           IconButton(
             key: const ValueKey('call-video'),
             tooltip: 'Video call',
@@ -965,14 +1210,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             child: StreamBuilder<List<Message>>(
               stream: _messages,
               builder: (context, snap) {
-                if (snap.hasError) return ErrorView(error: snap.error);
+                if (snap.hasError) {
+                  // v0.0.2: removed from the group
+                  if (_multi) return const SizedBox.shrink();
+                  return ErrorView(error: snap.error);
+                }
                 if (!snap.hasData) return const LoadingView();
                 final msgs = _visible(snap.data!);
                 _shown = msgs;
                 WidgetsBinding.instance.addPostFrameCallback(
                   (_) => _checkSeen(),
                 );
-                if (msgs.isEmpty) return _hello(o);
+                if (msgs.isEmpty) return _multi ? _helloGroup() : _hello(o);
                 final list = ListView.builder(
                   controller: _scroll,
                   reverse: true,
@@ -986,12 +1235,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       return SystemNote(
                         key: _keys.putIfAbsent(m.id, GlobalKey.new),
                         text: m.text,
-                        onTap: _chooseMode,
+                        onTap: _multi ? null : _chooseMode,
                       );
                     }
                     return SwipeToReply(
                       key: _keys.putIfAbsent(m.id, GlobalKey.new),
-                      onReply: () => _reply(m),
+                      onReply: () {
+                        if (_canPost) _reply(m);
+                      },
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 350),
                         decoration: BoxDecoration(
@@ -1000,21 +1251,23 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                               : Colors.transparent,
                           borderRadius: BorderRadius.circular(14),
                         ),
-                        child: MessageBubble(
+                        child: _withSender(msgs, i, MessageBubble(
                           message: m,
                           mine: m.senderId == _me,
                           myUid: _me,
-                          otherName: o.username,
+                          otherName: _multi
+                              ? _nameOf(m.replyTo?.senderId ?? '')
+                              : o.username,
                           tick: m.isCall ? MessageTick.none : _tickFor(m),
                           onLongPress: () => _menu(m),
                           onReactionsTap: () => _reactionsTap(m),
                           onQuoteTap: m.replyTo == null
                               ? null
                               : () => jumpTo(m.replyTo!.id),
-                          onCallTap: m.isCall
+                          onCallTap: m.isCall && !_multi
                               ? () => _call(video: m.video)
                               : null,
-                        ),
+                        )),
                       ),
                     );
                   },
@@ -1031,9 +1284,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               },
             ),
           ),
-          if (_otherTyping) TypingBubble(name: o.username),
+          if (_otherTyping)
+            TypingBubble(
+              name: _multi ? _nameOf(_typingUids.first) : o.username,
+            ),
           if (_mode != Disappear.off) _modeBar(),
-          if (ContentFilter.instance.isBlocked(widget.other.uid))
+          if (_multi)
+            _groupBottom()
+          else if (ContentFilter.instance.isBlocked(widget.other.uid))
             const SafeArea(
               top: false,
               child: Padding(
@@ -1139,6 +1397,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     ),
   );
 
+  Widget _helloGroup() => Center(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GroupAvatar(url: _photo, channel: _channel, size: 84),
+        const SizedBox(height: 12),
+        Text(
+          _title,
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+        ),
+      ],
+    ),
+  );
+
   Widget _hello(UserProfile o) => Center(
     child: Column(
       mainAxisSize: MainAxisSize.min,
@@ -1205,7 +1477,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         Text(
                           reply.senderId == _me
                               ? 'Replying to yourself'
-                              : 'Replying to ${widget.other.username}',
+                              : 'Replying to ${_nameOf(reply.senderId)}',
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 12,

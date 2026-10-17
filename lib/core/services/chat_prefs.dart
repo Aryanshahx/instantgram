@@ -1,9 +1,11 @@
 import '../../shared/models/post.dart';
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Your chat settings (v0.11), saved in prefs/{uid} (only you can read it;
 /// our server reads the muted lists to skip notifications / ringing).
@@ -46,6 +48,28 @@ class ChatPrefsData {
   final Map<String, String> themes;
 
   String themeOf(String chatId) => themes[chatId] ?? 'lime';
+
+  /// v0.0.2: same settings, other themes.
+  ChatPrefsData withThemes(Map<String, String> t) => ChatPrefsData(
+    pinned: pinned,
+    mutedChats: mutedChats,
+    mutedCalls: mutedCalls,
+    cleared: cleared,
+    pushOff: pushOff,
+    vanish: vanish,
+    themes: t,
+  );
+
+  /// v0.0.2: themes saved on this phone win over the database copy
+  /// ('lime' = the normal look, so it removes a theme).
+  static Map<String, String> mergeThemes(
+    Map<String, String> server,
+    Map<String, String> local,
+  ) {
+    final out = {...server, ...local};
+    out.removeWhere((k, v) => v.isEmpty || v == 'lime');
+    return out;
+  }
 
   String vanishMode(String chatId) => vanish[chatId]?.$1 ?? Disappear.off;
   DateTime? vanishSince(String chatId) => vanish[chatId]?.$2;
@@ -115,6 +139,44 @@ class ChatPrefs {
   String? _uid;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
 
+  /// v0.0.2: chat themes kept on this phone too, so a theme stays even
+  /// when the database refuses the save (old rules) or you are offline.
+  Map<String, String> _localThemes = {};
+  ChatPrefsData _server = ChatPrefsData.empty;
+  static String _themesKey(String uid) => 'chat_themes_$uid';
+
+  ChatPrefsData _withLocal(ChatPrefsData d) =>
+      d.withThemes(ChatPrefsData.mergeThemes(d.themes, _localThemes));
+
+  Future<void> _loadLocalThemes(String uid) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_themesKey(uid));
+      if (raw == null || _uid != uid) return;
+      final j = jsonDecode(raw);
+      if (j is! Map) return;
+      _localThemes = {
+        for (final e in j.entries)
+          if (e.key is String && e.value is String)
+            e.key as String: e.value as String,
+      };
+      value.value = _withLocal(_server);
+    } catch (e) {
+      debugPrint('chat themes: $e');
+    }
+  }
+
+  Future<void> _saveLocalThemes() async {
+    final uid = _uid;
+    if (uid == null) return;
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(_themesKey(uid), jsonEncode(_localThemes));
+    } catch (e) {
+      debugPrint('chat themes: $e');
+    }
+  }
+
   DocumentReference<Map<String, dynamic>> _doc(String uid) =>
       FirebaseFirestore.instance.collection('prefs').doc(uid);
 
@@ -123,8 +185,14 @@ class ChatPrefs {
     if (_uid == uid && _sub != null) return;
     _sub?.cancel();
     _uid = uid;
+    _localThemes = {};
+    _server = ChatPrefsData.empty;
+    unawaited(_loadLocalThemes(uid));
     _sub = _doc(uid).snapshots().listen(
-      (d) => value.value = ChatPrefsData.fromMap(d.data()),
+      (d) {
+        _server = ChatPrefsData.fromMap(d.data());
+        value.value = _withLocal(_server);
+      },
       onError: (Object e) => debugPrint('chat prefs: $e'),
     );
   }
@@ -133,6 +201,8 @@ class ChatPrefs {
     _sub?.cancel();
     _sub = null;
     _uid = null;
+    _localThemes = {};
+    _server = ChatPrefsData.empty;
     value.value = ChatPrefsData.empty;
   }
 
@@ -214,27 +284,20 @@ class ChatPrefs {
   }
 
   /// v0.0.1: chat theme for this chat (only you see it). 'lime' = default.
-  Future<void> setTheme(String chatId, String themeId) {
-    final v = value.value;
-    final next = {...v.themes};
+  /// v0.0.2: saved on this phone first (shows at once and stays), then
+  /// in the database for your other phones. A refused save is ignored.
+  Future<void> setTheme(String chatId, String themeId) async {
     final off = themeId.isEmpty || themeId == 'lime';
-    if (off) {
-      next.remove(chatId);
-    } else {
-      next[chatId] = themeId;
+    _localThemes = {..._localThemes, chatId: off ? 'lime' : themeId};
+    value.value = _withLocal(value.value);
+    await _saveLocalThemes();
+    try {
+      await _save({
+        'chatThemes': {chatId: off ? FieldValue.delete() : themeId},
+      });
+    } catch (e) {
+      debugPrint('chat theme not saved online: $e');
     }
-    value.value = ChatPrefsData(
-      pinned: v.pinned,
-      mutedChats: v.mutedChats,
-      mutedCalls: v.mutedCalls,
-      cleared: v.cleared,
-      pushOff: v.pushOff,
-      vanish: v.vanish,
-      themes: next,
-    );
-    return _save({
-      'chatThemes': {chatId: off ? FieldValue.delete() : themeId},
-    });
   }
 
   /// "Delete chat" for you: hides the chat and its messages until a new
