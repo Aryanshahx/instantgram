@@ -3,7 +3,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- v0.7: save QR code to the gallery (Android 9 and older) -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="29" />
+        android:maxSdkVersion="29"
+        tools:replace="android:maxSdkVersion" />
     <!-- v0.8: uploads go on in the background (with a notification) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
