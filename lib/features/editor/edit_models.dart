@@ -74,7 +74,11 @@ class EditItem {
   EditItem(this.src, {required ComposeMode mode})
     : aspect = mode == ComposeMode.story
           ? CropAspect.story
-          : CropAspect.original;
+          : CropAspect.original {
+    // camera: keep the filter + "no own sound" chosen while filming
+    if (src.filterPreset > 0) color = ColorEdits(preset: src.filterPreset);
+    muted = src.muted;
+  }
 
   final PickedMedia src;
   File get file => src.file;

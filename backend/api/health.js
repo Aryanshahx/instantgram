@@ -88,6 +88,8 @@ export default async function handler(req, res) {
         aiSongs: env('OPENROUTER_API_KEY') || env('GEMINI_API_KEY')
           ? `ok via ${env('OPENROUTER_API_KEY') ? 'OpenRouter' : 'Gemini'} (${songLimits().perDay} per person, ${songLimits().cap} for everyone per day)`
           : 'add OPENROUTER_API_KEY or GEMINI_API_KEY (optional, paid)',
+        // Epidemic Sound songs for posts, clips and moments
+        songs: env('EPIDEMIC_API_KEY') ? 'ok (Epidemic Sound)' : 'add EPIDEMIC_API_KEY',
         adminLogin: adminPassword() ? 'ok' : process.env.ADMIN_PASSWORD ? 'ADMIN_PASSWORD too short (16+)' : 'add ADMIN_PASSWORD',
       },
     }),

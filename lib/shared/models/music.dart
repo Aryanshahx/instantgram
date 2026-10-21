@@ -2,7 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// A song people can put on posts, clips and moments (music/{id}).
 /// source: 'library' (added by the admin), 'ai' (made with Google Lyria),
-/// 'original' (music someone added from the phone).
+/// 'original' (music someone added from the phone), 'epidemic' (a song
+/// from Epidemic Sound, id `es_<uuid>`; saved in our storage once used).
 class MusicTrack {
   const MusicTrack({
     required this.id,
@@ -18,11 +19,15 @@ class MusicTrack {
     this.lyrics = '',
     this.prompt = '',
     this.createdAt,
+    this.cover = '',
+    this.startMs = 0,
+    this.explicit = false,
   });
 
   static const String library = 'library';
   static const String ai = 'ai';
   static const String original = 'original';
+  static const String epidemic = 'epidemic';
 
   final String id;
   final String source;
@@ -38,7 +43,18 @@ class MusicTrack {
   final String prompt;
   final DateTime? createdAt;
 
+  /// Cover picture (Epidemic songs), '' = none.
+  final String cover;
+
+  /// Best part of the song to start at (ms).
+  final int startMs;
+  final bool explicit;
+
   bool get isAi => source == ai;
+  bool get isEpidemic => source == epidemic || id.startsWith('es_');
+
+  /// Epidemic id without "es_" ('' for other songs).
+  String get esId => id.startsWith('es_') ? id.substring(3) : '';
   bool get isOriginal => source == original;
 
   /// "Song · Artist" (saved on posts as audioName).
@@ -61,6 +77,9 @@ class MusicTrack {
       hidden: m['hidden'] == true,
       lyrics: s(m['lyrics']),
       prompt: s(m['prompt']),
+      cover: s(m['cover']),
+      startMs: i(m['startMs']),
+      explicit: m['explicit'] == true,
       createdAt: c is Timestamp
           ? c.toDate()
           : c is String
@@ -72,6 +91,49 @@ class MusicTrack {
   factory MusicTrack.fromDoc(DocumentSnapshot<Map<String, dynamic>> d) =>
       MusicTrack.fromMap(d.id, d.data() ?? const <String, dynamic>{});
 }
+
+/// Audios people made ("Original" tab): not hidden, has a file, no old
+/// library songs, no Epidemic songs (those are in "Trending").
+/// Most used first, then newest (no ties: id last).
+List<MusicTrack> sortAudios(Iterable<MusicTrack> all) {
+  final list = all
+      .where(
+        (t) =>
+            !t.hidden &&
+            t.url.isNotEmpty &&
+            t.source != MusicTrack.library &&
+            t.source != MusicTrack.epidemic,
+      )
+      .toList();
+  list.sort((a, b) {
+    final u = b.uses.compareTo(a.uses);
+    if (u != 0) return u;
+    final at = a.createdAt?.millisecondsSinceEpoch ?? 0;
+    final bt = b.createdAt?.millisecondsSinceEpoch ?? 0;
+    final t = bt.compareTo(at);
+    return t != 0 ? t : a.id.compareTo(b.id);
+  });
+  return list;
+}
+
+/// Search in name and artist (all words must match, "@" ignored).
+List<MusicTrack> searchAudios(List<MusicTrack> all, String query) {
+  final words = query
+      .toLowerCase()
+      .replaceAll('@', ' ')
+      .split(RegExp(r'\s+'))
+      .where((w) => w.isNotEmpty)
+      .toList();
+  if (words.isEmpty) return all;
+  return all.where((t) {
+    final hay = '${t.title} ${t.artist}'.toLowerCase();
+    return words.every(hay.contains);
+  }).toList();
+}
+
+/// "1 use", "12 uses", "1.2K uses".
+String audioUses(int n, String Function(int) compact) =>
+    n == 1 ? '1 use' : '${compact(n)} uses';
 
 /// "1:05" (0 = '').
 String trackTime(int ms) {

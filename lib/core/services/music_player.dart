@@ -29,11 +29,13 @@ class MusicPlayer with WidgetsBindingObserver {
 
   /// Plays [source] (an https URL or a file path) for [ownerId].
   /// Music update: [startMs] = where the song starts (loops from there).
+  /// [hls] = a streaming link (Epidemic Sound previews).
   Future<void> play(
     String ownerId,
     String source, {
     double volume = 1,
     int startMs = 0,
+    bool hls = false,
   }) async {
     if (disabled || source.isEmpty) return;
     _volume = volume;
@@ -58,7 +60,9 @@ class MusicPlayer with WidgetsBindingObserver {
     length.value = 0;
     try {
       final Duration? d;
-      if (source.startsWith('http')) {
+      if (hls || source.contains('.m3u8')) {
+        d = await p.setAudioSource(HlsAudioSource(Uri.parse(source)));
+      } else if (source.startsWith('http')) {
         d = await p.setUrl(source);
       } else {
         d = await p.setFilePath(source);
@@ -83,6 +87,14 @@ class MusicPlayer with WidgetsBindingObserver {
     if (_owner != ownerId) return;
     _pausedByApp = false;
     _player?.pause();
+  }
+
+  /// Back to the start of the song (camera: "retake").
+  Future<void> restart(String ownerId) async {
+    if (_owner != ownerId) return;
+    try {
+      await _player?.seek(Duration.zero);
+    } catch (_) {}
   }
 
   /// Continues after [pause].

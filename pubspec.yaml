@@ -28,6 +28,8 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  clock: ^1.1.1
+  camera: ^0.12.1
   flutter:
     sdk: flutter
 
@@ -71,6 +73,8 @@ dependencies:
   wakelock_plus: ^1.5.2
 
 dev_dependencies:
+  plugin_platform_interface: ^2.1.8
+  camera_platform_interface: ^2.15.0
   flutter_test:
     sdk: flutter
 

@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:instantgram/core/services/api_client.dart';
+import 'package:instantgram/core/services/chat_prefs.dart';
 import 'package:instantgram/core/services/media_service.dart';
 import 'package:instantgram/core/services/music_player.dart';
 import 'package:instantgram/core/theme/app_theme.dart';
@@ -82,6 +83,12 @@ void main() {
     MusicRepository.debugTrack = null;
     MusicRepository.debugPostsWith = null;
     MusicScreen.debugUse = null;
+    MusicRepository.debugAll = () async => const [];
+    MusicRepository.instance.debugReset();
+    // no Epidemic key on the server (each test can change this)
+    MusicRepository.instance.call = (body, timeout) async =>
+        throw const ApiException('Songs are not set up yet', statusCode: 503);
+    ChatPrefs.instance.debugSet(ChatPrefsData.empty);
   });
 
   // ------------------------------------------------------------- models
@@ -123,10 +130,7 @@ void main() {
       expect(p.allKeys, isNot(contains('audio/amit/a.mp3')));
       final own = _post(
         'p2',
-        extra: {
-          'audioUrl': 'https://x/b.mp3',
-          'audioKey': 'audio/amit/b.mp3',
-        },
+        extra: {'audioUrl': 'https://x/b.mp3', 'audioKey': 'audio/amit/b.mp3'},
       );
       expect(own.allKeys, contains('audio/amit/b.mp3'));
     });
@@ -203,6 +207,8 @@ void main() {
       await t.pumpAndSettle();
       expect(find.byKey(const ValueKey('music-tab-library')), findsNothing);
       expect(find.text('Library'), findsNothing);
+      await t.tap(find.byKey(const ValueKey('music-tab-phone')));
+      await t.pumpAndSettle();
       expect(find.byKey(const ValueKey('music-phone')), findsOneWidget);
       await t.tap(find.byKey(const ValueKey('music-tab-ai')));
       await t.pumpAndSettle();
@@ -347,6 +353,188 @@ void main() {
     });
   });
 
+  // ------------------------------------------------------- all audios
+  group('all audios', () {
+    final audios = [
+      _track(
+        'o_p1',
+        title: 'Original audio',
+        artist: '@amit',
+        uses: 3,
+        source: MusicTrack.original,
+      ),
+      _track(
+        'o_p2',
+        title: 'Sunny Day',
+        artist: '@kay',
+        uses: 12,
+        source: MusicTrack.original,
+      ),
+      _track(
+        'ai_1',
+        title: 'Rain',
+        artist: '@me',
+        uses: 3,
+        created: 9,
+        source: MusicTrack.ai,
+      ),
+      _track(
+        'o_p3',
+        title: 'Hidden one',
+        uses: 99,
+        hidden: true,
+        source: MusicTrack.original,
+      ),
+      _track('lib_1', title: 'Old library song', uses: 50),
+    ];
+
+    test('order: most used, then newest; hidden + old library left out', () {
+      expect(sortAudios(audios).map((t) => t.id), ['o_p2', 'ai_1', 'o_p1']);
+    });
+
+    test('search by name or @username', () {
+      final all = sortAudios(audios);
+      expect(searchAudios(all, 'sunny').map((t) => t.id), ['o_p2']);
+      expect(searchAudios(all, '@amit').map((t) => t.id), ['o_p1']);
+      expect(searchAudios(all, 'original amit').map((t) => t.id), ['o_p1']);
+      expect(searchAudios(all, 'rock'), isEmpty);
+      expect(audioUses(1, (n) => '$n'), '1 use');
+      expect(audioUses(1200, (n) => '1.2K'), '1.2K uses');
+    });
+
+    test('saved audios: read + save / unsave', () async {
+      final d = ChatPrefsData.fromMap({
+        'savedAudio': ['a', 'b'],
+        'pinnedChats': ['c1'],
+      });
+      expect(d.savedAudio, ['a', 'b']);
+      expect(d.isAudioSaved('b'), isTrue);
+      // keeps other settings
+      expect(d.withSavedAudio(const ['x']).pinned, ['c1']);
+      expect(d.withThemes(const {}).savedAudio, ['a', 'b']);
+      final p = ChatPrefs.instance..debugSet(ChatPrefsData.empty);
+      expect(await p.toggleSavedAudio('o_p1'), isTrue);
+      expect(p.value.value.savedAudio, ['o_p1']);
+      await p.toggleSavedAudio('o_p2');
+      await p.toggleSavedAudio('o_p1');
+      expect(p.value.value.savedAudio, ['o_p2']);
+      p.debugSet(ChatPrefsData(savedAudio: List.generate(500, (i) => 's$i')));
+      expect(await p.toggleSavedAudio('new'), isFalse);
+      expect(await p.toggleSavedAudio('s1'), isTrue);
+    });
+
+    testWidgets('picker: Trending, save, Saved tab, search, Use', (t) async {
+      MusicRepository.debugAll = () async => audios;
+      MusicRepository.debugTrack = (id) async =>
+          audios.where((a) => a.id == id).firstOrNull;
+      late BuildContext ctx;
+      await t.pumpWidget(
+        _app(
+          Builder(
+            builder: (c) {
+              ctx = c;
+              return const SizedBox.expand();
+            },
+          ),
+        ),
+      );
+      PickedAudio? got;
+      unawaited(showMusicPicker(ctx).then((a) => got = a));
+      await _frames(t);
+      // Original: most used first, no hidden / library songs
+      await t.tap(find.byKey(const ValueKey('music-tab-original')));
+      await _frames(t);
+      expect(find.byKey(const ValueKey('audio-original')), findsOneWidget);
+      expect(find.byKey(const ValueKey('track-o_p2')), findsOneWidget);
+      expect(find.byKey(const ValueKey('track-o_p3')), findsNothing);
+      expect(find.byKey(const ValueKey('track-lib_1')), findsNothing);
+      expect(find.text('@kay · 1:05 · 12 uses'), findsOneWidget);
+      final y1 = t.getTopLeft(find.byKey(const ValueKey('track-o_p2'))).dy;
+      final y2 = t.getTopLeft(find.byKey(const ValueKey('track-o_p1'))).dy;
+      expect(y1, lessThan(y2));
+      // save two audios
+      await t.tap(find.byKey(const ValueKey('track-save-o_p1')));
+      await t.tap(find.byKey(const ValueKey('track-save-ai_1')));
+      await _frames(t, 2);
+      expect(ChatPrefs.instance.value.value.savedAudio, ['o_p1', 'ai_1']);
+      final icon = t.widget<Icon>(
+        find.descendant(
+          of: find.byKey(const ValueKey('track-save-o_p1')),
+          matching: find.byType(Icon),
+        ),
+      );
+      expect(icon.icon, Icons.bookmark);
+      // Saved tab: newest saved first
+      await t.tap(find.byKey(const ValueKey('music-tab-saved')));
+      await _frames(t);
+      final saved = find.descendant(
+        of: find.byKey(const ValueKey('audio-saved')),
+        matching: find.byWidgetPredicate(
+          (w) => w is TrackRow,
+          skipOffstage: false,
+        ),
+      );
+      expect(t.widgetList<TrackRow>(saved).map((r) => r.track.id).toList(), [
+        'ai_1',
+        'o_p1',
+      ]);
+      // search
+      await t.enterText(find.byKey(const ValueKey('audio-search')), '@kay');
+      await _frames(t, 5);
+      expect(find.byKey(const ValueKey('audio-results')), findsOneWidget);
+      expect(find.byKey(const ValueKey('music-tabs')), findsNothing);
+      expect(find.byKey(const ValueKey('track-o_p2')), findsOneWidget);
+      expect(find.byKey(const ValueKey('track-o_p1')), findsNothing);
+      await t.enterText(find.byKey(const ValueKey('audio-search')), 'zzz');
+      await _frames(t, 5);
+      expect(find.text('No audio found'), findsOneWidget);
+      await t.tap(find.byKey(const ValueKey('audio-search-clear')));
+      await _frames(t);
+      expect(find.byKey(const ValueKey('music-tabs')), findsOneWidget);
+      await t.enterText(find.byKey(const ValueKey('audio-search')), 'sunny');
+      await _frames(t, 5);
+      await t.tap(find.byKey(const ValueKey('track-use-o_p2')));
+      await _frames(t);
+      expect(got?.musicId, 'o_p2');
+      expect(got?.isOnline, isTrue);
+      await _finish(t);
+    });
+
+    testWidgets('picker: empty tabs explain what to do', (t) async {
+      await t.pumpWidget(_app(const MusicPickerSheet()));
+      await _frames(t);
+      expect(find.text('Songs are coming soon'), findsOneWidget);
+      await t.tap(find.byKey(const ValueKey('music-tab-original')));
+      await _frames(t);
+      expect(find.text('No audios yet'), findsOneWidget);
+      await t.tap(find.byKey(const ValueKey('music-tab-saved')));
+      await _frames(t);
+      expect(find.text('No saved audios'), findsOneWidget);
+      await _finish(t);
+    });
+
+    testWidgets('song page: Save audio', (t) async {
+      MusicRepository.debugTrack = (id) async =>
+          _track(id, title: 'Sunny Day', source: MusicTrack.original);
+      MusicRepository.debugPostsWith = (id) async => const [];
+      await t.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark,
+          home: const MusicScreen(musicId: 'o_p2'),
+        ),
+      );
+      await _frames(t);
+      expect(find.byKey(const ValueKey('music-save')), findsOneWidget);
+      await t.tap(find.byKey(const ValueKey('track-save-o_p2')));
+      await _frames(t, 2);
+      expect(ChatPrefs.instance.value.value.isAudioSaved('o_p2'), isTrue);
+      await t.tap(find.byKey(const ValueKey('track-save-o_p2')));
+      await _frames(t, 2);
+      expect(ChatPrefs.instance.value.value.savedAudio, isEmpty);
+      await _finish(t);
+    });
+  });
+
   // -------------------------------------------------------- song page
   group('song page', () {
     testWidgets('title, shares, Use this audio (keeps the start)', (t) async {
@@ -442,16 +630,12 @@ void main() {
 
     testWidgets('drawn in the chat', (t) async {
       await t.pumpWidget(
-        _app(
-          const ChatBackground(theme: ChatTheme.lime, photo: 'wp:d_space'),
-        ),
+        _app(const ChatBackground(theme: ChatTheme.lime, photo: 'wp:d_space')),
       );
       expect(find.byKey(const ValueKey('chat-wp-d_space')), findsOneWidget);
       expect(find.byKey(const ValueKey('chat-bg-photo')), findsNothing);
       await t.pumpWidget(
-        _app(
-          const ChatBackground(theme: ChatTheme.lime, photo: 'wp:g_ocean'),
-        ),
+        _app(const ChatBackground(theme: ChatTheme.lime, photo: 'wp:g_ocean')),
       );
       expect(find.byKey(const ValueKey('chat-wp-g_ocean')), findsOneWidget);
       expect(t.takeException(), isNull);

@@ -27,6 +27,9 @@ import '../../../shared/widgets/user_tile.dart';
 import '../../post/data/post_repository.dart';
 import '../../profile/data/user_repository.dart';
 import '../../chats/data/group_repository.dart';
+import '../../music/data/music_repository.dart';
+import '../../music/presentation/music_screen.dart' show openMusic;
+import '../../../shared/models/music.dart';
 import '../../chats/presentation/group_screens.dart';
 import '../../chats/presentation/group_widgets.dart';
 import '../../../core/services/net_quality.dart';
@@ -54,6 +57,9 @@ class _ExploreScreenState extends State<ExploreScreen> {
   Timer? _debounce;
   String _query = '';
   List<UserProfile> _people = const [];
+
+  /// Audios whose name or @username matches (max 5 shown).
+  List<MusicTrack> _audios = const [];
   List<Chat> _channels = const []; // v0.0.2
   List<Post> _tagClips = const [];
   bool _searching = false;
@@ -121,6 +127,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
     if (q.replaceFirst('#', '').isEmpty) {
       setState(() {
         _people = const [];
+        _audios = const [];
         _channels = const [];
         _tagClips = const [];
         _searching = false;
@@ -143,12 +150,18 @@ class _ExploreScreenState extends State<ExploreScreen> {
               : GroupRepository.instance
                     .searchChannels(word)
                     .catchError((Object _) => <Chat>[]),
+          isTag
+              ? Future.value(<MusicTrack>[])
+              : MusicRepository.instance
+                    .search(word)
+                    .catchError((Object _) => <MusicTrack>[]),
         ]);
         if (mounted && _query == q) {
           setState(() {
             _people = results[0] as List<UserProfile>;
             _tagClips = results[1] as List<Post>;
             _channels = (results[2] as List<Chat>).take(5).toList();
+            _audios = (results[3] as List<MusicTrack>).take(5).toList();
             _searching = false;
           });
         }
@@ -211,7 +224,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   const Text('Explore', style: AppTheme.pageTitle),
                   const SizedBox(height: 14),
                   IgTextField(
-                    hint: 'Search people, clips or #tags',
+                    hint: 'Search people, clips, audio or #tags',
                     icon: Icons.search,
                     height: 46,
                     controller: _searchCtrl,
@@ -296,6 +309,16 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   },
                 ),
               ],
+              if (_audios.isNotEmpty) ...[
+                const SliverToBoxAdapter(child: _SectionTitle('Audio')),
+                SliverList.builder(
+                  itemCount: _audios.length,
+                  itemBuilder: (context, i) => _AudioTile(
+                    track: _audios[i],
+                    onTap: () => openMusic(context, _audios[i].id),
+                  ),
+                ),
+              ],
               if (clips.isNotEmpty) ...[
                 SliverToBoxAdapter(
                   child: _SectionTitle(_isTag ? 'Clips with #$_word' : 'Clips'),
@@ -304,7 +327,10 @@ class _ExploreScreenState extends State<ExploreScreen> {
               ],
               if (_searching)
                 const SliverToBoxAdapter(child: LoadingView(padding: 16))
-              else if (_people.isEmpty && _channels.isEmpty && clips.isEmpty)
+              else if (_people.isEmpty &&
+                  _channels.isEmpty &&
+                  _audios.isEmpty &&
+                  clips.isEmpty)
                 SliverToBoxAdapter(
                   child: EmptyState(
                     icon: Icons.search_off,
@@ -334,6 +360,49 @@ class _ExploreScreenState extends State<ExploreScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+/// One audio in the search results: tap = its page.
+class _AudioTile extends StatelessWidget {
+  const _AudioTile({required this.track, required this.onTap});
+  final MusicTrack track;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = track;
+    final info = [
+      if (t.artist.isNotEmpty) t.artist,
+      if (t.uses > 0) audioUses(t.uses, compactCount),
+    ].join(' · ');
+    return ListTile(
+      key: ValueKey('explore-audio-${t.id}'),
+      onTap: onTap,
+      leading: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: AppColors.surfaceHigh,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Icon(Icons.music_note, color: AppColors.lime),
+      ),
+      title: Text(
+        t.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+      subtitle: info.isEmpty
+          ? null
+          : Text(
+              info,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: AppColors.textSecondary),
+            ),
     );
   }
 }

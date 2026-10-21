@@ -10,6 +10,7 @@ import '../../../shared/widgets/post_grid.dart';
 import '../../post/data/post_repository.dart' show ViewSource;
 import '../../post/presentation/create_sheet.dart';
 import '../data/music_repository.dart';
+import 'music_picker_sheet.dart' show SaveAudioButton;
 
 /// Opens the song of [post] (tap on "♪ Song" on a post / clip).
 /// Old posts without a song page: nothing happens.
@@ -19,6 +20,14 @@ void openMusicOf(BuildContext context, Post post) {
     MaterialPageRoute<void>(
       builder: (_) => MusicScreen(musicId: post.musicId, from: post),
     ),
+  );
+}
+
+/// Opens the page of one audio (search results).
+void openMusic(BuildContext context, String musicId) {
+  if (musicId.isEmpty) return;
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(builder: (_) => MusicScreen(musicId: musicId)),
   );
 }
 
@@ -220,17 +229,34 @@ class _MusicScreenState extends State<MusicScreen> {
               style: TextStyle(color: AppColors.textSecondary),
             )
           else
-            FilledButton.icon(
-              key: const ValueKey('music-use'),
-              onPressed: t == null ? null : () => _use(t),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.lime,
-                foregroundColor: Colors.black,
-                minimumSize: const Size.fromHeight(44),
-                textStyle: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              icon: const Icon(Icons.video_call_outlined),
-              label: const Text('Use this audio'),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    key: const ValueKey('music-use'),
+                    onPressed: t == null ? null : () => _use(t),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.lime,
+                      foregroundColor: Colors.black,
+                      minimumSize: const Size.fromHeight(44),
+                      textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    icon: const Icon(Icons.video_call_outlined),
+                    label: const Text('Use this audio'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  key: const ValueKey('music-save'),
+                  height: 44,
+                  width: 48,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: AppColors.border),
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                  child: SaveAudioButton(musicId: widget.musicId),
+                ),
+              ],
             ),
         ],
       ),

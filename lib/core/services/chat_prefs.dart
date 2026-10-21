@@ -21,9 +21,28 @@ class ChatPrefsData {
     this.vanish = const {},
     this.themes = const {},
     this.backgrounds = const {},
+    this.savedAudio = const [],
   });
 
   static const empty = ChatPrefsData();
+
+  /// Saved audios (music ids, oldest first). Only you see them.
+  final List<String> savedAudio;
+
+  bool isAudioSaved(String musicId) => savedAudio.contains(musicId);
+
+  /// Same settings, other saved audios.
+  ChatPrefsData withSavedAudio(List<String> ids) => ChatPrefsData(
+    pinned: pinned,
+    mutedChats: mutedChats,
+    mutedCalls: mutedCalls,
+    cleared: cleared,
+    pushOff: pushOff,
+    vanish: vanish,
+    themes: themes,
+    backgrounds: backgrounds,
+    savedAudio: ids,
+  );
 
   /// Pinned chat ids (first = top).
   final List<String> pinned;
@@ -71,6 +90,7 @@ class ChatPrefsData {
     vanish: vanish,
     themes: t,
     backgrounds: backgrounds ?? this.backgrounds,
+    savedAudio: savedAudio,
   );
 
   /// v0.0.2: themes saved on this phone win over the database copy
@@ -131,6 +151,7 @@ class ChatPrefsData {
       pushOff: list(m['pushOff']).toSet(),
       vanish: _vanish(m['vanishChats']),
       themes: _themes(m['chatThemes']),
+      savedAudio: list(m['savedAudio']),
       cleared: {
         if (c is Map)
           for (final e in c.entries)
@@ -217,13 +238,10 @@ class ChatPrefs {
     _localBgs = {};
     _server = ChatPrefsData.empty;
     unawaited(_loadLocalThemes(uid));
-    _sub = _doc(uid).snapshots().listen(
-      (d) {
-        _server = ChatPrefsData.fromMap(d.data());
-        value.value = _withLocal(_server);
-      },
-      onError: (Object e) => debugPrint('chat prefs: $e'),
-    );
+    _sub = _doc(uid).snapshots().listen((d) {
+      _server = ChatPrefsData.fromMap(d.data());
+      value.value = _withLocal(_server);
+    }, onError: (Object e) => debugPrint('chat prefs: $e'));
   }
 
   void stop() {
@@ -247,6 +265,27 @@ class ChatPrefs {
       ...data,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+  }
+
+  static const int maxSavedAudio = 500;
+
+  /// Save / unsave an audio. false = too many saved audios.
+  Future<bool> toggleSavedAudio(String musicId) async {
+    final v = value.value;
+    final saved = v.isAudioSaved(musicId);
+    if (!saved && v.savedAudio.length >= maxSavedAudio) return false;
+    // shows at once (the database copy follows)
+    value.value = v.withSavedAudio(
+      saved
+          ? v.savedAudio.where((x) => x != musicId).toList()
+          : [...v.savedAudio, musicId],
+    );
+    await _save({
+      'savedAudio': saved
+          ? FieldValue.arrayRemove([musicId])
+          : FieldValue.arrayUnion([musicId]),
+    });
+    return true;
   }
 
   /// false = too many pinned chats.
@@ -304,6 +343,7 @@ class ChatPrefs {
       vanish: next,
       themes: v.themes,
       backgrounds: v.backgrounds,
+      savedAudio: v.savedAudio,
     );
     return _save({
       'vanishChats': {

@@ -842,7 +842,10 @@ service cloud.firestore {
       allow create, update: if signedIn() && me() == uid
         && request.resource.data.keys().hasOnly(['pinnedChats', 'mutedChats',
              'mutedCalls', 'cleared', 'updatedAt', 'pushOff', 'vanishChats',
-             'chatThemes'])
+             'chatThemes', 'savedAudio'])
+        // saved audios (music ids), only for you
+        && request.resource.data.get('savedAudio', []) is list
+        && request.resource.data.get('savedAudio', []).size() <= 500
         // v0.0.1: chat themes, only for you (chat id -> theme id)
         && request.resource.data.get('chatThemes', {}) is map
         && request.resource.data.get('chatThemes', {}).size() <= 1000

@@ -14,6 +14,8 @@
 // Music update: POST /api/hi { action: 'songInfo' } -> { enabled, left, perDay, fullCost }
 //   POST /api/hi { action: 'song', prompt, full?, instrumental?, title? }
 //   -> the new AI song (Google Lyria via OpenRouter or Gemini). Daily limit per person + for the app.
+// Epidemic Sound: POST /api/hi { action: 'esHome' | 'esSearch' | 'esCollection' |
+//   'esPreview' | 'esUse' | 'esTracks' } (see lib/epidemic.js, key EPIDEMIC_API_KEY).
 import { requireUser } from '../lib/firebase-auth.js';
 import { HttpError, env, postHandler, send } from '../lib/http.js';
 import { getDoc, notSetUp, serviceAccount } from '../lib/google.js';
@@ -22,10 +24,15 @@ import { allowTranslate, translate } from '../lib/translate.js';
 import { handleReport, updateTrending } from '../lib/safety.js';
 import { FULL_COST, makeSong, quotaOf } from '../lib/music.js';
 import { putFile } from '../lib/tigris.js';
+import { ES_ACTIONS, handleEs } from '../lib/epidemic.js';
 
 const ID = /^[A-Za-z0-9_-]{6,64}$/;
 
-export async function handle(uid, body, { sa = serviceAccount(), fetchFn = fetch, key = env('OPENAI_API_KEY'), now = Date.now(), geminiKey = env('GEMINI_API_KEY'), openrouterKey = env('OPENROUTER_API_KEY'), save = putFile } = {}) {
+export async function handle(uid, body, { sa = serviceAccount(), fetchFn = fetch, key = env('OPENAI_API_KEY'), now = Date.now(), geminiKey = env('GEMINI_API_KEY'), openrouterKey = env('OPENROUTER_API_KEY'), esKey = env('EPIDEMIC_API_KEY'), save = putFile } = {}) {
+  if (ES_ACTIONS.includes(body.action)) {
+    if (body.action === 'esUse' && !sa) throw notSetUp('Songs');
+    return handleEs(sa, uid, body, { key: esKey, fetchFn, save, now });
+  }
   if (body.action === 'songInfo') {
     if (!sa) throw notSetUp('AI songs');
     const { left, perDay } = await quotaOf(sa, uid, { now, fetchFn });

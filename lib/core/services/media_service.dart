@@ -105,9 +105,20 @@ const int kMaxAudioBytes = 20 * 1024 * 1024;
 
 /// A picked file from the gallery or camera.
 class PickedMedia {
-  const PickedMedia(this.file, {required this.isVideo});
+  const PickedMedia(
+    this.file, {
+    required this.isVideo,
+    this.filterPreset = 0,
+    this.muted = false,
+  });
   final File file;
   final bool isVideo;
+
+  /// Camera: the filter chosen while filming (the editor starts with it).
+  final int filterPreset;
+
+  /// Camera: filmed with music, so the own sound starts off.
+  final bool muted;
 }
 
 bool isVideoPath(String path) {
@@ -264,71 +275,9 @@ class MediaService {
     }
   }
 
-  /// Create flow picker: Gallery (any number) or Camera.
-  Future<List<PickedMedia>> pickForCreate(
-    BuildContext context,
-    PickKind kind,
-  ) async {
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              key: const ValueKey('pick-gallery'),
-              leading: const Icon(
-                Icons.photo_library_outlined,
-                color: AppColors.lime,
-              ),
-              title: const Text('Choose photos or videos'),
-              subtitle: const Text('Pick as many as you like'),
-              onTap: () => Navigator.pop(ctx, 'gallery'),
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.photo_camera_outlined,
-                color: AppColors.lime,
-              ),
-              title: const Text('Take photo'),
-              onTap: () => Navigator.pop(ctx, 'photo'),
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.videocam_outlined,
-                color: AppColors.lime,
-              ),
-              title: const Text('Record video'),
-              onTap: () => Navigator.pop(ctx, 'video'),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-    if (choice == null) return const [];
-
+  /// Create flow: photos and videos from the gallery (any number).
+  Future<List<PickedMedia>> pickGallery(BuildContext context) async {
     try {
-      switch (choice) {
-        case 'photo':
-          final x = await _picker.pickImage(
-            source: ImageSource.camera,
-            maxWidth: 2048,
-            imageQuality: 92,
-          );
-          return x == null
-              ? const []
-              : [PickedMedia(File(x.path), isVideo: false)];
-        case 'video':
-          final x = await _picker.pickVideo(
-            source: ImageSource.camera,
-            maxDuration: Duration(seconds: kind == PickKind.moment ? 60 : 90),
-          );
-          return x == null
-              ? const []
-              : [PickedMedia(File(x.path), isVideo: true)];
-      }
-      // gallery: photos and videos together, no limit
       final xs = await _picker.pickMultipleMedia(
         maxWidth: 2048,
         imageQuality: 92,
@@ -347,6 +296,35 @@ class MediaService {
             .showSnackBar(SnackBar(content: Text('Could not open picker: $e')));
       }
       return const [];
+    }
+  }
+
+  /// The phone's own camera app (when our camera can't start).
+  Future<PickedMedia?> systemCamera(
+    BuildContext context, {
+    required bool video,
+    int maxSeconds = 90,
+  }) async {
+    try {
+      if (video) {
+        final x = await _picker.pickVideo(
+          source: ImageSource.camera,
+          maxDuration: Duration(seconds: maxSeconds),
+        );
+        return x == null ? null : PickedMedia(File(x.path), isVideo: true);
+      }
+      final x = await _picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 2048,
+        imageQuality: 92,
+      );
+      return x == null ? null : PickedMedia(File(x.path), isVideo: false);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not open camera: $e')));
+      }
+      return null;
     }
   }
 

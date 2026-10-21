@@ -12,7 +12,7 @@ import { HttpError, env } from './http.js';
 import { getDoc, getDocMeta, patchDoc } from './google.js';
 import { decide, groupScores, moderate } from './hi.js';
 
-export const SOURCES = ['library', 'ai', 'original'];
+export const SOURCES = ['library', 'ai', 'original', 'epidemic'];
 
 /** Songs per person per day (a full song counts 2). Vercel: SONGS_PER_DAY. */
 export const SONGS_PER_DAY = 3;
@@ -381,5 +381,6 @@ export function musicFileKey(d) {
   if (!k || k.includes('..')) return '';
   if (d.source === 'library' && k.startsWith('music/lib/')) return k;
   if (d.source === 'ai' && typeof d.ownerUid === 'string' && k.startsWith(`audio/${d.ownerUid}/ai-`)) return k;
+  if (d.source === 'epidemic' && k.startsWith('music/es/')) return k;
   return ''; // original audio belongs to its post
 }

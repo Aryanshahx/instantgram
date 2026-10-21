@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 
+import 'dart:async';
+
 import '../../../core/services/api_client.dart';
+import '../../../core/services/chat_prefs.dart';
 import '../../../core/services/media_service.dart';
 import '../../../core/services/music_player.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/music.dart';
+import '../../../shared/widgets/net_image.dart';
 import '../data/music_repository.dart';
 
 const String _kPreview = 'music-picker';
@@ -15,9 +20,17 @@ void _stopPreview() {
   if (o != null && o.startsWith(_kPreview)) MusicPlayer.instance.stop(o);
 }
 
+void _snack(BuildContext context, String text) {
+  ScaffoldMessenger.maybeOf(context)
+    ?..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(text)));
+}
+
 /// Music update: choose a song for a post / clip / moment.
-/// Phone (a music file) and AI song ("Coming soon" until
-/// [MusicPickerSheet.aiSongsReady] is true). null = nothing chosen.
+/// Like Instagram: search songs + audios, Trending (Epidemic Sound songs),
+/// Original (audios people made, most used first), Saved, Phone (a music
+/// file) and AI song ("Coming soon" until [MusicPickerSheet.aiSongsReady]
+/// is true). null = nothing chosen.
 Future<PickedAudio?> showMusicPicker(BuildContext context) async {
   final picked = await showModalBottomSheet<PickedAudio>(
     context: context,
@@ -45,20 +58,46 @@ class MusicPickerSheet extends StatefulWidget {
 }
 
 class _MusicPickerSheetState extends State<MusicPickerSheet> {
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  /// Epidemic song being saved for us (shows "Getting song…").
+  String? _getting;
+
   @override
   void dispose() {
     _stopPreview();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
-  void _use(MusicTrack t) {
+  Future<void> _use(MusicTrack t) async {
+    if (_getting != null) return;
     _stopPreview();
+    var track = t;
+    if (t.isEpidemic && t.url.isEmpty) {
+      // first time anyone uses this song: the server keeps a copy
+      setState(() => _getting = t.id);
+      try {
+        track = await MusicRepository.instance.esUse(t);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _getting = null);
+        _snack(
+          context,
+          e is ApiException ? e.message : "Couldn't get this song. Try again.",
+        );
+        return;
+      }
+      if (!mounted) return;
+    }
     Navigator.of(context).pop(
       PickedAudio.online(
-        url: t.url,
-        name: t.label,
-        musicId: t.id,
-        durationMs: t.durationMs,
+        url: track.url,
+        name: track.label,
+        musicId: track.id,
+        startMs: track.startMs,
+        durationMs: track.durationMs,
       ),
     );
   }
@@ -68,52 +107,156 @@ class _MusicPickerSheetState extends State<MusicPickerSheet> {
     final h = MediaQuery.sizeOf(context).height;
     return SizedBox(
       height: h * 0.86,
-      child: DefaultTabController(
-        length: 2,
-        child: Column(
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.border,
-                borderRadius: BorderRadius.circular(2),
+      child: Stack(
+        children: [
+          Positioned.fill(child: _body()),
+          if (_getting != null)
+            Positioned.fill(
+              child: ColoredBox(
+                key: const ValueKey('es-getting'),
+                color: Colors.black54,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 14,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceHigh,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.lime,
+                          ),
+                        ),
+                        SizedBox(width: 12),
+                        Text('Getting song…'),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
-            const TabBar(
-              key: ValueKey('music-tabs'),
-              indicatorColor: AppColors.lime,
-              labelColor: AppColors.textPrimary,
-              unselectedLabelColor: AppColors.textSecondary,
-              dividerColor: AppColors.border,
-              labelStyle: TextStyle(fontWeight: FontWeight.w700),
-              tabs: [
-                Tab(key: ValueKey('music-tab-phone'), text: 'Phone'),
-                Tab(key: ValueKey('music-tab-ai'), text: 'AI song'),
-              ],
-            ),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  const _PhoneTab(),
-                  if (MusicPickerSheet.aiSongsReady)
-                    _AiTab(onUse: _use)
-                  else
-                    const _AiSoon(),
-                ],
-              ),
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }
+
+  Widget _body() => DefaultTabController(
+    length: 5,
+    child: Column(
+      children: [
+        const SizedBox(height: 8),
+        Container(
+          width: 36,
+          height: 4,
+          decoration: BoxDecoration(
+            color: AppColors.border,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 2),
+          child: TextField(
+            key: const ValueKey('audio-search'),
+            controller: _searchCtrl,
+            textInputAction: TextInputAction.search,
+            onChanged: (v) => setState(() => _query = v.trim()),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: 'Search songs and audio',
+              prefixIcon: const Icon(Icons.search, size: 20),
+              suffixIcon: _query.isEmpty
+                  ? null
+                  : IconButton(
+                      key: const ValueKey('audio-search-clear'),
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        setState(() => _query = '');
+                      },
+                    ),
+              filled: true,
+              fillColor: AppColors.surfaceHigh,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+        ),
+        if (_query.isNotEmpty)
+          Expanded(
+            child: _SearchResults(query: _query, onUse: _use),
+          )
+        else ...[
+          const TabBar(
+            key: ValueKey('music-tabs'),
+            indicatorColor: AppColors.lime,
+            labelColor: AppColors.textPrimary,
+            unselectedLabelColor: AppColors.textSecondary,
+            dividerColor: AppColors.border,
+            labelPadding: EdgeInsets.zero,
+            labelStyle: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+            tabs: [
+              Tab(key: ValueKey('music-tab-trending'), text: 'Trending'),
+              Tab(key: ValueKey('music-tab-original'), text: 'Original'),
+              Tab(key: ValueKey('music-tab-saved'), text: 'Saved'),
+              Tab(key: ValueKey('music-tab-phone'), text: 'Phone'),
+              Tab(key: ValueKey('music-tab-ai'), text: 'AI song'),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              children: [
+                _EsTab(onUse: _use),
+                _OriginalTab(onUse: _use),
+                _SavedTab(onUse: _use),
+                const _PhoneTab(),
+                if (MusicPickerSheet.aiSongsReady)
+                  _AiTab(onUse: _use)
+                else
+                  const _AiSoon(),
+              ],
+            ),
+          ),
+        ],
+      ],
+    ),
+  );
 }
 
 // ------------------------------------------------------------------ rows
 
-/// One song: play button, name, artist, Use.
+/// Plays / stops the preview of [t] (Epidemic songs: a short-lived link).
+Future<void> togglePreview(BuildContext context, MusicTrack t) async {
+  final mp = MusicPlayer.instance;
+  final owner = '$_kPreview-${t.id}';
+  if (mp.isOwner(owner)) {
+    await mp.stop(owner);
+    return;
+  }
+  if (t.isEpidemic && t.url.isEmpty) {
+    try {
+      final u = await MusicRepository.instance.esPreview(t.esId);
+      await mp.play(owner, u, hls: true);
+    } catch (_) {
+      if (context.mounted) _snack(context, "Couldn't play this song");
+    }
+    return;
+  }
+  await mp.play(owner, t.url);
+}
+
+/// One audio: cover / play button, name, artist, uses, save, Use.
+/// Tap the row = play / stop the preview.
 class TrackRow extends StatelessWidget {
   const TrackRow({super.key, required this.track, required this.onUse});
 
@@ -127,11 +270,12 @@ class TrackRow extends StatelessWidget {
     final info = [
       if (t.artist.isNotEmpty) t.artist,
       if (trackTime(t.durationMs).isNotEmpty) trackTime(t.durationMs),
-      if (t.uses > 0) t.uses == 1 ? '1 use' : '${t.uses} uses',
+      if (t.uses > 0) audioUses(t.uses, compactCount),
     ].join(' · ');
+    void toggle() => togglePreview(context, t);
     return InkWell(
       key: ValueKey('track-${t.id}'),
-      onTap: onUse,
+      onTap: toggle,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 7, 8, 7),
         child: Row(
@@ -140,22 +284,38 @@ class TrackRow extends StatelessWidget {
               valueListenable: MusicPlayer.instance.owner,
               builder: (_, now, _) {
                 final on = now == owner;
+                final icon = Icon(
+                  on ? Icons.pause : Icons.play_arrow,
+                  color: on && t.cover.isEmpty
+                      ? Colors.black
+                      : AppColors.textPrimary,
+                );
                 return GestureDetector(
                   key: ValueKey('track-play-${t.id}'),
-                  onTap: () => on
-                      ? MusicPlayer.instance.stop(owner)
-                      : MusicPlayer.instance.play(owner, t.url),
+                  onTap: toggle,
                   child: Container(
                     width: 42,
                     height: 42,
+                    clipBehavior: Clip.antiAlias,
                     decoration: BoxDecoration(
-                      color: on ? AppColors.lime : AppColors.surfaceHigh,
+                      color: on && t.cover.isEmpty
+                          ? AppColors.lime
+                          : AppColors.surfaceHigh,
                       borderRadius: BorderRadius.circular(10),
+                      border: on && t.cover.isNotEmpty
+                          ? Border.all(color: AppColors.lime, width: 2)
+                          : null,
                     ),
-                    child: Icon(
-                      on ? Icons.pause : Icons.play_arrow,
-                      color: on ? Colors.black : AppColors.textPrimary,
-                    ),
+                    child: t.cover.isEmpty
+                        ? icon
+                        : Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              NetImage(t.cover),
+                              const ColoredBox(color: Colors.black38),
+                              icon,
+                            ],
+                          ),
                   ),
                 );
               },
@@ -182,6 +342,10 @@ class TrackRow extends StatelessWidget {
                         const SizedBox(width: 6),
                         const _Tag('AI'),
                       ],
+                      if (t.explicit) ...[
+                        const SizedBox(width: 6),
+                        const _Tag('E'),
+                      ],
                     ],
                   ),
                   if (info.isNotEmpty)
@@ -197,6 +361,7 @@ class TrackRow extends StatelessWidget {
                 ],
               ),
             ),
+            SaveAudioButton(musicId: t.id),
             TextButton(
               key: ValueKey('track-use-${t.id}'),
               onPressed: onUse,
@@ -209,6 +374,46 @@ class TrackRow extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Bookmark: save / unsave an audio (only you see your saved audios).
+class SaveAudioButton extends StatelessWidget {
+  const SaveAudioButton({super.key, required this.musicId, this.size = 22});
+
+  final String musicId;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<ChatPrefsData>(
+      valueListenable: ChatPrefs.instance.value,
+      builder: (context, prefs, _) {
+        final on = prefs.isAudioSaved(musicId);
+        return IconButton(
+          key: ValueKey('track-save-$musicId'),
+          tooltip: on ? 'Saved' : 'Save audio',
+          visualDensity: VisualDensity.compact,
+          icon: Icon(
+            on ? Icons.bookmark : Icons.bookmark_border,
+            size: size,
+            color: on ? AppColors.lime : AppColors.textSecondary,
+          ),
+          onPressed: () async {
+            final ok = await ChatPrefs.instance.toggleSavedAudio(musicId);
+            if (!ok && context.mounted) {
+              ScaffoldMessenger.of(context)
+                ..hideCurrentSnackBar()
+                ..showSnackBar(
+                  const SnackBar(
+                    content: Text('You saved 500 audios. Remove some first.'),
+                  ),
+                );
+            }
+          },
+        );
+      },
     );
   }
 }
@@ -256,6 +461,424 @@ class _Empty extends StatelessWidget {
           style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
         ),
       ],
+    ),
+  );
+}
+
+// ---------------------------------------------------------- audio lists
+
+/// A list of audios with loading / error / empty states.
+class _AudioList extends StatelessWidget {
+  const _AudioList({
+    required this.listKey,
+    required this.tracks,
+    required this.failed,
+    required this.onUse,
+    required this.onRetry,
+    required this.empty,
+    this.onRefresh,
+  });
+
+  final String listKey;
+  final List<MusicTrack>? tracks;
+  final bool failed;
+  final ValueChanged<MusicTrack> onUse;
+  final VoidCallback onRetry;
+  final Widget empty;
+  final Future<void> Function()? onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = tracks;
+    if (l == null) {
+      return Center(
+        child: failed
+            ? TextButton(
+                key: ValueKey('$listKey-retry'),
+                onPressed: onRetry,
+                child: const Text("Couldn't load. Tap to try again"),
+              )
+            : const CircularProgressIndicator(color: AppColors.lime),
+      );
+    }
+    final list = ListView.builder(
+      key: ValueKey(listKey),
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.only(top: 4, bottom: 24),
+      itemCount: l.isEmpty ? 1 : l.length,
+      itemBuilder: (_, i) =>
+          l.isEmpty ? empty : TrackRow(track: l[i], onUse: () => onUse(l[i])),
+    );
+    final r = onRefresh;
+    return r == null
+        ? list
+        : RefreshIndicator(color: AppColors.lime, onRefresh: r, child: list);
+  }
+}
+
+/// Trending: popular Epidemic Sound songs + their playlists
+/// ("Trending on TikTok", moods, ...). Tap a chip to see a playlist.
+class _EsTab extends StatefulWidget {
+  const _EsTab({required this.onUse});
+  final ValueChanged<MusicTrack> onUse;
+
+  @override
+  State<_EsTab> createState() => _EsTabState();
+}
+
+class _EsTabState extends State<_EsTab> with AutomaticKeepAliveClientMixin {
+  EsHome? _home;
+  bool _failed = false;
+
+  /// The server has no Epidemic key yet.
+  bool _notReady = false;
+
+  /// '' = popular songs, else a playlist id.
+  String _sel = '';
+  final Map<String, List<MusicTrack>> _lists = {};
+  final Set<String> _listFailed = {};
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load({bool fresh = false}) async {
+    try {
+      final h = await MusicRepository.instance.esHome(fresh: fresh);
+      if (mounted) {
+        setState(() {
+          _home = h;
+          _failed = false;
+          _notReady = false;
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _failed = true;
+          _notReady = e.statusCode == 503;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  Future<void> _open(String id) async {
+    setState(() => _sel = id);
+    if (id.isEmpty || _lists.containsKey(id)) return;
+    _listFailed.remove(id);
+    try {
+      final l = await MusicRepository.instance.esPlaylist(id);
+      if (mounted) setState(() => _lists[id] = l);
+    } catch (_) {
+      if (mounted) setState(() => _listFailed.add(id));
+    }
+  }
+
+  Widget _chip(String id, String label) {
+    final on = _sel == id;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        key: ValueKey(id.isEmpty ? 'es-chip-popular' : 'es-chip-$id'),
+        label: Text(label),
+        selected: on,
+        showCheckmark: false,
+        onSelected: (_) => _open(id),
+        selectedColor: AppColors.lime,
+        backgroundColor: AppColors.surfaceHigh,
+        side: BorderSide.none,
+        visualDensity: VisualDensity.compact,
+        labelStyle: TextStyle(
+          color: on ? Colors.black : AppColors.textPrimary,
+          fontWeight: FontWeight.w700,
+          fontSize: 12.5,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final h = _home;
+    if (h == null && _notReady) {
+      return const _Empty(
+        Icons.music_note_outlined,
+        'Songs are coming soon',
+        'For now use Original, Saved or a song from your phone.',
+      );
+    }
+    final tracks = h == null ? null : (_sel.isEmpty ? h.tracks : _lists[_sel]);
+    return Column(
+      children: [
+        if (h != null && h.playlists.isNotEmpty)
+          SizedBox(
+            height: 44,
+            child: ListView(
+              key: const ValueKey('es-chips'),
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(14, 6, 6, 4),
+              children: [
+                _chip('', 'Popular'),
+                for (final p in h.playlists) _chip(p.id, p.name),
+              ],
+            ),
+          ),
+        Expanded(
+          child: _AudioList(
+            listKey: 'audio-trending',
+            tracks: tracks,
+            failed: h == null ? _failed : _listFailed.contains(_sel),
+            onUse: widget.onUse,
+            onRetry: () {
+              if (h == null) {
+                setState(() => _failed = false);
+                _load(fresh: true);
+              } else {
+                final id = _sel;
+                setState(() => _listFailed.remove(id));
+                _lists.remove(id);
+                _open(id);
+              }
+            },
+            onRefresh: _sel.isEmpty ? () => _load(fresh: true) : null,
+            empty: const _Empty(
+              Icons.music_off_outlined,
+              'No songs here',
+              'Try another playlist or search.',
+            ),
+          ),
+        ),
+        const Padding(
+          key: ValueKey('es-credit'),
+          padding: EdgeInsets.fromLTRB(14, 2, 14, 8),
+          child: Text(
+            'Music by Epidemic Sound',
+            style: TextStyle(fontSize: 11, color: AppColors.textHint),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Original: every audio people made, most used first.
+class _OriginalTab extends StatefulWidget {
+  const _OriginalTab({required this.onUse});
+  final ValueChanged<MusicTrack> onUse;
+
+  @override
+  State<_OriginalTab> createState() => _OriginalTabState();
+}
+
+class _OriginalTabState extends State<_OriginalTab>
+    with AutomaticKeepAliveClientMixin {
+  List<MusicTrack>? _all;
+  bool _failed = false;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load({bool fresh = false}) async {
+    try {
+      final l = await MusicRepository.instance.all(fresh: fresh);
+      if (mounted) {
+        setState(() {
+          _all = l;
+          _failed = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return _AudioList(
+      listKey: 'audio-original',
+      tracks: _all,
+      failed: _failed,
+      onUse: widget.onUse,
+      onRetry: () {
+        setState(() => _failed = false);
+        _load(fresh: true);
+      },
+      onRefresh: () => _load(fresh: true),
+      empty: const _Empty(
+        Icons.graphic_eq,
+        'No audios yet',
+        'When people post with music, their audio shows here.',
+      ),
+    );
+  }
+}
+
+/// Saved: audios you bookmarked (newest first).
+class _SavedTab extends StatefulWidget {
+  const _SavedTab({required this.onUse});
+  final ValueChanged<MusicTrack> onUse;
+
+  @override
+  State<_SavedTab> createState() => _SavedTabState();
+}
+
+class _SavedTabState extends State<_SavedTab>
+    with AutomaticKeepAliveClientMixin {
+  List<MusicTrack>? _list;
+  bool _failed = false;
+  List<String> _ids = const [];
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    ChatPrefs.instance.value.addListener(_changed);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    ChatPrefs.instance.value.removeListener(_changed);
+    super.dispose();
+  }
+
+  /// Unsaving keeps the row until you leave (so it can be saved again);
+  /// a new save loads the list again.
+  void _changed() {
+    final now = ChatPrefs.instance.value.value.savedAudio;
+    if (now.any((id) => !_ids.contains(id))) _load();
+  }
+
+  Future<void> _load() async {
+    final ids = ChatPrefs.instance.value.value.savedAudio;
+    _ids = ids;
+    try {
+      final l = await MusicRepository.instance.saved(ids);
+      if (mounted && identical(ids, _ids)) {
+        setState(() {
+          _list = l;
+          _failed = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return _AudioList(
+      listKey: 'audio-saved',
+      tracks: _list,
+      failed: _failed,
+      onUse: widget.onUse,
+      onRetry: () {
+        setState(() => _failed = false);
+        _load();
+      },
+      onRefresh: _load,
+      empty: const _Empty(
+        Icons.bookmark_border,
+        'No saved audios',
+        'Tap the bookmark on an audio to save it for later.',
+      ),
+    );
+  }
+}
+
+/// Search in all audios (name or @username).
+class _SearchResults extends StatefulWidget {
+  const _SearchResults({required this.query, required this.onUse});
+  final String query;
+  final ValueChanged<MusicTrack> onUse;
+
+  @override
+  State<_SearchResults> createState() => _SearchResultsState();
+}
+
+class _SearchResultsState extends State<_SearchResults> {
+  List<MusicTrack>? _found;
+  bool _failed = false;
+  Timer? _wait;
+
+  @override
+  void initState() {
+    super.initState();
+    _search();
+  }
+
+  @override
+  void didUpdateWidget(covariant _SearchResults old) {
+    super.didUpdateWidget(old);
+    if (old.query != widget.query) {
+      _wait?.cancel();
+      _wait = Timer(const Duration(milliseconds: 250), _search);
+    }
+  }
+
+  @override
+  void dispose() {
+    _wait?.cancel();
+    super.dispose();
+  }
+
+  /// Epidemic songs first, then audios people made. One of them failing
+  /// still shows the other.
+  Future<void> _search() async {
+    final q = widget.query;
+    final repo = MusicRepository.instance;
+    Future<List<MusicTrack>?> safe(Future<List<MusicTrack>> f) async {
+      try {
+        return await f;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final r = await Future.wait([safe(repo.esSearch(q)), safe(repo.search(q))]);
+    if (!mounted || q != widget.query) return;
+    if (r[0] == null && r[1] == null) {
+      setState(() => _failed = true);
+      return;
+    }
+    setState(() {
+      _found = [...?r[0], ...?r[1]];
+      _failed = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => _AudioList(
+    listKey: 'audio-results',
+    tracks: _found,
+    failed: _failed,
+    onUse: widget.onUse,
+    onRetry: () {
+      setState(() => _failed = false);
+      _search();
+    },
+    empty: _Empty(
+      Icons.search_off,
+      'No audio found',
+      'Nothing called "${widget.query}". Try a song name, a mood or @username.',
     ),
   );
 }
@@ -411,7 +1034,8 @@ class _AiTabState extends State<_AiTab> with AutomaticKeepAliveClientMixin {
               minLines: 2,
               maxLines: 4,
               decoration: InputDecoration(
-                hintText: 'Describe your song. Example: happy lofi beat '
+                hintText:
+                    'Describe your song. Example: happy lofi beat '
                     'for a sunset bike ride',
                 filled: true,
                 fillColor: AppColors.surface,
