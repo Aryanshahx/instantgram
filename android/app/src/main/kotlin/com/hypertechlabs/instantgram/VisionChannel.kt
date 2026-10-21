@@ -21,9 +21,6 @@ import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import com.google.mlkit.vision.face.FaceLandmark
-import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
-import com.google.mlkit.vision.segmentation.subject.SubjectSegmenter
-import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -36,12 +33,15 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Face effects + green screen (Google ML Kit, models from Google Play
- * services). The models are NOT in the app: they download the first time
- * you open Effects ("install"), so the app stays small.
+ * Face effects (Google ML Kit, model from Google Play services) + green
+ * screen / background effects ([Selfie]: TensorFlow Lite from Play
+ * services + a 250 KB model the app downloads). Nothing is in the APK.
  *
- *  status  {segment}                          -> Boolean (models on the phone)
- *  install {segment}                          -> Boolean, sends "progress"
+ *  status  {segment}                          -> Boolean (ready on the phone)
+ *  install {}                                 -> Boolean, sends "progress"
+ *  segPrepare {path}                          -> Boolean (loads the model file)
+ *  fxVideo {path, mode, bg?, out?}             -> {path?, cancelled}, sends "progress"
+ *  cancelFx
  *  analyze {bytes (NV21), w, h, rotation, mirror, face, segment}
  *                                             -> {w, h, faces, mask?, mw, mh}
  *  photo   {path, face, segment}              -> {path, w, h, faces, mask?, mw, mh}
@@ -60,7 +60,9 @@ class VisionChannel(private val context: Context, messenger: BinaryMessenger) :
     private val videoWorker: ExecutorService = Executors.newSingleThreadExecutor()
     private var fastDetector: FaceDetector? = null
     private var photoDetector: FaceDetector? = null
-    private var segmenter: SubjectSegmenter? = null
+    private val selfie = Selfie(context)
+    private val fxWorker: ExecutorService = Executors.newSingleThreadExecutor()
+    private var fx: VideoFx? = null
 
     @Volatile
     private var cancelVideo = false
@@ -73,10 +75,12 @@ class VisionChannel(private val context: Context, messenger: BinaryMessenger) :
         channel.setMethodCallHandler(null)
         worker.shutdown()
         videoWorker.shutdown()
+        fx?.cancelled = true
+        fxWorker.shutdown()
         try {
             fastDetector?.close()
             photoDetector?.close()
-            segmenter?.close()
+            selfie.close()
         } catch (_: Exception) {
         }
     }
@@ -109,24 +113,44 @@ class VisionChannel(private val context: Context, messenger: BinaryMessenger) :
         return n
     }
 
-    private fun seg(): SubjectSegmenter {
-        val s = segmenter
-        if (s != null) return s
-        val n = SubjectSegmentation.getClient(
-            SubjectSegmenterOptions.Builder().enableForegroundConfidenceMask().build()
-        )
-        segmenter = n
-        return n
-    }
-
-    private fun apis(segment: Boolean): Array<OptionalModuleApi> =
-        if (segment) arrayOf(fast(), seg()) else arrayOf(fast())
+    private fun apis(): Array<OptionalModuleApi> = arrayOf(fast())
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         try {
             when (call.method) {
                 "status" -> status(call.argument<Boolean>("segment") == true, result)
-                "install" -> install(call.argument<Boolean>("segment") == true, result)
+                "install" -> install(result)
+                "segPrepare" -> {
+                    val path = call.argument<String>("path") ?: ""
+                    background(worker, result) {
+                        selfie.prepare(path)
+                        true
+                    }
+                }
+                "fxVideo" -> {
+                    val path = call.argument<String>("path") ?: ""
+                    val out = call.argument<String>("out")?.takeIf { it.isNotEmpty() }
+                        ?: File(context.cacheDir, "fx_${System.currentTimeMillis()}.mp4").absolutePath
+                    val mode = call.argument<String>("mode") ?: "green"
+                    val bg = call.argument<String>("bg")
+                    fx?.cancelled = true
+                    val job = VideoFx(selfie) { p ->
+                        main.post { channel.invokeMethod("progress", mapOf("kind" to "fx", "p" to p)) }
+                    }
+                    fx = job
+                    background(fxWorker, result) {
+                        val picture = if (bg.isNullOrEmpty()) null else BitmapFactory.decodeFile(bg)
+                        val done = job.run(path, out, mode, picture)
+                        val r = HashMap<String, Any>()
+                        if (done) r["path"] = out
+                        r["cancelled"] = job.cancelled
+                        r
+                    }
+                }
+                "cancelFx" -> {
+                    fx?.cancelled = true
+                    result.success(null)
+                }
                 "analyze" -> {
                     val bytes = call.argument<ByteArray>("bytes")
                     val w = call.argument<Int>("w") ?: 0
@@ -193,12 +217,14 @@ class VisionChannel(private val context: Context, messenger: BinaryMessenger) :
 
     private fun status(segment: Boolean, result: MethodChannel.Result) {
         ModuleInstall.getClient(context)
-            .areModulesAvailable(*apis(segment))
-            .addOnSuccessListener { result.success(it.areModulesAvailable()) }
+            .areModulesAvailable(*apis())
+            .addOnSuccessListener {
+                result.success(it.areModulesAvailable() && (!segment || selfie.ready))
+            }
             .addOnFailureListener { result.success(false) }
     }
 
-    private fun install(segment: Boolean, result: MethodChannel.Result) {
+    private fun install(result: MethodChannel.Result) {
         val client = ModuleInstall.getClient(context)
         var answered = false
         fun answer(ok: Boolean, why: String?) {
@@ -231,7 +257,7 @@ class VisionChannel(private val context: Context, messenger: BinaryMessenger) :
             }
         }
         val builder = ModuleInstallRequest.newBuilder()
-        for (api in apis(segment)) builder.addApi(api)
+        for (api in apis()) builder.addApi(api)
         client.installModules(builder.setListener(listener).build())
             .addOnSuccessListener { r ->
                 if (r.areModulesAlreadyInstalled()) {
@@ -297,28 +323,10 @@ class VisionChannel(private val context: Context, messenger: BinaryMessenger) :
                 .take(maxFaces)
                 .map { faceMap(it, up.width, up.height) }
         }
-        if (segment) {
-            val mask = maskOf(up)
-            if (mask != null) {
-                out["mask"] = mask
-                out["mw"] = up.width
-                out["mh"] = up.height
-            }
-        }
-        return out
-    }
-
-    /** Foreground mask: one byte per pixel, 255 = person / subject. */
-    private fun maskOf(bmp: Bitmap): ByteArray? {
-        val r = Tasks.await(seg().process(InputImage.fromBitmap(bmp, 0)))
-        val buf = r.foregroundConfidenceMask ?: return null
-        val n = bmp.width * bmp.height
-        if (buf.capacity() < n) return null
-        buf.rewind()
-        val out = ByteArray(n)
-        for (i in 0 until n) {
-            val c = buf.get()
-            out[i] = (if (c <= 0f) 0 else if (c >= 1f) 255 else (c * 255f).toInt()).toByte()
+        if (segment && selfie.ready) {
+            out["mask"] = selfie.mask(up, up.width, up.height, true)
+            out["mw"] = up.width
+            out["mh"] = up.height
         }
         return out
     }
@@ -370,22 +378,13 @@ class VisionChannel(private val context: Context, messenger: BinaryMessenger) :
                 .take(5)
                 .map { faceMap(it, up.width, up.height) }
         }
-        if (segment) {
+        if (segment && selfie.ready) {
             val scale = min(1f, 1024f / max(up.width, up.height))
-            val small = if (scale < 1f) {
-                Bitmap.createScaledBitmap(
-                    up,
-                    max(1, (up.width * scale).toInt()),
-                    max(1, (up.height * scale).toInt()),
-                    true
-                )
-            } else up
-            val mask = maskOf(small)
-            if (mask != null) {
-                out["mask"] = mask
-                out["mw"] = small.width
-                out["mh"] = small.height
-            }
+            val mw = max(1, (up.width * scale).toInt())
+            val mh = max(1, (up.height * scale).toInt())
+            out["mask"] = selfie.mask(up, mw, mh, false)
+            out["mw"] = mw
+            out["mh"] = mh
         }
         return out
     }

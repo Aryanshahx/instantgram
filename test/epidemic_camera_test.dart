@@ -164,7 +164,11 @@ class FakeCamera extends CameraPlatform with MockPlatformInterfaceMixin {
   }) {
     log.add('stream');
     final c = StreamController<CameraImageData>(
-      onCancel: () => log.add('stream stop'),
+      // a test-zone future, so `await stopImageStream()` ends in fake time
+      onCancel: () {
+        log.add('stream stop');
+        return Future<void>.value();
+      },
     );
     frames = c;
     return c.stream;
@@ -800,7 +804,10 @@ void main() {
       await t.tap(find.byKey(const ValueKey('camera-effects')));
       await _frames(t, 2);
       // first time: the face model is downloaded (not in the APK)
-      expect(find.byKey(const ValueKey('camera-fx-downloading')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('camera-fx-downloading')),
+        findsOneWidget,
+      );
       expect(calls.map((c) => c.method), contains('install'));
       expect(cam.log, isNot(contains('stream')));
       install.complete(true);
@@ -822,12 +829,11 @@ void main() {
       expect(a['face'], isTrue);
       expect(a['segment'], isFalse);
       expect(find.byKey(const ValueKey('camera-face-fx')), findsOneWidget);
-      // green screen = photos only
-      await t.tap(find.byKey(const ValueKey('camera-fx-green')));
-      await t.pump();
+      // v0.0.1 fix: background effects are there in video mode too
+      expect(find.byKey(const ValueKey('camera-fx-green')), findsOneWidget);
       expect(
         find.text('Green screen works for photos. Switch to Photo.'),
-        findsOneWidget,
+        findsNothing,
       );
       // no effect -> camera frames stop, glasses gone
       await t.tap(find.byKey(const ValueKey('camera-fx-none')));
@@ -842,6 +848,51 @@ void main() {
       await _frames(t, 2);
       expect(calls.where((c) => c.method == 'install').length, installs);
       expect(find.byKey(const ValueKey('camera-fx-strip')), findsOneWidget);
+      await _finish(t);
+    });
+
+    testWidgets('video: blur background live + put into the video', (t) async {
+      messenger.setMockMethodCallHandler(VisionService.channel, (c) async {
+        calls.add(c);
+        switch (c.method) {
+          case 'status':
+            return true; // models ready
+          case 'analyze':
+            return {'w': 240, 'h': 320};
+          case 'fxVideo':
+            return {'path': '/tmp/fx_out.mp4', 'cancelled': false};
+        }
+        return null;
+      });
+      // a real phone screen (the 800x600 test screen is too small)
+      t.view.physicalSize = const Size(1080, 2340);
+      t.view.devicePixelRatio = 3;
+      addTearDown(t.view.reset);
+      final h = await _openCamera(t);
+      await t.tap(find.byKey(const ValueKey('camera-effects')));
+      await _frames(t, 2);
+      expect(find.byKey(const ValueKey('camera-fx-bg-blur')), findsOneWidget);
+      await t.tap(find.byKey(const ValueKey('camera-fx-bg-blur')));
+      await _frames(t, 2);
+      expect(find.byKey(const ValueKey('camera-bg-blur')), findsOneWidget);
+      cam.frames!.add(_nv21(640, 480));
+      await _frames(t, 2);
+      final a = calls.lastWhere((c) => c.method == 'analyze').arguments as Map;
+      expect(a['segment'], isTrue);
+      expect(a['face'], isFalse);
+      // filming keeps the effect on screen, then it goes INTO the video
+      await t.tap(find.byKey(const ValueKey('camera-record')));
+      await _frames(t, 2);
+      await t.pump(const Duration(seconds: 1));
+      await t.tap(find.byKey(const ValueKey('camera-next')));
+      await _frames(t, 4);
+      final fx = calls.lastWhere((c) => c.method == 'fxVideo').arguments as Map;
+      expect(fx['mode'], 'blur');
+      expect(fx['path'], endsWith('ig_fake_video.mp4'));
+      expect(fx.containsKey('bg'), isFalse);
+      expect(h.done, isTrue);
+      expect(h.result!.media.single.file.path, '/tmp/fx_out.mp4');
+      expect(h.result!.media.single.isVideo, isTrue);
       await _finish(t);
     });
 

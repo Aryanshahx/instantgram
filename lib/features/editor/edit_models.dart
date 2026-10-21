@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/services/media_service.dart';
 import '../../shared/models/post.dart';
+import '../../shared/widgets/styled_text.dart';
 import 'filters.dart';
 
 /// What the user is creating.
@@ -50,6 +51,12 @@ class TextLayer {
     this.background = false,
     this.sticker = false,
     this.font = '',
+    this.bgStyle = 1,
+    this.align = 0,
+    this.outline = false,
+    this.glow = false,
+    this.spacing = 0,
+    this.rotation = 0,
   });
 
   String text;
@@ -67,6 +74,32 @@ class TextLayer {
   /// Center position (0..1 of the frame).
   Offset pos;
   bool background;
+
+  /// v0.0.1 text look (see VideoOverlay): background style, alignment,
+  /// outline, glow, letter spacing.
+  int bgStyle;
+  int align;
+  bool outline;
+  bool glow;
+  double spacing;
+
+  /// v0.0.1: turned by this much (radians, clockwise).
+  double rotation;
+
+  /// How it looks (same on screen and in the saved photo).
+  TextSpec get spec => sticker
+      ? TextSpec(text: text, shadow: 0)
+      : TextSpec(
+          text: text,
+          color: color,
+          font: font,
+          bg: background ? TextBg.clean(bgStyle) : TextBg.none,
+          align: align,
+          outline: outline,
+          glow: glow,
+          spacing: spacing,
+          shadow: 0.12,
+        );
 }
 
 /// One picked photo/video and all its edits.

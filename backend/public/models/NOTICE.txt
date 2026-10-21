@@ -1,0 +1,7 @@
+selfie_seg_v1.tflite
+Google MediaPipe "Selfie Segmenter" model (Apache License 2.0),
+https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite
+Changed for InstantGram: the custom "Convolution2DTransposeBias" op was
+rewritten as the standard TRANSPOSE_CONV op (same results) and the
+metadata was removed, so TensorFlow Lite from Google Play services can run it.
+The app downloads this file the first time you use the green screen.

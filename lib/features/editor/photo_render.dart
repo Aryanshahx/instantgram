@@ -3,9 +3,8 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
-import '../../core/theme/app_theme.dart';
+import '../../shared/widgets/styled_text.dart';
 import 'edit_models.dart';
-import '../../shared/widgets/bio_font.dart';
 
 /// Size of the crop frame and of the photo box inside it, exactly like the
 /// editor lays them out.
@@ -159,18 +158,22 @@ void paintSticker(
 ) {
   final w = t.size * fw;
   final h = w * img.height / math.max(1, img.width);
+  final at = Offset(t.pos.dx * fw, t.pos.dy * fh);
+  final turned = t.rotation != 0;
+  if (turned) {
+    canvas.save();
+    canvas.translate(at.dx, at.dy);
+    canvas.rotate(t.rotation);
+  }
   canvas.drawImageRect(
     img,
     Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
-    Rect.fromCenter(
-      center: Offset(t.pos.dx * fw, t.pos.dy * fh),
-      width: w,
-      height: h,
-    ),
+    Rect.fromCenter(center: turned ? Offset.zero : at, width: w, height: h),
     Paint()
       ..filterQuality = FilterQuality.high
       ..isAntiAlias = true,
   );
+  if (turned) canvas.restore();
 }
 
 /// Same look as the editor's text widget.
@@ -183,44 +186,7 @@ void paintTextLayer(
 }) {
   // v0.12: limits as a part of the width (same on screen and in the file)
   final fs = (t.size * fw).clamp(fw * 0.02, fw * 0.5) * textScale;
-  final padH = t.background ? fs * 0.4 : 0.0;
-  final padV = t.background ? fs * 0.15 : 0.0;
-  final tp = TextPainter(
-    text: TextSpan(
-      text: t.text,
-      style: TextStyle(
-        // v0.16: the chosen font
-        fontFamily: t.sticker
-            ? AppTheme.fontFamily
-            : BioFont.family(t.font, AppTheme.fontFamily),
-        color: t.color,
-        fontSize: t.sticker ? fs : fs * BioFont.factor(t.font),
-        fontWeight: FontWeight.w800,
-        height: 1.15,
-        shadows: t.background || t.sticker
-            ? null
-            : [Shadow(blurRadius: fs * 0.12, color: Colors.black54)],
-      ),
-    ),
-    textAlign: TextAlign.center,
-    textDirection: TextDirection.ltr,
-  )..layout(maxWidth: math.max(1, fw * 0.9 - padH * 2));
-  final boxW = tp.width + padH * 2;
-  final boxH = tp.height + padV * 2;
-  final left = t.pos.dx * fw - boxW / 2;
-  final top = t.pos.dy * fh - boxH / 2;
-  if (t.background) {
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(left, top, boxW, boxH),
-        Radius.circular(fs * 0.3),
-      ),
-      Paint()
-        ..color = t.color.computeLuminance() > 0.5
-            ? Colors.black87
-            : Colors.white,
-    );
-  }
-  tp.paint(canvas, Offset(left + padH, top + padV));
-  tp.dispose();
+  final l = StyledTextLayout(t.spec, fontSize: fs, maxWidth: fw * 0.9);
+  l.paintAt(canvas, Offset(t.pos.dx * fw, t.pos.dy * fh), rotation: t.rotation);
+  l.dispose();
 }

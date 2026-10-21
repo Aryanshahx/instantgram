@@ -6,11 +6,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 
-import '../../core/theme/app_theme.dart';
 import '../../shared/models/post.dart';
-import '../../shared/widgets/bio_font.dart';
 import '../../shared/widgets/media_links.dart';
 import '../../shared/widgets/stickers.dart';
+import '../../shared/widgets/styled_text.dart';
 import '../../shared/widgets/video_extras.dart';
 import 'bake_filter.dart';
 import 'filters.dart';
@@ -21,8 +20,10 @@ import 'filters.dart';
 /// picture.
 
 /// Texts / stickers visible at [ms] (position in the video file).
-List<VideoOverlay> overlaysAt(List<VideoOverlay> all, int ms) =>
-    [for (final o in all) if (o.visibleAt(ms)) o];
+List<VideoOverlay> overlaysAt(List<VideoOverlay> all, int ms) => [
+  for (final o in all)
+    if (o.visibleAt(ms)) o,
+];
 
 /// Texts / stickers of a video at [ms], on top of a frame shown in a box
 /// with the video's shape. Never takes taps.
@@ -115,60 +116,29 @@ void paintVideoOverlay(
   if (pic != null) {
     final w = o.size * fw;
     final h = w * pic.height / math.max(1, pic.width);
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(o.rotation);
     canvas.drawImageRect(
       pic,
       Rect.fromLTWH(0, 0, pic.width.toDouble(), pic.height.toDouble()),
-      Rect.fromCenter(center: center, width: w, height: h),
+      Rect.fromCenter(center: Offset.zero, width: w, height: h),
       Paint()
         ..filterQuality = FilterQuality.high
         ..isAntiAlias = true,
     );
+    canvas.restore();
     return;
   }
   if (o.isSticker && StickerPack.isPack(o.text)) return; // picture missing
   final fs = (o.size * fw).clamp(6.0, 2000.0);
-  final color = Color(o.color);
-  final TextStyle style;
-  if (o.isSticker) {
-    style = TextStyle(fontSize: fs, height: 1.1);
-  } else {
-    style = TextStyle(
-      fontFamily: BioFont.family(o.font, AppTheme.fontFamily),
-      color: color,
-      fontSize: fs * BioFont.factor(o.font),
-      fontWeight: FontWeight.w800,
-      height: 1.15,
-      shadows: o.background
-          ? null
-          : [Shadow(blurRadius: fs * 0.25, color: Colors.black54)],
-    );
-  }
-  final bg = !o.isSticker && o.background;
-  final padH = bg ? fs * 0.4 : 0.0;
-  final padV = bg ? fs * 0.15 : 0.0;
-  final tp = TextPainter(
-    text: TextSpan(text: o.text, style: style),
-    textAlign: TextAlign.center,
-    textDirection: TextDirection.ltr,
-  )..layout(maxWidth: math.max(1, o.isSticker ? fw * 4 : fw * 0.9 - padH * 2));
-  final boxW = tp.width + padH * 2;
-  final boxH = tp.height + padV * 2;
-  final left = center.dx - boxW / 2;
-  final top = center.dy - boxH / 2;
-  if (bg) {
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(left, top, boxW, boxH),
-        Radius.circular(fs * 0.3),
-      ),
-      Paint()
-        ..color = color.computeLuminance() > 0.5
-            ? Colors.black87
-            : Colors.white,
-    );
-  }
-  tp.paint(canvas, Offset(left + padH, top + padV));
-  tp.dispose();
+  final l = StyledTextLayout(
+    TextSpec.ofOverlay(o),
+    fontSize: fs,
+    maxWidth: o.isSticker ? fw * 4 : fw * 0.9,
+  );
+  l.paintAt(canvas, center, rotation: o.rotation);
+  l.dispose();
 }
 
 class _Rgba {

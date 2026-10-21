@@ -205,6 +205,18 @@ const List<FaceEffect> kFaceEffects = [
   FaceEffect('party', 'Party'),
   FaceEffect('flowers', 'Flowers'),
   FaceEffect('mustache', 'Mustache'),
+  FaceEffect('nerd', 'Nerd'),
+  FaceEffect('clown', 'Clown'),
+  FaceEffect('pig', 'Piggy'),
+  FaceEffect('bear', 'Teddy'),
+  FaceEffect('beard', 'Beard'),
+  FaceEffect('pirate', 'Pirate'),
+  FaceEffect('headphones', 'Headphones'),
+  FaceEffect('cowboy', 'Cowboy'),
+  FaceEffect('santa', 'Santa'),
+  FaceEffect('ninja', 'Ninja'),
+  FaceEffect('visor', 'Cyber'),
+  FaceEffect('freckles', 'Freckles'),
 ];
 
 bool isFaceEffect(String id) => kFaceEffects.any((e) => e.id == id);
@@ -283,6 +295,30 @@ void _paintOne(Canvas canvas, Size size, String effect, FaceBox f) {
       g.flowers();
     case 'mustache':
       g.mustache();
+    case 'nerd':
+      g.nerd();
+    case 'clown':
+      g.clown();
+    case 'pig':
+      g.pig();
+    case 'bear':
+      g.bear();
+    case 'beard':
+      g.beard();
+    case 'pirate':
+      g.pirate();
+    case 'headphones':
+      g.headphones();
+    case 'cowboy':
+      g.cowboy();
+    case 'santa':
+      g.santa();
+    case 'ninja':
+      g.ninja();
+    case 'visor':
+      g.visor();
+    case 'freckles':
+      g.freckles();
   }
   canvas.restore();
 }
@@ -429,8 +465,12 @@ class _Face {
       ..quadraticBezierTo(-w * 0.85, 34, -w, -10)
       ..close();
     final holes = Path()
-      ..addOval(Rect.fromCenter(center: const Offset(-48, 0), width: 50, height: 32))
-      ..addOval(Rect.fromCenter(center: const Offset(48, 0), width: 50, height: 32));
+      ..addOval(
+        Rect.fromCenter(center: const Offset(-48, 0), width: 50, height: 32),
+      )
+      ..addOval(
+        Rect.fromCenter(center: const Offset(48, 0), width: 50, height: 32),
+      );
     final mask = Path.combine(PathOperation.difference, band, holes);
     c.drawPath(mask, _fill(const Color(0xF2141414)));
     c.drawPath(mask, _line(const Color(0xFF2E2E2E), 2));
@@ -672,6 +712,330 @@ class _Face {
         ..close();
     }
     c.drawPath(p, _fill(const Color(0xFF2A1A0E)));
+  }
+
+  void nerd() {
+    const frame = Color(0xFF151515);
+    _arms(frame, -8);
+    for (final x in [-50.0, 50.0]) {
+      final r = RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset(x, 2), width: 82, height: 62),
+        const Radius.circular(10),
+      );
+      c.drawRRect(r, _fill(const Color(0x1AFFFFFF)));
+      c.drawRRect(r, _line(frame, 10));
+      _shine(Offset(x, 0));
+    }
+    _bridge(frame);
+    // white tape on the middle
+    c.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: const Offset(0, -6), width: 22, height: 22),
+        const Radius.circular(3),
+      ),
+      _fill(const Color(0xFFF2F2F2)),
+    );
+  }
+
+  void _cheeks(Color color, double alpha) {
+    for (final s in [-1.0, 1.0]) {
+      c.drawOval(
+        Rect.fromCenter(center: Offset(s * 62, 58), width: 48, height: 30),
+        _fill(color.withValues(alpha: alpha))
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7),
+      );
+    }
+  }
+
+  void clown() {
+    _cheeks(const Color(0xFFFF3B30), 0.45);
+    const nose = Offset(0, 58);
+    c.drawCircle(
+      nose,
+      27,
+      Paint()
+        ..shader = const RadialGradient(
+          center: Alignment(-0.35, -0.4),
+          colors: [Color(0xFFFF8A80), Color(0xFFE00000), Color(0xFF9B0000)],
+          stops: [0, 0.55, 1],
+        ).createShader(Rect.fromCircle(center: nose, radius: 27)),
+    );
+    c.drawCircle(
+      nose + const Offset(-9, -10),
+      6,
+      _fill(Colors.white.withValues(alpha: 0.7)),
+    );
+  }
+
+  void pig() {
+    _cheeks(const Color(0xFFFF8FAB), 0.35);
+    final r = Rect.fromCenter(
+      center: const Offset(0, 60),
+      width: 62,
+      height: 44,
+    );
+    c.drawOval(r, _fill(const Color(0xFFFFA3BC)));
+    c.drawOval(r, _line(const Color(0xFFE87A98), 4));
+    for (final s in [-1.0, 1.0]) {
+      c.drawOval(
+        Rect.fromCenter(center: Offset(s * 12, 61), width: 11, height: 18),
+        _fill(const Color(0xFF9C3A57)),
+      );
+    }
+    // little pig ears
+    for (final s in [-1.0, 1.0]) {
+      final x = s * half * 0.62;
+      final ear = Path()
+        ..moveTo(x - 30, top + 30)
+        ..quadraticBezierTo(x + s * 30, top - 50, x + 34, top + 28)
+        ..close();
+      c.drawPath(ear, _fill(const Color(0xFFFFA3BC)));
+      c.drawPath(ear, _line(const Color(0xFFE87A98), 4));
+    }
+  }
+
+  void bear() {
+    const fur = Color(0xFF8D5B34), inner = Color(0xFFD9A577);
+    for (final s in [-1.0, 1.0]) {
+      final o = Offset(s * half * 0.72, top + 14);
+      c.drawCircle(o, 40, _fill(fur));
+      c.drawCircle(o, 22, _fill(inner));
+    }
+    c.drawOval(
+      Rect.fromCenter(center: const Offset(0, 74), width: 92, height: 66),
+      _fill(inner.withValues(alpha: 0.9)),
+    );
+    _nose(const Color(0xFF2B1A10), 58, 40, 28);
+    final mouth = Path()
+      ..moveTo(0, 72)
+      ..lineTo(0, 86)
+      ..moveTo(-14, 92)
+      ..quadraticBezierTo(0, 100, 14, 92);
+    c.drawPath(mouth, _line(const Color(0xFF2B1A10), 4));
+  }
+
+  void beard() {
+    const hair = Color(0xFF3B2414);
+    final w = half * 0.98;
+    final b = Path()
+      ..moveTo(-w, 40)
+      ..quadraticBezierTo(-w * 0.95, chin + 40, 0, chin + 58)
+      ..quadraticBezierTo(w * 0.95, chin + 40, w, 40)
+      ..quadraticBezierTo(w * 0.7, 120, 34, 108)
+      ..quadraticBezierTo(0, 98, -34, 108)
+      ..quadraticBezierTo(-w * 0.7, 120, -w, 40)
+      ..close();
+    final mouth = Path()
+      ..addOval(
+        Rect.fromCenter(center: const Offset(0, 112), width: 56, height: 24),
+      );
+    final shape = Path.combine(PathOperation.difference, b, mouth);
+    c.drawPath(shape, _fill(hair));
+    // a bit of texture
+    final t = _line(const Color(0xFF5A3A22), 2.5);
+    for (var i = 0; i < 9; i++) {
+      final x = -w * 0.7 + w * 1.4 * i / 8;
+      c.drawLine(Offset(x, chin - 4), Offset(x * 0.92, chin + 26), t);
+    }
+    mustache();
+  }
+
+  void pirate() {
+    // strap
+    final strap = Path()
+      ..moveTo(-half, -40)
+      ..quadraticBezierTo(0, -10, half, 30);
+    c.drawPath(strap, _line(const Color(0xFF111111), 7));
+    // patch on the right eye of the picture
+    final patch = Path()
+      ..moveTo(18, -16)
+      ..quadraticBezierTo(50, -32, 82, -16)
+      ..quadraticBezierTo(90, 34, 50, 40)
+      ..quadraticBezierTo(10, 34, 18, -16)
+      ..close();
+    c.drawPath(patch, _fill(const Color(0xFF0D0D0D)));
+    c.drawPath(patch, _line(const Color(0xFF2C2C2C), 3));
+    // red bandana
+    final by = top + 34;
+    final w = half * 1.12;
+    final band = Path()
+      ..moveTo(-w, by + 20)
+      ..quadraticBezierTo(0, top - 70, w, by + 20)
+      ..quadraticBezierTo(0, by - 8, -w, by + 20)
+      ..close();
+    c.drawPath(band, _fill(const Color(0xFFD62828)));
+    for (var i = 0; i < 5; i++) {
+      c.drawCircle(
+        Offset(
+          -w * 0.6 + w * 0.3 * i,
+          by - 18 - (i == 2 ? 14 : (i == 1 || i == 3 ? 8 : 0)),
+        ),
+        5,
+        _fill(Colors.white),
+      );
+    }
+  }
+
+  void headphones() {
+    final band = Rect.fromLTRB(-half * 1.12, top - 34, half * 1.12, top + 200);
+    c.drawArc(
+      band,
+      math.pi * 1.08,
+      math.pi * 0.84,
+      false,
+      _line(const Color(0xFF1C1C1E), 18),
+    );
+    c.drawArc(
+      band,
+      math.pi * 1.1,
+      math.pi * 0.8,
+      false,
+      _line(const Color(0xFF3A3A3C), 6),
+    );
+    for (final s in [-1.0, 1.0]) {
+      final cup = RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(s * (half + 6), 20),
+          width: 50,
+          height: 92,
+        ),
+        const Radius.circular(24),
+      );
+      c.drawRRect(cup, _fill(const Color(0xFF1C1C1E)));
+      c.drawRRect(cup.deflate(9), _fill(const Color(0xFF30D158)));
+    }
+  }
+
+  void cowboy() {
+    final by = top + 26;
+    const leather = Color(0xFF9C6B3C);
+    // wide brim, curled up at the sides
+    final brim = Path()
+      ..moveTo(-half * 1.5, by - 34)
+      ..quadraticBezierTo(-half * 1.25, by + 4, -half * 0.6, by + 10)
+      ..quadraticBezierTo(0, by + 18, half * 0.6, by + 10)
+      ..quadraticBezierTo(half * 1.25, by + 4, half * 1.5, by - 34)
+      ..quadraticBezierTo(half * 1.2, by - 14, half * 0.6, by - 16)
+      ..quadraticBezierTo(0, by - 10, -half * 0.6, by - 16)
+      ..quadraticBezierTo(-half * 1.2, by - 14, -half * 1.5, by - 34)
+      ..close();
+    final crown = Path()
+      ..moveTo(-half * 0.66, by - 8)
+      ..quadraticBezierTo(-half * 0.78, by - 112, -half * 0.3, by - 116)
+      ..quadraticBezierTo(0, by - 94, half * 0.3, by - 116)
+      ..quadraticBezierTo(half * 0.78, by - 112, half * 0.66, by - 8)
+      ..close();
+    c.drawPath(crown, _fill(leather));
+    c.drawPath(crown, _line(const Color(0xFF6B4423), 3));
+    c.drawRect(
+      Rect.fromLTRB(-half * 0.7, by - 36, half * 0.7, by - 18),
+      _fill(const Color(0xFF3E2611)),
+    );
+    c.drawPath(brim, _fill(const Color(0xFF8A5A2E)));
+    c.drawPath(brim, _line(const Color(0xFF5E3A17), 3));
+  }
+
+  void santa() {
+    final by = top + 30;
+    final w = half * 1.1;
+    final hat = Path()
+      ..moveTo(-w, by)
+      ..quadraticBezierTo(-w * 0.6, by - 150, w * 0.5, by - 170)
+      ..quadraticBezierTo(w * 1.2, by - 160, w * 1.25, by - 70)
+      ..quadraticBezierTo(w * 0.9, by - 120, w * 0.6, by - 118)
+      ..quadraticBezierTo(w * 0.8, by - 60, w, by)
+      ..close();
+    c.drawPath(hat, _fill(const Color(0xFFD7263D)));
+    final fur = RRect.fromRectAndRadius(
+      Rect.fromLTRB(-w - 10, by - 28, w + 10, by + 14),
+      const Radius.circular(21),
+    );
+    c.drawRRect(fur, _fill(Colors.white));
+    c.drawCircle(Offset(w * 1.25, by - 64), 22, _fill(Colors.white));
+  }
+
+  void ninja() {
+    final w = half * 1.02;
+    final cover = Path()
+      ..moveTo(-w, 34)
+      ..quadraticBezierTo(0, 18, w, 34)
+      ..quadraticBezierTo(w, chin + 30, 0, chin + 40)
+      ..quadraticBezierTo(-w, chin + 30, -w, 34)
+      ..close();
+    c.drawPath(cover, _fill(const Color(0xFF1B1B1F)));
+    final band = Rect.fromLTRB(-w - 6, top + 40, w + 6, top + 74);
+    c.drawRect(band, _fill(const Color(0xFFD62828)));
+    for (final s in [-1.0, 1.0]) {
+      final tail = Path()
+        ..moveTo(w + 4, top + 50)
+        ..quadraticBezierTo(w + 40, top + 60, w + 70, top + 110 + s * 14)
+        ..lineTo(w + 54, top + 114 + s * 14)
+        ..quadraticBezierTo(w + 30, top + 74, w + 4, top + 66)
+        ..close();
+      c.drawPath(tail, _fill(const Color(0xFFB71C1C)));
+    }
+  }
+
+  void visor() {
+    final r = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+        center: const Offset(0, 0),
+        width: half * 2.05,
+        height: 64,
+      ),
+      const Radius.circular(32),
+    );
+    c.drawRRect(
+      r,
+      Paint()
+        ..shader = const LinearGradient(
+          colors: [Color(0xE600E5FF), Color(0xE6BF5AF2), Color(0xE6FF2D95)],
+        ).createShader(r.outerRect),
+    );
+    c.drawRRect(
+      r,
+      _line(const Color(0xFF00E5FF), 4)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+    );
+    final scan = _line(Colors.white.withValues(alpha: 0.35), 2);
+    for (var i = 1; i < 5; i++) {
+      final y = -32 + 64 * i / 5;
+      c.drawLine(Offset(-half * 0.95, y), Offset(half * 0.95, y), scan);
+    }
+  }
+
+  void freckles() {
+    _cheeks(const Color(0xFFFF6F61), 0.3);
+    final dot = _fill(const Color(0xFF8B4A2B).withValues(alpha: 0.75));
+    const spots = [
+      Offset(-70, 44),
+      Offset(-56, 52),
+      Offset(-80, 58),
+      Offset(-62, 66),
+      Offset(-44, 46),
+      Offset(-50, 62),
+      Offset(70, 44),
+      Offset(56, 52),
+      Offset(80, 58),
+      Offset(62, 66),
+      Offset(44, 46),
+      Offset(50, 62),
+      Offset(-14, 40),
+      Offset(12, 42),
+      Offset(0, 48),
+    ];
+    for (final o in spots) {
+      c.drawCircle(o, 3.2, dot);
+    }
+    // sparkles
+    final sp = _fill(Colors.white);
+    for (final o in const [
+      Offset(-110, -40),
+      Offset(104, -60),
+      Offset(120, 30),
+    ]) {
+      c.drawPath(_star(o, 12), sp);
+    }
   }
 }
 

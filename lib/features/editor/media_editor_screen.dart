@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderStack;
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:image/image.dart' as img;
@@ -24,6 +25,7 @@ import '../../shared/widgets/smooth_clock.dart';
 import '../../shared/models/post.dart';
 import '../../shared/widgets/video_extras.dart';
 import '../../shared/widgets/stickers.dart';
+import '../../shared/widgets/styled_text.dart';
 import '../music/presentation/music_picker_sheet.dart';
 import '../post/presentation/create_post_screen.dart';
 import 'edit_models.dart';
@@ -165,6 +167,14 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
   int? _cvOverlay;
   TextLayer? _selText;
   double _handleBase = 0;
+  // v0.0.1: corner handle = turn + size; two fingers = turn too
+  Offset? _hCenter;
+  double _hDist0 = 1;
+  double _hAngle0 = 0;
+  double _hRot0 = 0;
+  double _cvAngle0 = 0;
+  double _cvRotBase = 0;
+  bool _snapped = false;
   final Map<int, Offset> _tlPtrs = {};
   bool _pinching = false;
   double _pinchDist = 1;
@@ -1001,47 +1011,49 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
             height: fh,
             child: _pinchArea(
               Stack(
-              children: [
-                RepaintBoundary(
-                  child: ClipRect(
-                    child: ColoredBox(
-                      color: Colors.black,
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          Positioned.fill(
-                            child: InteractiveViewer(
-                              transformationController: item.zoom,
-                              // v0.0.1: no photo zoom while resizing a text
-                              scaleEnabled: !_cvResizing && _cvText == null,
-                              panEnabled: !_cvResizing && _cvText == null,
-                              constrained: false,
-                              minScale: 1,
-                              maxScale: 5,
-                              boundaryMargin: EdgeInsets.zero,
-                              onInteractionStart: (_) =>
-                                  setState(() => _showGrid = true),
-                              onInteractionEnd: (_) => setState(() {
-                                _showGrid = false;
-                                item.zoomChanged = true;
-                              }),
-                              child: photo,
+                children: [
+                  RepaintBoundary(
+                    child: ClipRect(
+                      child: ColoredBox(
+                        color: Colors.black,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Positioned.fill(
+                              child: InteractiveViewer(
+                                transformationController: item.zoom,
+                                // v0.0.1: no photo zoom while resizing a text
+                                scaleEnabled: !_cvResizing && _cvText == null,
+                                panEnabled: !_cvResizing && _cvText == null,
+                                constrained: false,
+                                minScale: 1,
+                                maxScale: 5,
+                                boundaryMargin: EdgeInsets.zero,
+                                onInteractionStart: (_) =>
+                                    setState(() => _showGrid = true),
+                                onInteractionEnd: (_) => setState(() {
+                                  _showGrid = false;
+                                  item.zoomChanged = true;
+                                }),
+                                child: photo,
+                              ),
                             ),
-                          ),
-                          for (final t in item.texts)
-                            _textLayer(item, t, fw, fh),
-                          _linksOnCanvas(item),
-                        ],
+                            for (final t in item.texts)
+                              _textLayer(item, t, fw, fh),
+                            _linksOnCanvas(item),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-                if (_showGrid || _tool == _Tool.crop)
-                  const Positioned.fill(
-                    child: IgnorePointer(child: CustomPaint(painter: _Grid())),
-                  ),
-              ],
-            ),
+                  if (_showGrid || _tool == _Tool.crop)
+                    const Positioned.fill(
+                      child: IgnorePointer(
+                        child: CustomPaint(painter: _Grid()),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         );
@@ -1052,71 +1064,28 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
   Widget _textLayer(EditItem item, TextLayer t, double fw, double fh) {
     // v0.12: same limits as the saved photo; stickers; pinch = size
     final fs = (t.size * fw).clamp(fw * 0.02, fw * 0.5);
-    final text = Text(
-      t.text,
-      textAlign: TextAlign.center,
-      textScaler: t.sticker ? TextScaler.noScaling : null,
-      style: TextStyle(
-        fontFamily: t.sticker
-            ? AppTheme.fontFamily
-            : BioFont.family(t.font, AppTheme.fontFamily),
-        color: t.color,
-        fontSize: t.sticker ? fs : fs * BioFont.factor(t.font),
-        fontWeight: FontWeight.w800,
-        height: 1.15,
-        shadows: t.background || t.sticker
-            ? null
-            : [Shadow(blurRadius: fs * 0.12, color: Colors.black54)],
-      ),
-    );
     final picture = t.sticker && StickerPack.isPack(t.text);
     final limits = _sizeLimits(t.text, t.sticker);
     final sel = identical(_selText, t);
-    final body = Listener(
-      // first finger on it: pinch anywhere resizes it
-      onPointerDown: (_) {
-        if (_cvPtrs.isEmpty) {
-          _cvText = t;
-          if (!sel) setState(() => _selText = t);
-        }
-      },
-      child: GestureDetector(
-        onScaleUpdate: (d) => setState(() {
-          t.pos = Offset(
-            (t.pos.dx + d.focalPointDelta.dx / fw).clamp(0.0, 1.0),
-            (t.pos.dy + d.focalPointDelta.dy / fh).clamp(0.0, 1.0),
-          );
-        }),
-        onTap: () => t.sticker ? _removeSticker(item, t) : _editText(item, t),
-        child: Container(
-          padding: const EdgeInsets.all(11),
-          decoration: sel
-              ? BoxDecoration(
-                  border: Border.all(color: Colors.white70, width: 1),
-                  borderRadius: BorderRadius.circular(6),
-                )
-              : null,
-          child: picture
-              ? StickerImage(text: t.text, width: t.size * fw)
-              : ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: fw * 0.9),
-                  child: t.background
-                      ? Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: fs * 0.4,
-                            vertical: fs * 0.15,
-                          ),
-                          decoration: BoxDecoration(
-                            color: t.color.computeLuminance() > 0.5
-                                ? Colors.black87
-                                : Colors.white,
-                            borderRadius: BorderRadius.circular(fs * 0.3),
-                          ),
-                          child: text,
-                        )
-                      : text,
-                ),
-        ),
+    final body = GestureDetector(
+      onScaleUpdate: (d) => setState(() {
+        t.pos = Offset(
+          (t.pos.dx + d.focalPointDelta.dx / fw).clamp(0.0, 1.0),
+          (t.pos.dy + d.focalPointDelta.dy / fh).clamp(0.0, 1.0),
+        );
+      }),
+      onTap: () => t.sticker ? _removeSticker(item, t) : _editText(item, t),
+      child: Container(
+        padding: const EdgeInsets.all(11),
+        decoration: sel
+            ? BoxDecoration(
+                border: Border.all(color: Colors.white70, width: 1),
+                borderRadius: BorderRadius.circular(6),
+              )
+            : null,
+        child: picture
+            ? StickerImage(text: t.text, width: t.size * fw)
+            : StyledText(spec: t.spec, fontSize: fs, maxWidth: fw * 0.9),
       ),
     );
     return Positioned(
@@ -1124,51 +1093,102 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
       top: t.pos.dy * fh,
       child: FractionalTranslation(
         translation: const Offset(-0.5, -0.5),
-        child: Stack(
-          children: [
-            body,
-            if (sel)
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: _resizeHandle(
-                  key: const ValueKey('text-resize'),
-                  onStart: () => _handleBase = t.size,
-                  onDrag: (dx) => setState(() {
-                    _handleBase += dx / fw * (picture ? 1.0 : 0.35);
-                    t.size = _handleBase.clamp(limits.$1, limits.$2);
-                  }),
-                ),
-              ),
-          ],
+        // always a Transform (a new one mid-drag would stop the drag)
+        child: Transform.rotate(
+          angle: t.rotation,
+          // first finger on it (or on its handle): pinch anywhere resizes /
+          // turns it, and it stays selected
+          child: Listener(
+            onPointerDown: (_) {
+              if (_cvPtrs.isEmpty) {
+                _cvText = t;
+                if (!sel) setState(() => _selText = t);
+              }
+            },
+            child: Stack(
+              children: [
+                body,
+                if (sel)
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: _resizeHandle(
+                      key: const ValueKey('text-resize'),
+                      onStart: () {
+                        _handleBase = t.size;
+                        _hRot0 = t.rotation;
+                      },
+                      onChange: (k, rot) => setState(() {
+                        t.size = (_handleBase * k).clamp(limits.$1, limits.$2);
+                        t.rotation = rot;
+                      }),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
-  /// v0.0.1: drag the corner to make a text / sticker bigger or smaller.
+  /// Angle near straight (0, 90, 180 ...) -> straight, with a small buzz.
+  double _snap(double a) {
+    const q = math.pi / 2;
+    final n = (a / q).roundToDouble() * q;
+    final near = (a - n).abs() < 0.07;
+    if (near && !_snapped) HapticFeedback.selectionClick();
+    _snapped = near;
+    return near ? n : a;
+  }
+
+  /// v0.0.1: drag the corner to turn a text / sticker and make it bigger
+  /// or smaller ([onChange] gets the size factor and the new angle).
   Widget _resizeHandle({
     required Key key,
     required VoidCallback onStart,
-    required ValueChanged<double> onDrag,
+    required void Function(double k, double rotation) onChange,
   }) {
-    return GestureDetector(
-      key: key,
-      behavior: HitTestBehavior.opaque,
-      onPanStart: (_) => onStart(),
-      onPanUpdate: (d) => onDrag((d.delta.dx + d.delta.dy) / 2),
-      child: Container(
-        width: 22,
-        height: 22,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          shape: BoxShape.circle,
-          boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black45)],
-        ),
-        child: const Icon(
-          Icons.open_in_full_rounded,
-          size: 13,
-          color: Colors.black,
+    return Builder(
+      builder: (hc) => GestureDetector(
+        key: key,
+        behavior: HitTestBehavior.opaque,
+        onPanStart: (d) {
+          // the middle of the text / sticker (it turns around it)
+          final box = hc.findAncestorRenderObjectOfType<RenderStack>();
+          if (box == null || !box.hasSize) return;
+          final c = box.localToGlobal(box.size.center(Offset.zero));
+          final v = d.globalPosition - c;
+          _hCenter = c;
+          _hDist0 = math.max(8.0, v.distance);
+          _hAngle0 = v.direction;
+          _snapped = false;
+          onStart();
+        },
+        onPanUpdate: (d) {
+          final c = _hCenter;
+          if (c == null) return;
+          final v = d.globalPosition - c;
+          onChange(
+            math.max(8.0, v.distance) / _hDist0,
+            _snap(_hRot0 + (v.direction - _hAngle0)),
+          );
+        },
+        onPanEnd: (_) => _hCenter = null,
+        onPanCancel: () => _hCenter = null,
+        child: Container(
+          width: 24,
+          height: 24,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            boxShadow: [BoxShadow(blurRadius: 4, color: Colors.black45)],
+          ),
+          child: const Icon(
+            Icons.rotate_right_rounded,
+            size: 15,
+            color: Colors.black,
+          ),
         ),
       ),
     );
@@ -1179,6 +1199,12 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
     final p = _cvPtrs.values.take(2).toList();
     if (p.length < 2) return 1;
     return math.max(12.0, (p[0] - p[1]).distance);
+  }
+
+  double _cvAngle() {
+    final p = _cvPtrs.values.take(2).toList();
+    if (p.length < 2) return 0;
+    return (p[1] - p[0]).direction;
   }
 
   void _cvDown(PointerDownEvent e) {
@@ -1193,12 +1219,16 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
       final o = _cvOverlay;
       if (t != null) {
         _cvPinchBase = t.size;
+        _cvRotBase = t.rotation;
       } else if (o != null && o < item.overlays.length) {
         _cvPinchBase = item.overlays[o].size;
+        _cvRotBase = item.overlays[o].rotation;
       } else {
         return;
       }
       _cvPinchDist = _cvSpan();
+      _cvAngle0 = _cvAngle();
+      _snapped = false;
       setState(() {}); // the photo zoom stops while you resize
     }
   }
@@ -1209,6 +1239,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
     final d0 = _cvPinchDist;
     if (d0 == null || _cvPtrs.length < 2) return;
     final k = _cvSpan() / d0;
+    final rot = _snap(_cvRotBase + (_cvAngle() - _cvAngle0));
     final item = _item;
     final t = _cvText;
     final o = _cvOverlay;
@@ -1216,11 +1247,13 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
       if (t != null) {
         final l = _sizeLimits(t.text, t.sticker);
         t.size = (_cvPinchBase * k).clamp(l.$1, l.$2);
+        t.rotation = rot;
       } else if (o != null && o < item.overlays.length) {
         final ov = item.overlays[o];
         final l = _sizeLimits(ov.text, ov.isSticker);
         item.overlays[o] = ov.copyWith(
           size: (_cvPinchBase * k).clamp(l.$1, l.$2),
+          rotation: rot,
         );
       }
     });
@@ -1315,8 +1348,12 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                 text: o.text,
                 color: Color(o.color),
                 size: o.size,
-                background: o.background,
+                bg: o.background ? TextBg.clean(o.bgStyle) : TextBg.none,
                 font: o.font,
+                align: o.align,
+                outline: o.outline,
+                glow: o.glow,
+                spacing: o.spacing,
               ),
       ),
     );
@@ -1335,6 +1372,12 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
         color: res.color.toARGB32(),
         size: res.size,
         background: res.background,
+        bgStyle: res.bgStyle,
+        align: res.align,
+        outline: res.outline,
+        glow: res.glow,
+        spacing: res.spacing,
+        rotation: o?.rotation ?? 0,
         font: res.font,
         x: o?.x ?? 0.5,
         y: o?.y ?? 0.5,
@@ -1362,8 +1405,14 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                 text: layer.text,
                 color: layer.color,
                 size: layer.size,
-                background: layer.background,
+                bg: layer.background
+                    ? TextBg.clean(layer.bgStyle)
+                    : TextBg.none,
                 font: layer.font,
+                align: layer.align,
+                outline: layer.outline,
+                glow: layer.glow,
+                spacing: layer.spacing,
               ),
       ),
     );
@@ -1387,6 +1436,11 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
             color: res.color,
             size: res.size,
             background: res.background,
+            bgStyle: res.bgStyle,
+            align: res.align,
+            outline: res.outline,
+            glow: res.glow,
+            spacing: res.spacing,
             font: res.font,
           ),
         );
@@ -1396,6 +1450,11 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
           ..color = res.color
           ..size = res.size
           ..background = res.background
+          ..bgStyle = res.bgStyle
+          ..align = res.align
+          ..outline = res.outline
+          ..glow = res.glow
+          ..spacing = res.spacing
           ..font = res.font;
       }
     });
@@ -1428,28 +1487,28 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
             // v0.12: square corners (what you see is what is posted)
             child: _pinchArea(
               ClipRect(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  applyMatrix(
-                    item.color.isNone ? null : item.color.matrix,
-                    VideoPlayer(c),
-                  ),
-                  // v0.0.1 effects: face effect from the camera
-                  if (item.src.face case final fx?)
-                    FaceFxLayer(fx: fx, controller: c),
-                  _overlaysOnCanvas(item, c),
-                  _linksOnCanvas(item),
-                  // v0.15: play / pause is next to the timeline (not here)
-                  if (item.muted)
-                    const Positioned(
-                      right: 10,
-                      top: 10,
-                      child: Icon(Icons.volume_off, color: Colors.white),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    applyMatrix(
+                      item.color.isNone ? null : item.color.matrix,
+                      VideoPlayer(c),
                     ),
-                ],
+                    // v0.0.1 effects: face effect from the camera
+                    if (item.src.face case final fx?)
+                      FaceFxLayer(fx: fx, controller: c),
+                    _overlaysOnCanvas(item, c),
+                    _linksOnCanvas(item),
+                    // v0.15: play / pause is next to the timeline (not here)
+                    if (item.muted)
+                      const Positioned(
+                        right: 10,
+                        top: 10,
+                        child: Icon(Icons.volume_off, color: Colors.white),
+                      ),
+                  ],
+                ),
               ),
-            ),
             ),
           ),
         ),
@@ -1481,79 +1540,83 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                       height: fh,
                       child: Opacity(
                         opacity: item.overlays[i].visibleAt(ms) ? 1 : 0.4,
-                        child: Stack(
-                          children: [
-                            Listener(
-                              // first finger on it: pinch anywhere = size
-                              onPointerDown: (_) {
-                                if (_cvPtrs.isEmpty) _cvOverlay = i;
-                              },
-                              child: GestureDetector(
-                                onTap: () {
-                                  final o = item.overlays[i];
-                                  if (_selOverlay == i && !o.isSticker) {
-                                    _editOverlay(i);
-                                  } else {
-                                    setState(() => _selOverlay = i);
-                                  }
+                        child: Transform.rotate(
+                          angle: item.overlays[i].rotation,
+                          child: Stack(
+                            children: [
+                              Listener(
+                                // first finger on it: pinch anywhere = size
+                                onPointerDown: (_) {
+                                  if (_cvPtrs.isEmpty) _cvOverlay = i;
                                 },
-                                onScaleStart: (_) =>
-                                    setState(() => _selOverlay = i),
-                                onScaleUpdate: (d) => setState(() {
-                                  final o = item.overlays[i];
-                                  item.overlays[i] = o.copyWith(
-                                    x: (o.x + d.focalPointDelta.dx / fw).clamp(
-                                      0,
-                                      1,
+                                child: GestureDetector(
+                                  onTap: () {
+                                    final o = item.overlays[i];
+                                    if (_selOverlay == i && !o.isSticker) {
+                                      _editOverlay(i);
+                                    } else {
+                                      setState(() => _selOverlay = i);
+                                    }
+                                  },
+                                  onScaleStart: (_) =>
+                                      setState(() => _selOverlay = i),
+                                  onScaleUpdate: (d) => setState(() {
+                                    final o = item.overlays[i];
+                                    item.overlays[i] = o.copyWith(
+                                      x: (o.x + d.focalPointDelta.dx / fw)
+                                          .clamp(0, 1),
+                                      y: (o.y + d.focalPointDelta.dy / fh)
+                                          .clamp(0, 1),
+                                    );
+                                  }),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(11),
+                                    decoration: _selOverlay == i
+                                        ? BoxDecoration(
+                                            border: Border.all(
+                                              color: Colors.white70,
+                                              width: 1,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              6,
+                                            ),
+                                          )
+                                        : null,
+                                    child: OverlayView(
+                                      overlay: item.overlays[i],
+                                      frameWidth: fw,
                                     ),
-                                    y: (o.y + d.focalPointDelta.dy / fh).clamp(
-                                      0,
-                                      1,
-                                    ),
-                                  );
-                                }),
-                                child: Container(
-                                  padding: const EdgeInsets.all(11),
-                                  decoration: _selOverlay == i
-                                      ? BoxDecoration(
-                                          border: Border.all(
-                                            color: Colors.white70,
-                                            width: 1,
-                                          ),
-                                          borderRadius: BorderRadius.circular(
-                                            6,
-                                          ),
-                                        )
-                                      : null,
-                                  child: OverlayView(
-                                    overlay: item.overlays[i],
-                                    frameWidth: fw,
                                   ),
                                 ),
                               ),
-                            ),
-                            if (_selOverlay == i)
-                              Positioned(
-                                right: 0,
-                                bottom: 0,
-                                child: _resizeHandle(
-                                  key: ValueKey('ov-resize-$i'),
-                                  onStart: () =>
-                                      _handleBase = item.overlays[i].size,
-                                  onDrag: (dx) => setState(() {
-                                    final o = item.overlays[i];
-                                    final l = _sizeLimits(o.text, o.isSticker);
-                                    final pic =
-                                        o.isSticker &&
-                                        StickerPack.isPack(o.text);
-                                    _handleBase += dx / fw * (pic ? 1.0 : 0.35);
-                                    item.overlays[i] = o.copyWith(
-                                      size: _handleBase.clamp(l.$1, l.$2),
-                                    );
-                                  }),
+                              if (_selOverlay == i)
+                                Positioned(
+                                  right: 0,
+                                  bottom: 0,
+                                  child: _resizeHandle(
+                                    key: ValueKey('ov-resize-$i'),
+                                    onStart: () {
+                                      _handleBase = item.overlays[i].size;
+                                      _hRot0 = item.overlays[i].rotation;
+                                    },
+                                    onChange: (k, rot) => setState(() {
+                                      final o = item.overlays[i];
+                                      final l = _sizeLimits(
+                                        o.text,
+                                        o.isSticker,
+                                      );
+                                      item.overlays[i] = o.copyWith(
+                                        size: (_handleBase * k).clamp(
+                                          l.$1,
+                                          l.$2,
+                                        ),
+                                        rotation: rot,
+                                      );
+                                    }),
+                                  ),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -3148,30 +3211,30 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                             child: FittedBox(
                               fit: BoxFit.scaleDown,
                               child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _toolIcon(t),
-                                  size: 21,
-                                  color: _tool == t
-                                      ? AppColors.lime
-                                      : AppColors.textSecondary,
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  _toolLabel(t),
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: _tool == t
-                                        ? FontWeight.w800
-                                        : FontWeight.w500,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _toolIcon(t),
+                                    size: 21,
                                     color: _tool == t
                                         ? AppColors.lime
                                         : AppColors.textSecondary,
                                   ),
-                                ),
-                              ],
-                            ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    _toolLabel(t),
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: _tool == t
+                                          ? FontWeight.w800
+                                          : FontWeight.w500,
+                                      color: _tool == t
+                                          ? AppColors.lime
+                                          : AppColors.textSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -3435,18 +3498,33 @@ class _TextResult {
     this.text = '',
     this.color = Colors.white,
     this.size = 0.08,
-    this.background = false,
+    this.bg = TextBg.none,
     this.delete = false,
     this.font = '',
+    this.align = 0,
+    this.outline = false,
+    this.glow = false,
+    this.spacing = 0,
   });
   final String text;
   final Color color;
   final double size;
-  final bool background;
+
+  /// [TextBg] (none = no background).
+  final int bg;
   final bool delete;
 
   /// v0.16: font id (see BioFont).
   final String font;
+  final int align;
+  final bool outline;
+  final bool glow;
+  final double spacing;
+
+  bool get background => bg != TextBg.none;
+
+  /// Saved style (1 when there is no background).
+  int get bgStyle => bg == TextBg.none ? 1 : bg;
 }
 
 const List<Color> _textColors = [
@@ -3458,6 +3536,14 @@ const List<Color> _textColors = [
   Color(0xFFFFC53D),
   Color(0xFF4DA3FF),
   Color(0xFFB97CFF),
+  Color(0xFFFF8A3D),
+  Color(0xFFFF7EB6),
+  Color(0xFF2EE6D6),
+  Color(0xFF1E3A8A),
+  Color(0xFF8B5E3C),
+  Color(0xFF9CA3AF),
+  Color(0xFFFFF3B0),
+  Color(0xFFE11D48),
 ];
 
 class _TextSheet extends StatefulWidget {
@@ -3474,17 +3560,153 @@ class _TextSheetState extends State<_TextSheet> {
   late final _ctrl = TextEditingController(text: widget.initial?.text ?? '');
   late Color _color = widget.initial?.color ?? Colors.white;
   late double _size = widget.initial?.size ?? 0.08;
-  late bool _bg = widget.initial?.background ?? false;
+  late int _bg = widget.initial?.bg ?? TextBg.none;
   late String _font = BioFont.normalize(widget.initial?.font);
+  late int _align = widget.initial?.align ?? 0;
+  late bool _outline = widget.initial?.outline ?? false;
+  late bool _glow = widget.initial?.glow ?? false;
+  late double _spacing = widget.initial?.spacing ?? 0;
+  bool _custom = false;
+  double _hue = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl.addListener(_changed);
+  }
+
+  void _changed() => setState(() {});
 
   @override
   void dispose() {
+    _ctrl.removeListener(_changed);
     _ctrl.dispose();
     super.dispose();
   }
 
+  Widget _tool({
+    required Key key,
+    required String tip,
+    required bool on,
+    required Widget icon,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tip,
+      child: InkResponse(
+        key: key,
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        radius: 22,
+        child: Container(
+          width: 40,
+          height: 40,
+          margin: const EdgeInsets.only(right: 8),
+          decoration: BoxDecoration(
+            color: on ? AppColors.lime.withValues(alpha: 0.18) : Colors.white10,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: on ? AppColors.lime : Colors.white24,
+              width: on ? 1.6 : 1,
+            ),
+          ),
+          alignment: Alignment.center,
+          child: icon,
+        ),
+      ),
+    );
+  }
+
+  /// The "A" button: shows what the background looks like.
+  Widget _bgIcon() {
+    final light = TextSpec.light(_color);
+    final (Color box, Color fg) = switch (_bg) {
+      TextBg.solid => (light ? Colors.black : Colors.white, _color),
+      TextBg.inverse => (_color, light ? Colors.black : Colors.white),
+      TextBg.soft => (
+        light ? Colors.black54 : Colors.white60,
+        light ? Colors.white : Colors.black,
+      ),
+      _ => (Colors.transparent, Colors.white),
+    };
+    return Container(
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        color: box,
+        borderRadius: BorderRadius.circular(6),
+        border: _bg == TextBg.none ? Border.all(color: Colors.white54) : null,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        'A',
+        style: TextStyle(
+          fontFamily: AppTheme.fontFamily,
+          fontWeight: FontWeight.w900,
+          fontSize: 15,
+          color: fg,
+          height: 1,
+        ),
+      ),
+    );
+  }
+
+  static const _hues = [
+    Color(0xFFFF0000),
+    Color(0xFFFFFF00),
+    Color(0xFF00FF00),
+    Color(0xFF00FFFF),
+    Color(0xFF0000FF),
+    Color(0xFFFF00FF),
+    Color(0xFFFF0000),
+  ];
+
+  Widget _hueBar() {
+    return LayoutBuilder(
+      builder: (context, box) {
+        void pick(double x) => setState(() {
+          _hue = (x / box.maxWidth).clamp(0.0, 1.0);
+          _color = HSVColor.fromAHSV(1, _hue * 360, 0.85, 1).toColor();
+        });
+        return GestureDetector(
+          key: const ValueKey('text-hue'),
+          onTapDown: (d) => pick(d.localPosition.dx),
+          onHorizontalDragUpdate: (d) => pick(d.localPosition.dx),
+          child: Container(
+            height: 26,
+            margin: const EdgeInsets.only(top: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(13),
+              gradient: const LinearGradient(colors: _hues),
+            ),
+            child: Stack(
+              children: [
+                Positioned(
+                  left: (_hue * box.maxWidth - 13).clamp(0, box.maxWidth - 26),
+                  top: 0,
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: _color,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 3),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final preview = _ctrl.text.trim();
     return Padding(
       padding: EdgeInsets.only(
         left: 16,
@@ -3492,122 +3714,259 @@ class _TextSheetState extends State<_TextSheet> {
         top: 8,
         bottom: MediaQuery.of(context).viewInsets.bottom + 16,
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            controller: _ctrl,
-            autofocus: true,
-            maxLines: 3,
-            minLines: 1,
-            maxLength: 120,
-            style: BioFont.style(
-              _font,
-              TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-                color: _color == Colors.black ? Colors.white : _color,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // what it will look like on the picture
+            Container(
+              key: const ValueKey('text-preview'),
+              width: double.infinity,
+              constraints: const BoxConstraints(minHeight: 84),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF3A4150), Color(0xFF1B1E26)],
+                ),
+              ),
+              alignment: switch (_align) {
+                1 => Alignment.centerLeft,
+                2 => Alignment.centerRight,
+                _ => Alignment.center,
+              },
+              child: preview.isEmpty
+                  ? const Text(
+                      'Your text',
+                      style: TextStyle(color: Colors.white38, fontSize: 18),
+                    )
+                  : LayoutBuilder(
+                      builder: (context, box) => StyledText(
+                        spec: TextSpec(
+                          text: preview,
+                          color: _color,
+                          font: _font,
+                          bg: _bg,
+                          align: _align,
+                          outline: _outline,
+                          glow: _glow,
+                          spacing: _spacing,
+                        ),
+                        fontSize: (_size * 300).clamp(14.0, 46.0),
+                        maxWidth: box.maxWidth,
+                      ),
+                    ),
+            ),
+            TextField(
+              controller: _ctrl,
+              autofocus: true,
+              maxLines: 3,
+              minLines: 1,
+              maxLength: 120,
+              style: BioFont.style(
+                _font,
+                const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+              decoration: const InputDecoration(
+                hintText: 'Type something…',
+                border: InputBorder.none,
               ),
             ),
-            decoration: const InputDecoration(
-              hintText: 'Type something…',
-              border: InputBorder.none,
+            // v0.16: fonts for moment / post texts
+            BioFontPicker(
+              key: const ValueKey('text-fonts'),
+              value: _font,
+              small: true,
+              keyPrefix: 'text-font',
+              onChanged: (v) => setState(() => _font = v),
             ),
-          ),
-          // v0.16: fonts for moment / post texts
-          BioFontPicker(
-            key: const ValueKey('text-fonts'),
-            value: _font,
-            small: true,
-            keyPrefix: 'text-font',
-            onChanged: (v) => setState(() => _font = v),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 36,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
+            const SizedBox(height: 10),
+            Row(
               children: [
-                for (final c in _textColors)
+                _tool(
+                  key: const ValueKey('text-bg'),
+                  tip: 'Background',
+                  on: _bg != TextBg.none,
+                  icon: _bgIcon(),
+                  onTap: () => setState(() => _bg = (_bg + 1) % TextBg.count),
+                ),
+                _tool(
+                  key: const ValueKey('text-align'),
+                  tip: 'Align',
+                  on: _align != 0,
+                  icon: Icon(switch (_align) {
+                    1 => Icons.format_align_left,
+                    2 => Icons.format_align_right,
+                    _ => Icons.format_align_center,
+                  }, size: 20),
+                  onTap: () => setState(() => _align = (_align + 1) % 3),
+                ),
+                _tool(
+                  key: const ValueKey('text-outline'),
+                  tip: 'Outline',
+                  on: _outline,
+                  icon: Text(
+                    'A',
+                    style: TextStyle(
+                      fontFamily: AppTheme.fontFamily,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 18,
+                      height: 1,
+                      foreground: Paint()
+                        ..style = PaintingStyle.stroke
+                        ..strokeWidth = 1.6
+                        ..color = Colors.white,
+                    ),
+                  ),
+                  onTap: () => setState(() => _outline = !_outline),
+                ),
+                _tool(
+                  key: const ValueKey('text-glow'),
+                  tip: 'Glow',
+                  on: _glow,
+                  icon: Icon(
+                    Icons.auto_awesome,
+                    size: 19,
+                    color: _glow ? _color : Colors.white,
+                  ),
+                  onTap: () => setState(() => _glow = !_glow),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 36,
+              child: ListView(
+                key: const ValueKey('text-colors'),
+                scrollDirection: Axis.horizontal,
+                children: [
                   GestureDetector(
-                    onTap: () => setState(() => _color = c),
+                    key: const ValueKey('text-color-custom'),
+                    onTap: () => setState(() => _custom = !_custom),
                     child: Container(
                       width: 30,
                       height: 30,
                       margin: const EdgeInsets.only(right: 8),
                       decoration: BoxDecoration(
-                        color: c,
                         shape: BoxShape.circle,
+                        gradient: const SweepGradient(colors: _hues),
                         border: Border.all(
-                          color: _color == c ? AppColors.lime : Colors.white24,
-                          width: _color == c ? 3 : 1,
+                          color: _custom ? AppColors.lime : Colors.white24,
+                          width: _custom ? 3 : 1,
                         ),
                       ),
                     ),
                   ),
+                  for (final c in _textColors)
+                    GestureDetector(
+                      onTap: () => setState(() => _color = c),
+                      child: Container(
+                        width: 30,
+                        height: 30,
+                        margin: const EdgeInsets.only(right: 8),
+                        decoration: BoxDecoration(
+                          color: c,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: _color == c
+                                ? AppColors.lime
+                                : Colors.white24,
+                            width: _color == c ? 3 : 1,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (_custom) _hueBar(),
+            Row(
+              children: [
+                const Tooltip(
+                  message: 'Size',
+                  child: Icon(Icons.format_size, size: 20),
+                ),
+                Expanded(
+                  child: Slider(
+                    value: _size.clamp(0.03, 0.18),
+                    min: 0.03,
+                    max: 0.18,
+                    activeColor: AppColors.lime,
+                    onChanged: (v) => setState(() => _size = v),
+                  ),
+                ),
               ],
             ),
-          ),
-          Row(
-            children: [
-              const Icon(Icons.format_size, size: 20),
-              Expanded(
-                child: Slider(
-                  value: _size,
-                  min: 0.04,
-                  max: 0.18,
-                  activeColor: AppColors.lime,
-                  onChanged: (v) => setState(() => _size = v),
+            Row(
+              children: [
+                const Tooltip(
+                  message: 'Letter spacing',
+                  child: Icon(Icons.format_line_spacing, size: 20),
                 ),
-              ),
-              IconButton(
-                tooltip: 'Background',
-                onPressed: () => setState(() => _bg = !_bg),
-                icon: Icon(
-                  _bg ? Icons.format_color_fill : Icons.format_color_reset,
-                  color: _bg ? AppColors.lime : null,
-                ),
-              ),
-            ],
-          ),
-          Row(
-            children: [
-              if (widget.initial != null)
-                TextButton.icon(
-                  onPressed: () =>
-                      Navigator.pop(context, const _TextResult(delete: true)),
-                  icon: const Icon(Icons.delete_outline, color: AppColors.like),
-                  label: const Text(
-                    'Delete',
-                    style: TextStyle(color: AppColors.like),
+                Expanded(
+                  child: Slider(
+                    key: const ValueKey('text-spacing'),
+                    value: _spacing.clamp(-0.05, 0.4),
+                    min: -0.05,
+                    max: 0.4,
+                    activeColor: AppColors.lime,
+                    onChanged: (v) => setState(() => _spacing = v),
                   ),
                 ),
-              const Spacer(),
-              FilledButton(
-                onPressed: () => Navigator.pop(
-                  context,
-                  _TextResult(
-                    text: _ctrl.text,
-                    color: _color,
-                    size: _size,
-                    background: _bg,
-                    font: _font,
+              ],
+            ),
+            Row(
+              children: [
+                if (widget.initial != null)
+                  TextButton.icon(
+                    onPressed: () =>
+                        Navigator.pop(context, const _TextResult(delete: true)),
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      color: AppColors.like,
+                    ),
+                    label: const Text(
+                      'Delete',
+                      style: TextStyle(color: AppColors.like),
+                    ),
                   ),
-                ),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.lime,
-                  foregroundColor: Colors.black,
-                  textStyle: const TextStyle(
-                    fontFamily: AppTheme.fontFamily,
-                    fontWeight: FontWeight.w800,
+                const Spacer(),
+                FilledButton(
+                  onPressed: () => Navigator.pop(
+                    context,
+                    _TextResult(
+                      text: _ctrl.text,
+                      color: _color,
+                      size: _size,
+                      bg: _bg,
+                      font: _font,
+                      align: _align,
+                      outline: _outline,
+                      glow: _glow,
+                      spacing: _spacing,
+                    ),
                   ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.lime,
+                    foregroundColor: Colors.black,
+                    textStyle: const TextStyle(
+                      fontFamily: AppTheme.fontFamily,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  child: const Text('Done'),
                 ),
-                child: const Text('Done'),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

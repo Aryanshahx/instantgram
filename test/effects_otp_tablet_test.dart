@@ -209,7 +209,9 @@ void main() {
     test('bad text is ignored', () {
       expect(FaceTrack.parse(''), isNull);
       expect(FaceTrack.parse('v2;0'), isNull);
-      final t = FaceTrack.parse('v1;0,1,2;x;100,0.1,0.1,0.2,0.1,0.9,0.9,0.1,0.1')!;
+      final t = FaceTrack.parse(
+        'v1;0,1,2;x;100,0.1,0.1,0.2,0.1,0.9,0.9,0.1,0.1',
+      )!;
       // wrong count = no face, a box with r < l = no face
       expect(t.times, [0, 100]);
       expect(t.faces, [null, null]);
@@ -223,7 +225,10 @@ void main() {
       expect(FaceFx.fromMap({'fx': '', 't': 'v1'}), isNull);
       expect(FaceFx.fromMap({'fx': 'dog', 't': 'nope'}), isNull);
       expect(FaceFx.fromMap('x'), isNull);
-      expect(kFaceEffects.length, 14);
+      // v0.0.1 update: 12 more (26), all with different ids
+      expect(kFaceEffects.length, 26);
+      expect(kFaceEffects.map((e) => e.id).toSet().length, 26);
+      expect(isFaceEffect('pirate') && isFaceEffect('freckles'), isTrue);
       expect(isFaceEffect('crown'), isTrue);
       expect(isFaceEffect('nope'), isFalse);
     });
@@ -257,10 +262,8 @@ void main() {
                   child: TextButton(
                     onPressed: () => showModalBottomSheet<void>(
                       context: context,
-                      builder: (_) => const SizedBox(
-                        key: ValueKey('sheet'),
-                        height: 100,
-                      ),
+                      builder: (_) =>
+                          const SizedBox(key: ValueKey('sheet'), height: 100),
                     ),
                     child: const Text('open'),
                   ),
@@ -305,7 +308,10 @@ void main() {
         if (body['action'] == 'otpSend') return {'sent': true, 'resendIn': 60};
         if (body['action'] == 'otpVerify') {
           if (body['code'] == '123456') return {'otpToken': 'tok1'};
-          throw const ApiException('Wrong code. 4 tries left.', statusCode: 400);
+          throw const ApiException(
+            'Wrong code. 4 tries left.',
+            statusCode: 400,
+          );
         }
         return {};
       };
@@ -314,11 +320,24 @@ void main() {
 
     test('service: send + verify go to /api/u without login', () async {
       expect(await AuthService.instance.sendSignupCode(' a@b.co '), 60);
-      expect(sent.last, {'path': '/api/u', 'action': 'otpSend', 'email': 'a@b.co'});
-      expect(await AuthService.instance.verifySignupCode('a@b.co', '123456'), 'tok1');
+      expect(sent.last, {
+        'path': '/api/u',
+        'action': 'otpSend',
+        'email': 'a@b.co',
+      });
+      expect(
+        await AuthService.instance.verifySignupCode('a@b.co', '123456'),
+        'tok1',
+      );
       await expectLater(
         AuthService.instance.verifySignupCode('a@b.co', '000000'),
-        throwsA(isA<AuthFailure>().having((e) => e.message, 'm', contains('Wrong code'))),
+        throwsA(
+          isA<AuthFailure>().having(
+            (e) => e.message,
+            'm',
+            contains('Wrong code'),
+          ),
+        ),
       );
     });
 
@@ -354,7 +373,9 @@ void main() {
       await _finish(t);
     });
 
-    testWidgets('account step fails -> try again uses the same code', (t) async {
+    testWidgets('account step fails -> try again uses the same code', (
+      t,
+    ) async {
       var n = 0;
       await t.pumpWidget(
         MaterialApp(
@@ -495,7 +516,10 @@ void main() {
       expect(deleted, isEmpty);
       StoryViewerScreen.debugDelete = (st) async => throw StateError('offline');
       await deleteNow(t);
-      expect(find.text("Couldn't delete. Check your internet."), findsOneWidget);
+      expect(
+        find.text("Couldn't delete. Check your internet."),
+        findsOneWidget,
+      );
       expect(find.byType(StoryViewerScreen), findsOneWidget);
       await _finish(t);
     });

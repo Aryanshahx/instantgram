@@ -5,9 +5,8 @@ import 'package:just_audio/just_audio.dart';
 import 'package:video_player/video_player.dart';
 
 import 'stickers.dart';
-import '../../core/theme/app_theme.dart';
 import '../models/post.dart';
-import 'bio_font.dart';
+import 'styled_text.dart';
 
 /// v0.12: one text / sticker drawn on a video frame [frameWidth] wide.
 /// Same look in the editor and when watching.
@@ -25,55 +24,21 @@ class OverlayView extends StatelessWidget {
   Widget build(BuildContext context) {
     final o = overlay;
     final fs = (o.size * frameWidth).clamp(6.0, 2000.0);
-    final color = Color(o.color);
     if (o.isSticker && StickerPack.isPack(o.text)) {
       // v0.13: built-in sticker picture (size = width)
       return StickerImage(text: o.text, width: o.size * frameWidth);
     }
-    if (o.isSticker) {
-      return Text(
-        o.text,
-        textScaler: TextScaler.noScaling,
-        textAlign: TextAlign.center,
-        style: TextStyle(fontSize: fs, height: 1.1),
-      );
-    }
-    final text = Text(
-      o.text,
-      textAlign: TextAlign.center,
-      textScaler: TextScaler.noScaling,
-      style: TextStyle(
-        // v0.16: the chosen font
-        fontFamily: BioFont.family(o.font, AppTheme.fontFamily),
-        color: color,
-        fontSize: fs * BioFont.factor(o.font),
-        fontWeight: FontWeight.w800,
-        height: 1.15,
-        shadows: o.background
-            ? null
-            : [Shadow(blurRadius: fs * 0.25, color: Colors.black54)],
-      ),
-    );
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: frameWidth * 0.9),
-      child: o.background
-          ? Container(
-              padding: EdgeInsets.symmetric(
-                horizontal: fs * 0.4,
-                vertical: fs * 0.15,
-              ),
-              decoration: BoxDecoration(
-                color: color.computeLuminance() > 0.5
-                    ? Colors.black87
-                    : Colors.white,
-                borderRadius: BorderRadius.circular(fs * 0.3),
-              ),
-              child: text,
-            )
-          : text,
+    return StyledText(
+      spec: TextSpec.ofOverlay(o),
+      fontSize: fs,
+      maxWidth: o.isSticker ? frameWidth * 4 : frameWidth * 0.9,
     );
   }
 }
+
+/// v0.0.1: turns [child] by [rotation] (radians) around its middle.
+Widget turned(double rotation, Widget child) =>
+    rotation == 0 ? child : Transform.rotate(angle: rotation, child: child);
 
 /// Places [child] with its center at ([x], [y]) (0..1) of the box.
 class OverlayPlace extends StatelessWidget {
@@ -132,7 +97,10 @@ class VideoOverlayLayer extends StatelessWidget {
                 y: o.y,
                 width: box.maxWidth,
                 height: box.maxHeight,
-                child: OverlayView(overlay: o, frameWidth: box.maxWidth),
+                child: turned(
+                  o.rotation,
+                  OverlayView(overlay: o, frameWidth: box.maxWidth),
+                ),
               ),
         ],
       ),

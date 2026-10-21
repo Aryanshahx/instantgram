@@ -84,6 +84,12 @@ class VideoOverlay {
     this.startMs = 0,
     this.endMs = 0,
     this.font = '',
+    this.bgStyle = 1,
+    this.align = 0,
+    this.outline = false,
+    this.glow = false,
+    this.spacing = 0,
+    this.rotation = 0,
   });
 
   static const String textKind = 'text';
@@ -114,7 +120,25 @@ class VideoOverlay {
   /// v0.16: font id of a text (see BioFont, '' = app font).
   final String font;
 
+  /// v0.0.1 text look: background style when [background] is on (see
+  /// TextBg: 1 solid, 2 your colour, 3 see-through), 0 middle / 1 left /
+  /// 2 right, outline, neon glow, space between letters.
+  final int bgStyle;
+  final int align;
+  final bool outline;
+  final bool glow;
+  final double spacing;
+
+  /// v0.0.1: turned by this much (radians, clockwise).
+  final double rotation;
+
   VideoOverlay copyWith({
+    int? bgStyle,
+    int? align,
+    bool? outline,
+    bool? glow,
+    double? spacing,
+    double? rotation,
     String? font,
     String? text,
     int? color,
@@ -135,6 +159,12 @@ class VideoOverlay {
     background: background ?? this.background,
     startMs: startMs ?? this.startMs,
     endMs: endMs ?? this.endMs,
+    bgStyle: bgStyle ?? this.bgStyle,
+    align: align ?? this.align,
+    outline: outline ?? this.outline,
+    glow: glow ?? this.glow,
+    spacing: spacing ?? this.spacing,
+    rotation: rotation ?? this.rotation,
   );
 
   Map<String, dynamic> toMap() => {
@@ -148,6 +178,12 @@ class VideoOverlay {
     if (font.isNotEmpty) 'f': font,
     if (startMs > 0) 's': startMs,
     if (endMs > 0) 'e': endMs,
+    if (background && bgStyle != 1) 'bs': bgStyle,
+    if (align != 0) 'a': align,
+    if (outline) 'o': true,
+    if (glow) 'g': true,
+    if (spacing != 0) 'ls': double.parse(spacing.toStringAsFixed(3)),
+    if (rotation != 0) 'r': double.parse(rotation.toStringAsFixed(4)),
   };
 
   static VideoOverlay? fromMap(Object? v) {
@@ -169,6 +205,16 @@ class VideoOverlay {
           : '',
       startMs: v['s'] is num ? (v['s'] as num).toInt() : 0,
       endMs: v['e'] is num ? (v['e'] as num).toInt() : 0,
+      bgStyle: v['bs'] is num && (v['bs'] as num) >= 1 && (v['bs'] as num) <= 3
+          ? (v['bs'] as num).toInt()
+          : 1,
+      align: v['a'] is num && (v['a'] as num) >= 0 && (v['a'] as num) <= 2
+          ? (v['a'] as num).toInt()
+          : 0,
+      outline: v['o'] == true,
+      glow: v['g'] == true,
+      spacing: d(v['ls'], 0, -0.1, 0.5),
+      rotation: d(v['r'], 0, -100, 100),
     );
   }
 }
@@ -463,7 +509,9 @@ class MediaLink {
     final scheme = u.scheme.toLowerCase();
     if (scheme != 'http' && scheme != 'https') return null;
     final host = u.host;
-    if (host.isEmpty || !host.contains('.') || host.startsWith('.') ||
+    if (host.isEmpty ||
+        !host.contains('.') ||
+        host.startsWith('.') ||
         host.endsWith('.')) {
       return null;
     }

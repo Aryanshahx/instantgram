@@ -85,7 +85,8 @@ class _CameraScreenState extends State<CameraScreen>
   // v0.0.1 effects: face effects + green screen (Google ML Kit, the
   // models download the first time you open Effects)
   String _fx = '';
-  bool _green = false;
+  // background effect: '' (none), 'green', 'blur', 'mono', 'spot'
+  String _bg = '';
   GreenBackground _greenBg = const GreenBackground();
   bool _showFx = false;
   bool _fxLoading = false;
@@ -97,7 +98,8 @@ class _CameraScreenState extends State<CameraScreen>
   bool _applying = false;
   bool _fxCancelled = false;
 
-  bool get _fxOn => _fx.isNotEmpty || _green;
+  bool get _green => _bg == 'green';
+  bool get _fxOn => _fx.isNotEmpty || _bg.isNotEmpty;
 
   // controls
   FlashMode _flash = FlashMode.off;
@@ -285,7 +287,8 @@ class _CameraScreenState extends State<CameraScreen>
   void _onFrame(CameraImage img) {
     if (_frameBusy || !mounted || !_fxOn || img.planes.isEmpty) return;
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _frameAt < (_green ? 110 : 60)) return;
+    // fast model: about 25 pictures a second
+    if (now - _frameAt < (_bg.isNotEmpty ? 38 : 50)) return;
     _frameAt = now;
     _frameBusy = true;
     _analyze(img).whenComplete(() => _frameBusy = false);
@@ -298,11 +301,11 @@ class _CameraScreenState extends State<CameraScreen>
       img.width,
       img.height,
       stride: p.bytesPerRow,
-      target: _green ? 256 : 240,
+      target: 240,
     );
     if (small == null || _cams.isEmpty) return;
     final cam = _cams[_camIndex];
-    final green = _green;
+    final green = _bg.isNotEmpty;
     try {
       final r = await VisionService.instance.analyze(
         small,
@@ -367,23 +370,20 @@ class _CameraScreenState extends State<CameraScreen>
   void _pickFx(String id) {
     setState(() {
       _fx = id;
-      if (id.isEmpty) _green = false;
+      if (id.isEmpty) _bg = '';
     });
     unawaited(_syncStream());
   }
 
-  Future<void> _toggleGreen() async {
-    if (_green) {
-      setState(() => _green = false);
+  /// Green screen / blur / color pop / spotlight (photos and videos).
+  Future<void> _pickBg(String mode) async {
+    if (_bg == mode) {
+      setState(() => _bg = '');
       unawaited(_syncStream());
       return;
     }
-    if (_video) {
-      _snack('Green screen works for photos. Switch to Photo.');
-      return;
-    }
     if (!await _ensureModels(segment: true) || !mounted) return;
-    setState(() => _green = true);
+    setState(() => _bg = mode);
     unawaited(_syncStream());
   }
 
@@ -493,11 +493,6 @@ class _CameraScreenState extends State<CameraScreen>
 
   Future<void> _setMode(bool video) async {
     if (video == _video || _recording || _countdown != null) return;
-    if (video && _green) {
-      _snack('Green screen is off: it works for photos.');
-      setState(() => _green = false);
-      unawaited(_syncStream());
-    }
     setState(() => _video = video);
     final c = _ctrl;
     if (c == null) return;
@@ -608,11 +603,12 @@ class _CameraScreenState extends State<CameraScreen>
           final r = await bakeEffects(
             x.path,
             effect: _fx,
-            green: _green ? _greenBg : null,
+            bg: _bg,
+            green: _greenBg,
           );
           file = r.file;
           if (_fx.isNotEmpty && r.faces == 0) _snack('No face found');
-          if (_green && !r.cutOut) _snack('No person found for the green screen');
+          if (_bg.isNotEmpty && !r.cutOut) _snack('No person found');
         } catch (_) {
           _snack("Couldn't add the effect");
         }
@@ -638,8 +634,8 @@ class _CameraScreenState extends State<CameraScreen>
     final c = _ctrl;
     if (c == null || _busy || _recording) return;
     setState(() => _busy = true);
-    // v0.0.1 effects: the face effect stays on screen while filming
-    final live = _fx.isNotEmpty;
+    // v0.0.1 effects: the effects stay on screen while filming
+    final live = _fxOn;
     if (c.value.isStreamingImages) {
       try {
         await c.stopImageStream();
@@ -749,13 +745,30 @@ class _CameraScreenState extends State<CameraScreen>
     try {
       final x = await c.stopVideoRecording();
       if (!mounted) return;
-      // v0.0.1 effects: find the face in the video (drawn while playing)
-      FaceFx? face;
-      if (_fx.isNotEmpty) {
-        _fxCancelled = false;
+      var path = x.path;
+      _fxCancelled = false;
+      // background effect INTO the video (green screen, blur, ...)
+      if (_bg.isNotEmpty) {
         setState(() => _applying = true);
         try {
-          final t = await VisionService.instance.videoTrack(x.path);
+          final bg = _green ? await greenBackgroundFile(_greenBg) : null;
+          final out = await VisionService.instance.fxVideo(
+            path,
+            mode: _bg,
+            bg: bg,
+          );
+          if (out != null) path = out;
+        } catch (_) {
+          _snack("Couldn't add the effect");
+        }
+        if (!mounted) return;
+      }
+      // v0.0.1 effects: find the face in the video (drawn while playing)
+      FaceFx? face;
+      if (_fx.isNotEmpty && !_fxCancelled) {
+        setState(() => _applying = true);
+        try {
+          final t = await VisionService.instance.videoTrack(path);
           if (t != null) {
             face = FaceFx(effect: _fx, track: t);
           } else if (!_fxCancelled) {
@@ -769,7 +782,7 @@ class _CameraScreenState extends State<CameraScreen>
       Navigator.of(context).pop(
         CameraResult([
           PickedMedia(
-            File(x.path),
+            File(path),
             isVideo: true,
             filterPreset: _filter,
             muted: _audio != null,
@@ -956,12 +969,7 @@ class _CameraScreenState extends State<CameraScreen>
                   child: _filterStrip(),
                 ),
               if (_showFx && !_recording)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 10,
-                  child: _fxStrip(),
-                ),
+                Positioned(left: 0, right: 0, bottom: 10, child: _fxStrip()),
               if (_fxLoading) Positioned.fill(child: _fxDownloading()),
               if (_applying) Positioned.fill(child: _fxApplyingView()),
               if (_focusAt case final f?)
@@ -1139,13 +1147,28 @@ class _CameraScreenState extends State<CameraScreen>
   /// The camera picture + green screen + face effect (same box).
   Widget _liveLayers(CameraController c, Size box) {
     Widget cam = CameraPreview(c);
-    if (_green) {
+    if (_bg.isNotEmpty) {
       final mask = _mask;
+      final Widget back = switch (_bg) {
+        'blur' => ImageFiltered(
+          imageFilter: ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+          child: CameraPreview(c),
+        ),
+        'mono' => ColorFiltered(
+          colorFilter: kMonoFilter,
+          child: CameraPreview(c),
+        ),
+        'spot' => ColorFiltered(
+          colorFilter: kSpotFilter,
+          child: CameraPreview(c),
+        ),
+        _ => GreenBackdrop(background: _greenBg),
+      };
       cam = Stack(
-        key: const ValueKey('camera-green'),
+        key: ValueKey(_green ? 'camera-green' : 'camera-bg-$_bg'),
         fit: StackFit.expand,
         children: [
-          GreenBackdrop(background: _greenBg),
+          back,
           if (mask != null)
             ShaderMask(
               blendMode: BlendMode.dstIn,
@@ -1160,7 +1183,7 @@ class _CameraScreenState extends State<CameraScreen>
               ),
               child: cam,
             )
-          else
+          else if (_green)
             Opacity(opacity: 0.35, child: cam),
         ],
       );
@@ -1340,15 +1363,17 @@ class _CameraScreenState extends State<CameraScreen>
                         width: _greenBg.file != null ? 2.5 : 1,
                       ),
                     ),
-                    child: const Icon(Icons.add_photo_alternate_outlined, size: 20),
+                    child: const Icon(
+                      Icons.add_photo_alternate_outlined,
+                      size: 20,
+                    ),
                   ),
                 ),
                 for (var i = 0; i < kGreenGradients.length; i++)
                   GestureDetector(
                     key: ValueKey('camera-green-bg-$i'),
-                    onTap: () => setState(
-                      () => _greenBg = GreenBackground(gradient: i),
-                    ),
+                    onTap: () =>
+                        setState(() => _greenBg = GreenBackground(gradient: i)),
                     child: Container(
                       width: 40,
                       height: 40,
@@ -1357,8 +1382,7 @@ class _CameraScreenState extends State<CameraScreen>
                         shape: BoxShape.circle,
                         gradient: GreenBackground(gradient: i).linear,
                         border: Border.all(
-                          color:
-                              _greenBg.file == null && _greenBg.gradient == i
+                          color: _greenBg.file == null && _greenBg.gradient == i
                               ? AppColors.lime
                               : Colors.white54,
                           width: _greenBg.file == null && _greenBg.gradient == i
@@ -1390,15 +1414,55 @@ class _CameraScreenState extends State<CameraScreen>
               ),
               _fxItem(
                 key: const ValueKey('camera-fx-green'),
-                label: 'Green screen',
+                label: kBgEffectNames['green']!,
                 on: _green,
-                onTap: _toggleGreen,
-                child: Opacity(
-                  opacity: _video ? 0.5 : 1,
-                  child: const ColoredBox(
-                    color: Color(0xFF1FA34A),
-                    child: Icon(Icons.person_outline, size: 26),
+                onTap: () => _pickBg('green'),
+                child: const ColoredBox(
+                  color: Color(0xFF1FA34A),
+                  child: Icon(Icons.person_outline, size: 26),
+                ),
+              ),
+              _fxItem(
+                key: const ValueKey('camera-fx-bg-blur'),
+                label: kBgEffectNames['blur']!,
+                on: _bg == 'blur',
+                onTap: () => _pickBg('blur'),
+                child: const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      colors: [Color(0xFF9FB7C9), Color(0xFF3B5166)],
+                    ),
                   ),
+                  child: Icon(Icons.blur_on, size: 26),
+                ),
+              ),
+              _fxItem(
+                key: const ValueKey('camera-fx-bg-mono'),
+                label: kBgEffectNames['mono']!,
+                on: _bg == 'mono',
+                onTap: () => _pickBg('mono'),
+                child: const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Color(0xFF8A8A8A), Color(0xFF2E2E2E)],
+                    ),
+                  ),
+                  child: Icon(Icons.person, size: 26, color: Color(0xFFFF4D6D)),
+                ),
+              ),
+              _fxItem(
+                key: const ValueKey('camera-fx-bg-spot'),
+                label: kBgEffectNames['spot']!,
+                on: _bg == 'spot',
+                onTap: () => _pickBg('spot'),
+                child: const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      colors: [Color(0xFFFFF3C4), Color(0xFF0B0B0B)],
+                      stops: [0.15, 0.85],
+                    ),
+                  ),
+                  child: Icon(Icons.person, size: 26, color: Colors.black87),
                 ),
               ),
               for (final e in kFaceEffects)

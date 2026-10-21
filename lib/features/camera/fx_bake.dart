@@ -55,6 +55,52 @@ class GreenBackdrop extends StatelessWidget {
   }
 }
 
+/// Background effects: what each one is called on screen.
+const Map<String, String> kBgEffectNames = {
+  'green': 'Green screen',
+  'blur': 'Blur',
+  'mono': 'Color pop',
+  'spot': 'Spotlight',
+};
+
+/// Colour change for "Color pop" (black and white behind you).
+const ColorFilter kMonoFilter = ColorFilter.matrix(<double>[
+  0.299, 0.587, 0.114, 0, 0, //
+  0.299, 0.587, 0.114, 0, 0, //
+  0.299, 0.587, 0.114, 0, 0, //
+  0, 0, 0, 1, 0, //
+]);
+
+/// "Spotlight": dark behind you.
+const ColorFilter kSpotFilter = ColorFilter.matrix(<double>[
+  0.22, 0, 0, 0, 0, //
+  0, 0.22, 0, 0, 0, //
+  0, 0, 0.22, 0, 0, //
+  0, 0, 0, 1, 0, //
+]);
+
+/// The green screen background as a picture file (for videos). A photo
+/// is used as it is; a colour is drawn into a small PNG.
+Future<String> greenBackgroundFile(GreenBackground bg) async {
+  final f = bg.file;
+  if (f != null) return f.path;
+  const size = Size(540, 960);
+  final rec = ui.PictureRecorder();
+  final canvas = Canvas(rec, Offset.zero & size);
+  canvas.drawRect(
+    Offset.zero & size,
+    Paint()..shader = bg.linear.createShader(Offset.zero & size),
+  );
+  final image = await rec.endRecording().toImage(540, 960);
+  final data = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  if (data == null) throw const VisionException("Couldn't make the background");
+  final dir = await getTemporaryDirectory();
+  final out = File('${dir.path}/fx_bg_${bg.gradient}.png');
+  await out.writeAsBytes(data.buffer.asUint8List(), flush: true);
+  return out.path;
+}
+
 /// Mask bytes (255 = person) -> a picture whose see-through parts are the
 /// background.
 Future<ui.Image> maskToImage(Uint8List mask, int w, int h) {
@@ -76,8 +122,11 @@ Float64List coverMatrix(Size src, Size dst) {
   final s = math.max(dst.width / src.width, dst.height / src.height);
   final dx = (dst.width - src.width * s) / 2;
   final dy = (dst.height - src.height * s) / 2;
-  return (Matrix4.diagonal3Values(s, s, 1)..setTranslationRaw(dx, dy, 0))
-      .storage;
+  return (Matrix4.diagonal3Values(
+    s,
+    s,
+    1,
+  )..setTranslationRaw(dx, dy, 0)).storage;
 }
 
 Rect coverRect(Size src, Rect dst) {
@@ -105,20 +154,22 @@ class BakeResult {
   /// Faces that got the effect.
   final int faces;
 
-  /// The green screen worked (a person was found).
+  /// The background effect worked (a person was found).
   final bool cutOut;
 }
 
-/// Puts the face effect / green screen INTO a photo (a new JPEG).
+/// Puts the face effect / background effect ([bg], see [kBgEffects])
+/// INTO a photo (a new JPEG).
 Future<BakeResult> bakeEffects(
   String path, {
   required String effect,
-  GreenBackground? green,
+  String bg = '',
+  GreenBackground green = const GreenBackground(),
   VisionService? vision,
 }) async {
   final v = vision ?? VisionService.instance;
   final face = isFaceEffect(effect);
-  final r = await v.photo(path, face: face, segment: green != null);
+  final r = await v.photo(path, face: face, segment: bg.isNotEmpty);
   final src = r.path.isNotEmpty ? r.path : path;
   final photo = await _decode(await File(src).readAsBytes());
   final w = photo.width, h = photo.height;
@@ -127,10 +178,30 @@ Future<BakeResult> bakeEffects(
   final canvas = Canvas(rec, full);
   final mask = r.mask;
   var cutOut = false;
-  if (green != null && mask != null) {
+  if (bg.isNotEmpty && mask != null) {
     cutOut = true;
     final bgFile = green.file;
-    if (bgFile != null) {
+    if (bg == 'blur') {
+      final sigma = math.max(w, h) / 70;
+      canvas.saveLayer(full, Paint());
+      canvas.drawImage(
+        photo,
+        Offset.zero,
+        Paint()
+          ..imageFilter = ui.ImageFilter.blur(
+            sigmaX: sigma,
+            sigmaY: sigma,
+            tileMode: TileMode.clamp,
+          ),
+      );
+      canvas.restore();
+    } else if (bg == 'mono' || bg == 'spot') {
+      canvas.drawImage(
+        photo,
+        Offset.zero,
+        Paint()..colorFilter = bg == 'mono' ? kMonoFilter : kSpotFilter,
+      );
+    } else if (bgFile != null) {
       final bg = await _decode(await bgFile.readAsBytes());
       final s = Size(bg.width.toDouble(), bg.height.toDouble());
       canvas.drawImageRect(

@@ -66,12 +66,17 @@ export function trackOut(t) {
   };
 }
 
-/** Tracks the app can use (premium "preview only" songs left out). */
+/**
+ * Tracks for the app. v0.0.1 fix 2: Epidemic says "isPreviewOnly" is NOT
+ * a reliable download check for full-catalogue API keys (it is true on
+ * songs you CAN download), and leaving those out made the list empty.
+ * Now every song is shown; songs not marked preview-only come first.
+ */
 export function tracksOut(list) {
-  return (Array.isArray(list) ? list : [])
-    .filter((t) => t && t.isPreviewOnly !== true)
-    .map(trackOut)
-    .filter(Boolean);
+  const all = (Array.isArray(list) ? list : []).filter((t) => t && typeof t === 'object');
+  const sure = all.filter((t) => t.isPreviewOnly !== true);
+  const rest = all.filter((t) => t.isPreviewOnly === true);
+  return [...sure, ...rest].map(trackOut).filter(Boolean);
 }
 
 async function esFetch(path, { key, fetchFn, uid, raw = false }) {
@@ -96,6 +101,12 @@ async function esFetch(path, { key, fetchFn, uid, raw = false }) {
     } catch { /* no JSON */ }
     console.warn('epidemic', r.status, path.split('?')[0], msg);
     if (r.status === 401) throw new HttpError(503, 'EPIDEMIC_API_KEY is wrong');
+    // plan limit (Free API plan: 50 downloads) -> a clear message; a short
+    // "too many requests" 429 is not the plan limit
+    if ((r.status === 403 && /limit|quota|exceed/i.test(msg)) ||
+        (r.status === 429 && /download|quota|month|plan/i.test(msg))) {
+      throw new HttpError(429, 'New songs are paused for now (song limit reached). Try again later.');
+    }
     if (r.status === 403) throw new HttpError(403, "This song can't be used here. Pick another one.");
     if (r.status === 404) throw new HttpError(404, 'Song not found');
     if (r.status === 429) throw new HttpError(429, 'Too many songs right now. Try again in a minute.');
@@ -204,6 +215,7 @@ export async function esDiagnose({ key = env('EPIDEMIC_API_KEY'), fetchFn = fetc
     const list = Array.isArray(top?.tracks) ? top.tracks : [];
     out.popular = list.length;
     out.popularUsable = tracksOut(list).length;
+    out.previewFlagged = list.filter((t) => t?.isPreviewOnly === true).length;
   } catch (e) {
     out.popularError = e?.message || String(e);
   }

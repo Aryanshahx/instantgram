@@ -93,8 +93,8 @@ flutter {
 dependencies {
     // v0.0.1: flutter_local_notifications needs it
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-    // v0.0.1: face effects + green screen (Google ML Kit, models download on first use)
+    // v0.0.1: face effects (ML Kit) + fast green screen (TensorFlow Lite), from Google Play services
     implementation("com.google.android.gms:play-services-mlkit-face-detection:17.1.0")
-    implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
+    implementation("com.google.android.gms:play-services-tflite-java:16.5.0")
     implementation("com.google.android.gms:play-services-base:18.11.1")
 }
