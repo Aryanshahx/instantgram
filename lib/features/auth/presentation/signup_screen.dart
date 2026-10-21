@@ -13,6 +13,7 @@ import '../../../shared/widgets/ig_buttons.dart';
 import '../../../shared/widgets/ig_logo.dart';
 import '../../../shared/widgets/ig_text_field.dart';
 import '../data/auth_service.dart';
+import 'email_code_screen.dart';
 import '../../../shared/widgets/hi_text_check.dart';
 import '../../../shared/widgets/username_status.dart';
 
@@ -46,6 +47,12 @@ class _SignupScreenState extends State<SignupScreen> {
   late String _lang = widget.language;
   String _country = '';
   bool _loading = false;
+
+  /// v0.0.1: a checked email code (used again if only the account step
+  /// failed, e.g. username just taken).
+  String? _otpEmail;
+  String? _otpToken;
+  DateTime? _otpAt;
 
   @override
   void initState() {
@@ -111,28 +118,74 @@ class _SignupScreenState extends State<SignupScreen> {
     // v0.18 Hyper Intelligence: no strong abuse in name / username
     if (!await hiTextOk(context, [_nameCtrl.text, _userCtrl.text])) return;
     if (!mounted) return;
-    setState(() => _loading = true);
-    try {
-      await AuthService.instance.signUp(
-        name: _nameCtrl.text,
-        username: _userCtrl.text,
-        email: _emailCtrl.text,
-        password: _passCtrl.text,
-        birthDate: _dob!,
-        language: _lang,
-        country: _country,
-      );
-      AppSettings.instance.setLanguage(_lang);
-      if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
-    } on AuthFailure catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(SnackBar(content: Text(e.message)));
+    final email = _emailCtrl.text.trim().toLowerCase();
+    final at = _otpAt;
+    final token = _otpToken;
+    // v0.0.1: same email checked a moment ago -> no new code
+    if (token != null &&
+        _otpEmail == email &&
+        at != null &&
+        DateTime.now().difference(at) < const Duration(minutes: 25)) {
+      setState(() => _loading = true);
+      try {
+        await _create(token);
+      } on AuthFailure catch (e) {
+        _snack(e.message);
+      } finally {
+        if (mounted) setState(() => _loading = false);
       }
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      return;
     }
+    setState(() => _loading = true);
+    int wait;
+    try {
+      await AuthService.instance.checkUsername(_userCtrl.text);
+      wait = await AuthService.instance.sendSignupCode(email);
+    } on AuthFailure catch (e) {
+      _snack(e.message);
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _loading = false);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => EmailCodeScreen(
+          email: email,
+          resendIn: wait,
+          onVerified: (t) async {
+            _otpEmail = email;
+            _otpToken = t;
+            _otpAt = DateTime.now();
+            await _create(t);
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Makes the account with a checked email code.
+  Future<void> _create(String otpToken) async {
+    await AuthService.instance.signUp(
+      name: _nameCtrl.text,
+      username: _userCtrl.text,
+      email: _emailCtrl.text.trim().toLowerCase(),
+      password: _passCtrl.text,
+      birthDate: _dob!,
+      language: _lang,
+      country: _country,
+      otpToken: otpToken,
+    );
+    _otpToken = null;
+    AppSettings.instance.setLanguage(_lang);
+    if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+  }
+
+  void _snack(String m) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(m)));
   }
 
   @override

@@ -11,6 +11,7 @@ import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/avatar.dart';
+import '../../../shared/widgets/face_effects.dart';
 import '../../../shared/widgets/hi_blur.dart';
 import '../../../shared/widgets/media_view.dart' show CutSkipper, MusicChip;
 import '../../../shared/widgets/net_image.dart';
@@ -54,6 +55,8 @@ class StoryViewerScreen extends StatefulWidget {
   static Future<bool> Function(String storyId)? debugMyLike;
   @visibleForTesting
   static Stream<List<StoryView>> Function(String storyId)? debugViews;
+  @visibleForTesting
+  static Future<void> Function(Story st)? debugDelete;
 
   @override
   State<StoryViewerScreen> createState() => _StoryViewerScreenState();
@@ -63,8 +66,13 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     with SingleTickerProviderStateMixin {
   static const _photoTime = Duration(seconds: 5);
 
-  late int _g = widget.initialGroup.clamp(0, widget.groups.length - 1);
-  late int _s = widget.recordViews ? _firstUnseen(widget.groups[_g]) : 0;
+  /// v0.0.1: own copy, so a deleted moment leaves the viewer at once.
+  late final List<StoryGroup> _groups = [
+    for (final g in widget.groups) StoryGroup(g.authorId, [...g.stories]),
+  ];
+  late int _g = widget.initialGroup.clamp(0, _groups.length - 1);
+  late int _s = widget.recordViews ? _firstUnseen(_groups[_g]) : 0;
+  bool _deleting = false;
   late final AnimationController _timer =
       AnimationController(vsync: this, duration: _photoTime)
         ..addStatusListener((st) {
@@ -80,7 +88,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
   bool _hiBlocked = false;
   int _loadId = 0;
 
-  StoryGroup get _group => widget.groups[_g];
+  StoryGroup get _group => _groups[_g];
   Story get _story => _group.stories[_s];
 
   String get _me => StoryViewerScreen.debugMe ?? UserRepository.instance.myUid;
@@ -274,8 +282,8 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     Story? next;
     if (_s < _group.stories.length - 1) {
       next = _group.stories[_s + 1];
-    } else if (_g < widget.groups.length - 1) {
-      final g = widget.groups[_g + 1];
+    } else if (_g < _groups.length - 1) {
+      final g = _groups[_g + 1];
       next = g.stories[_firstUnseen(g)];
     }
     if (next == null) return;
@@ -310,7 +318,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     if (_s < _group.stories.length - 1) {
       setState(() => _s++);
       _show();
-    } else if (_g < widget.groups.length - 1) {
+    } else if (_g < _groups.length - 1) {
       setState(() {
         _g++;
         _s = widget.recordViews ? _firstUnseen(_group) : 0;
@@ -377,13 +385,93 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
         ],
       ),
     );
-    if (ok == true) {
-      await StoryRepository.instance.delete(_story);
-      if (mounted) Navigator.of(context).maybePop();
-    } else {
+    if (!mounted) return;
+    if (ok != true) {
       _resume();
+      return;
     }
+    final st = _story;
+    setState(() => _deleting = true);
+    try {
+      await (StoryViewerScreen.debugDelete ?? StoryRepository.instance.delete)(
+        st,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _deleting = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text("Couldn't delete. Check your internet."),
+          ),
+        );
+      _resume();
+      return;
+    }
+    if (!mounted) return;
+    // v0.0.1: stay in the viewer and show the next moment
+    final list = _group.stories;
+    final i = list.indexWhere((x) => x.id == st.id);
+    final atEnd = i < 0 || i == list.length - 1;
+    if (atEnd && _g >= _groups.length - 1) {
+      // nothing after it: close (the list is not changed while closing)
+      _deleting = false;
+      Navigator.of(context).maybePop();
+      return;
+    }
+    list.removeAt(i);
+    if (list.isEmpty) {
+      _groups.removeAt(_g); // the next person moves into this place
+      _s = widget.recordViews ? _firstUnseen(_group) : 0;
+    } else if (_s >= list.length) {
+      // it was the last one of this person: go on to the next person
+      _g++;
+      _s = widget.recordViews ? _firstUnseen(_group) : 0;
+    }
+    setState(() => _deleting = false);
+    _show();
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Moment deleted'),
+          duration: Duration(seconds: 2),
+        ),
+      );
   }
+
+  /// v0.0.1: round, easy to hit buttons (a near miss no longer skips).
+  Widget _roundButton({
+    required Key key,
+    required IconData icon,
+    required String tip,
+    required VoidCallback? onTap,
+    Widget? child,
+  }) => Tooltip(
+    message: tip,
+    child: GestureDetector(
+      key: key,
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        width: 44,
+        height: 44,
+        child: Center(
+          child: Container(
+            width: 34,
+            height: 34,
+            decoration: const BoxDecoration(
+              color: Colors.black38,
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: child ?? Icon(icon, size: 21, color: Colors.white),
+          ),
+        ),
+      ),
+    ),
+  );
 
   Widget _media() {
     final st = _story;
@@ -413,6 +501,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
           fit: StackFit.expand,
           children: [
             applyMatrix(st.edits.filter, VideoPlayer(c)),
+            // v0.0.1 effects: face effect from the camera
+            if (st.edits.face case final fx?)
+              FaceFxLayer(fx: fx, controller: c),
             // v0.12: texts / stickers
             VideoOverlayLayer(overlays: st.edits.overlays, controller: c),
           ],
@@ -429,8 +520,11 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
       backgroundColor: Colors.black,
       body: GestureDetector(
         onTapUp: (d) {
-          final w = MediaQuery.of(context).size.width;
-          d.globalPosition.dx < w / 3 ? _prev() : _next();
+          if (_deleting) return;
+          final w =
+              (context.findRenderObject() as RenderBox?)?.size.width ??
+              MediaQuery.of(context).size.width;
+          d.localPosition.dx < w / 3 ? _prev() : _next();
         },
         onLongPressStart: (_) => _pause(),
         onLongPressEnd: (_) => _resume(),
@@ -554,13 +648,27 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                         ],
                         const Spacer(),
                         if (mine && live)
-                          IconButton(
-                            onPressed: _delete,
-                            icon: const Icon(Icons.delete_outline),
+                          _roundButton(
+                            key: const ValueKey('story-delete'),
+                            icon: Icons.delete_outline,
+                            tip: 'Delete',
+                            onTap: _deleting ? null : _delete,
+                            child: _deleting
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : null,
                           ),
-                        IconButton(
-                          onPressed: () => Navigator.of(context).maybePop(),
-                          icon: const Icon(Icons.close),
+                        _roundButton(
+                          key: const ValueKey('story-close'),
+                          icon: Icons.close,
+                          tip: 'Close',
+                          onTap: () => Navigator.of(context).maybePop(),
                         ),
                       ],
                     ),

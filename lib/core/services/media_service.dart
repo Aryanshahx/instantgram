@@ -12,6 +12,7 @@ import 'package:image_picker_platform_interface/image_picker_platform_interface.
 import '../theme/app_colors.dart';
 import 'api_client.dart';
 import 'uploader.dart';
+import '../../shared/models/post.dart' show FaceFx;
 
 /// What the file is used for (decides the folder in Tigris + size limits).
 /// What a file is for (folder on the server). v0.9: chat photos / GIFs
@@ -110,9 +111,13 @@ class PickedMedia {
     required this.isVideo,
     this.filterPreset = 0,
     this.muted = false,
+    this.face,
   });
   final File file;
   final bool isVideo;
+
+  /// Camera: face effect filmed on a video (drawn while playing).
+  final FaceFx? face;
 
   /// Camera: the filter chosen while filming (the editor starts with it).
   final int filterPreset;

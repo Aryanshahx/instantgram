@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:clock/clock.dart';
@@ -8,10 +9,14 @@ import 'package:flutter/services.dart';
 
 import '../../core/services/media_service.dart';
 import '../../core/services/music_player.dart';
+import '../../core/services/vision_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../shared/models/post.dart' show FaceFx;
+import '../../shared/widgets/face_effects.dart';
 import '../editor/edit_models.dart';
 import '../editor/filters.dart';
 import '../music/presentation/music_picker_sheet.dart';
+import 'fx_bake.dart';
 
 /// What our camera gives back: the photo / video (or gallery picks) and
 /// the song chosen in the camera.
@@ -77,6 +82,23 @@ class _CameraScreenState extends State<CameraScreen>
   Timer? _filterNameTimer;
   double _swipeDx = 0;
 
+  // v0.0.1 effects: face effects + green screen (Google ML Kit, the
+  // models download the first time you open Effects)
+  String _fx = '';
+  bool _green = false;
+  GreenBackground _greenBg = const GreenBackground();
+  bool _showFx = false;
+  bool _fxLoading = false;
+  bool _frameBusy = false;
+  int _frameAt = 0;
+  List<FaceBox> _faces = const [];
+  Size _frameSize = Size.zero;
+  ui.Image? _mask;
+  bool _applying = false;
+  bool _fxCancelled = false;
+
+  bool get _fxOn => _fx.isNotEmpty || _green;
+
   // controls
   FlashMode _flash = FlashMode.off;
   bool _torch = false;
@@ -126,6 +148,7 @@ class _CameraScreenState extends State<CameraScreen>
     _focusTimer?.cancel();
     MusicPlayer.instance.stop(_kMusic);
     _ctrl?.dispose();
+    _mask?.dispose();
     super.dispose();
   }
 
@@ -141,6 +164,7 @@ class _CameraScreenState extends State<CameraScreen>
       if (c != null) {
         setState(() => _ctrl = null);
         c.dispose();
+        _clearLive();
       }
     } else if (state == AppLifecycleState.resumed) {
       if (_ctrl == null && !_starting && _error == null && mounted) _init();
@@ -184,6 +208,8 @@ class _CameraScreenState extends State<CameraScreen>
         ResolutionPreset.veryHigh,
         enableAudio: sound,
         fps: 30,
+        // v0.0.1 effects: frames for face effects / green screen
+        imageFormatGroup: ImageFormatGroup.nv21,
       );
       try {
         await c.initialize();
@@ -225,6 +251,151 @@ class _CameraScreenState extends State<CameraScreen>
       _maxZoom = max < min ? min : (max > 10 ? 10 : max);
       _zoom = min;
     });
+    unawaited(_syncStream());
+  }
+
+  // ------------------------------------------------------------ effects
+
+  /// Camera frames go to ML Kit only while an effect is on.
+  Future<void> _syncStream() async {
+    final c = _ctrl;
+    if (c == null || !c.value.isInitialized || _recording) return;
+    try {
+      if (_fxOn && !c.value.isStreamingImages) {
+        await c.startImageStream(_onFrame);
+      } else if (!_fxOn && c.value.isStreamingImages) {
+        await c.stopImageStream();
+      }
+    } catch (_) {}
+    if (!_fxOn) _clearLive();
+  }
+
+  void _clearLive() {
+    if (_faces.isEmpty && _mask == null) return;
+    final m = _mask;
+    if (mounted) {
+      setState(() {
+        _faces = const [];
+        _mask = null;
+      });
+    }
+    m?.dispose();
+  }
+
+  void _onFrame(CameraImage img) {
+    if (_frameBusy || !mounted || !_fxOn || img.planes.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _frameAt < (_green ? 110 : 60)) return;
+    _frameAt = now;
+    _frameBusy = true;
+    _analyze(img).whenComplete(() => _frameBusy = false);
+  }
+
+  Future<void> _analyze(CameraImage img) async {
+    final p = img.planes.first;
+    final small = shrinkNv21(
+      p.bytes,
+      img.width,
+      img.height,
+      stride: p.bytesPerRow,
+      target: _green ? 256 : 240,
+    );
+    if (small == null || _cams.isEmpty) return;
+    final cam = _cams[_camIndex];
+    final green = _green;
+    try {
+      final r = await VisionService.instance.analyze(
+        small,
+        rotation: frameRotation(cam.sensorOrientation, front: _front),
+        mirror: _front,
+        face: _fx.isNotEmpty,
+        segment: green,
+      );
+      if (r == null || !mounted) return;
+      final mask = r.mask;
+      ui.Image? m;
+      if (green && mask != null) {
+        m = await maskToImage(mask, r.maskWidth, r.maskHeight);
+      }
+      if (!mounted || !_fxOn) {
+        m?.dispose();
+        return;
+      }
+      final old = m != null ? _mask : null;
+      setState(() {
+        _faces = r.faces;
+        _frameSize = Size(r.width.toDouble(), r.height.toDouble());
+        if (m != null) _mask = m;
+      });
+      old?.dispose();
+    } catch (_) {}
+  }
+
+  /// Downloads the effect models (only the first time).
+  Future<bool> _ensureModels({bool segment = false}) async {
+    final v = VisionService.instance;
+    if (await v.isReady(segment: segment)) return true;
+    if (!mounted) return false;
+    setState(() => _fxLoading = true);
+    try {
+      await v.install(segment: segment);
+      return true;
+    } on VisionException catch (e) {
+      _snack(e.message);
+      return false;
+    } catch (_) {
+      _snack("Couldn't download effects. Try again.");
+      return false;
+    } finally {
+      if (mounted) setState(() => _fxLoading = false);
+    }
+  }
+
+  Future<void> _toggleEffects() async {
+    if (_showFx) {
+      setState(() => _showFx = false);
+      return;
+    }
+    if (_fxLoading) return;
+    if (!await _ensureModels() || !mounted) return;
+    setState(() {
+      _showFx = true;
+      _showFilters = false;
+    });
+  }
+
+  void _pickFx(String id) {
+    setState(() {
+      _fx = id;
+      if (id.isEmpty) _green = false;
+    });
+    unawaited(_syncStream());
+  }
+
+  Future<void> _toggleGreen() async {
+    if (_green) {
+      setState(() => _green = false);
+      unawaited(_syncStream());
+      return;
+    }
+    if (_video) {
+      _snack('Green screen works for photos. Switch to Photo.');
+      return;
+    }
+    if (!await _ensureModels(segment: true) || !mounted) return;
+    setState(() => _green = true);
+    unawaited(_syncStream());
+  }
+
+  Future<void> _pickGreenPhoto() async {
+    final m = await MediaService.instance.pickGallery(context);
+    if (!mounted) return;
+    final photo = m.where((x) => !x.isVideo).firstOrNull;
+    if (photo == null) {
+      if (m.isNotEmpty) _snack('Pick a photo for the background');
+      return;
+    }
+    setState(() => _greenBg = GreenBackground(file: photo.file));
   }
 
   String _why(CameraException e) {
@@ -322,6 +493,11 @@ class _CameraScreenState extends State<CameraScreen>
 
   Future<void> _setMode(bool video) async {
     if (video == _video || _recording || _countdown != null) return;
+    if (video && _green) {
+      _snack('Green screen is off: it works for photos.');
+      setState(() => _green = false);
+      unawaited(_syncStream());
+    }
     setState(() => _video = video);
     final c = _ctrl;
     if (c == null) return;
@@ -424,14 +600,37 @@ class _CameraScreenState extends State<CameraScreen>
     try {
       final x = await c.takePicture();
       if (!mounted) return;
+      var file = File(x.path);
+      // v0.0.1 effects: the face effect / green screen goes into the photo
+      if (_fxOn) {
+        setState(() => _applying = true);
+        try {
+          final r = await bakeEffects(
+            x.path,
+            effect: _fx,
+            green: _green ? _greenBg : null,
+          );
+          file = r.file;
+          if (_fx.isNotEmpty && r.faces == 0) _snack('No face found');
+          if (_green && !r.cutOut) _snack('No person found for the green screen');
+        } catch (_) {
+          _snack("Couldn't add the effect");
+        }
+        if (!mounted) return;
+      }
       Navigator.of(context).pop(
         CameraResult([
-          PickedMedia(File(x.path), isVideo: false, filterPreset: _filter),
+          PickedMedia(file, isVideo: false, filterPreset: _filter),
         ], audio: _audio),
       );
     } catch (_) {
       _snack("Couldn't take the photo. Try again.");
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _applying = false;
+        });
+      }
     }
   }
 
@@ -439,12 +638,25 @@ class _CameraScreenState extends State<CameraScreen>
     final c = _ctrl;
     if (c == null || _busy || _recording) return;
     setState(() => _busy = true);
+    // v0.0.1 effects: the face effect stays on screen while filming
+    final live = _fx.isNotEmpty;
+    if (c.value.isStreamingImages) {
+      try {
+        await c.stopImageStream();
+      } catch (_) {}
+    }
     try {
-      await c.startVideoRecording();
+      try {
+        await c.startVideoRecording(onAvailable: live ? _onFrame : null);
+      } catch (_) {
+        if (!live) rethrow;
+        await c.startVideoRecording(); // this phone: no frames while filming
+      }
     } catch (_) {
       _holding = false;
       _snack("Couldn't start filming. Try again.");
       if (mounted) setState(() => _busy = false);
+      unawaited(_syncStream());
       return;
     }
     if (!mounted) return;
@@ -462,6 +674,7 @@ class _CameraScreenState extends State<CameraScreen>
       _paused = false;
       _busy = false;
       _showFilters = false;
+      _showFx = false;
     });
   }
 
@@ -536,6 +749,23 @@ class _CameraScreenState extends State<CameraScreen>
     try {
       final x = await c.stopVideoRecording();
       if (!mounted) return;
+      // v0.0.1 effects: find the face in the video (drawn while playing)
+      FaceFx? face;
+      if (_fx.isNotEmpty) {
+        _fxCancelled = false;
+        setState(() => _applying = true);
+        try {
+          final t = await VisionService.instance.videoTrack(x.path);
+          if (t != null) {
+            face = FaceFx(effect: _fx, track: t);
+          } else if (!_fxCancelled) {
+            _snack('No face found for the effect');
+          }
+        } catch (_) {
+          _snack("Couldn't add the effect");
+        }
+        if (!mounted) return;
+      }
       Navigator.of(context).pop(
         CameraResult([
           PickedMedia(
@@ -543,6 +773,7 @@ class _CameraScreenState extends State<CameraScreen>
             isVideo: true,
             filterPreset: _filter,
             muted: _audio != null,
+            face: face,
           ),
         ], audio: _audio),
       );
@@ -574,7 +805,9 @@ class _CameraScreenState extends State<CameraScreen>
         _recording = false;
         _paused = false;
         _busy = false;
+        _applying = false;
       });
+      unawaited(_syncStream());
     }
   }
 
@@ -722,6 +955,15 @@ class _CameraScreenState extends State<CameraScreen>
                   bottom: 10,
                   child: _filterStrip(),
                 ),
+              if (_showFx && !_recording)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 10,
+                  child: _fxStrip(),
+                ),
+              if (_fxLoading) Positioned.fill(child: _fxDownloading()),
+              if (_applying) Positioned.fill(child: _fxApplyingView()),
               if (_focusAt case final f?)
                 Positioned(
                   left: f.dx - 32,
@@ -780,7 +1022,7 @@ class _CameraScreenState extends State<CameraScreen>
                 Positioned(
                   left: 0,
                   right: 0,
-                  bottom: _showFilters ? 96 : 14,
+                  bottom: _showFilters || _showFx ? (_green ? 150 : 96) : 14,
                   child: Center(
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -887,10 +1129,293 @@ class _CameraScreenState extends State<CameraScreen>
           child: SizedBox(
             width: 100,
             height: 100 * ratio,
-            child: CameraPreview(c),
+            child: _liveLayers(c, Size(100, 100 * ratio)),
           ),
         ),
       ),
+    );
+  }
+
+  /// The camera picture + green screen + face effect (same box).
+  Widget _liveLayers(CameraController c, Size box) {
+    Widget cam = CameraPreview(c);
+    if (_green) {
+      final mask = _mask;
+      cam = Stack(
+        key: const ValueKey('camera-green'),
+        fit: StackFit.expand,
+        children: [
+          GreenBackdrop(background: _greenBg),
+          if (mask != null)
+            ShaderMask(
+              blendMode: BlendMode.dstIn,
+              shaderCallback: (r) => ImageShader(
+                mask,
+                TileMode.clamp,
+                TileMode.clamp,
+                coverMatrix(
+                  Size(mask.width.toDouble(), mask.height.toDouble()),
+                  r.size,
+                ),
+              ),
+              child: cam,
+            )
+          else
+            Opacity(opacity: 0.35, child: cam),
+        ],
+      );
+    }
+    if (_fx.isNotEmpty && _faces.isNotEmpty && !_frameSize.isEmpty) {
+      final faces = [for (final f in _faces) f.coverInto(_frameSize, box)];
+      cam = Stack(
+        fit: StackFit.expand,
+        children: [
+          cam,
+          IgnorePointer(
+            child: CustomPaint(
+              key: const ValueKey('camera-face-fx'),
+              painter: FaceFxPainter(_fx, faces),
+            ),
+          ),
+        ],
+      );
+    }
+    return cam;
+  }
+
+  Widget _fxDownloading() {
+    return ColoredBox(
+      key: const ValueKey('camera-fx-downloading'),
+      color: Colors.black54,
+      child: Center(
+        child: ValueListenableBuilder<int?>(
+          valueListenable: VisionService.instance.progress,
+          builder: (context, p, _) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 46,
+                height: 46,
+                child: CircularProgressIndicator(
+                  color: AppColors.lime,
+                  value: p == null || p <= 0 ? null : p / 100,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                p == null || p <= 0
+                    ? 'Getting effects ready…'
+                    : 'Downloading effects… $p%',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Only the first time',
+                style: TextStyle(fontSize: 12, color: Colors.white70),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _fxApplyingView() {
+    return ColoredBox(
+      key: const ValueKey('camera-fx-applying'),
+      color: Colors.black54,
+      child: Center(
+        child: ValueListenableBuilder<int?>(
+          valueListenable: VisionService.instance.progress,
+          builder: (context, p, _) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 40,
+                height: 40,
+                child: CircularProgressIndicator(color: AppColors.lime),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                p == null ? 'Adding effect…' : 'Adding effect… $p%',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              if (_video && p != null)
+                TextButton(
+                  key: const ValueKey('camera-fx-skip'),
+                  onPressed: () {
+                    _fxCancelled = true;
+                    VisionService.instance.cancelVideo();
+                  },
+                  child: const Text(
+                    'Skip effect',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _fxItem({
+    required Key key,
+    required String label,
+    required bool on,
+    required VoidCallback onTap,
+    required Widget child,
+  }) {
+    return GestureDetector(
+      key: key,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 5),
+        child: Column(
+          children: [
+            Container(
+              width: 54,
+              height: 54,
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: on ? AppColors.lime : Colors.white54,
+                  width: on ? 2.5 : 1,
+                ),
+              ),
+              child: ClipOval(child: child),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: on ? FontWeight.w800 : FontWeight.w500,
+                shadows: const [Shadow(blurRadius: 6)],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Effects: none, green screen, face effects (+ green screen backgrounds).
+  Widget _fxStrip() {
+    const face = DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF3A3D4A), Color(0xFF1C1E26)],
+        ),
+      ),
+    );
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_green)
+          SizedBox(
+            height: 48,
+            child: ListView(
+              key: const ValueKey('camera-green-bgs'),
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              children: [
+                GestureDetector(
+                  key: const ValueKey('camera-green-photo'),
+                  onTap: _pickGreenPhoto,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black45,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: _greenBg.file != null
+                            ? AppColors.lime
+                            : Colors.white54,
+                        width: _greenBg.file != null ? 2.5 : 1,
+                      ),
+                    ),
+                    child: const Icon(Icons.add_photo_alternate_outlined, size: 20),
+                  ),
+                ),
+                for (var i = 0; i < kGreenGradients.length; i++)
+                  GestureDetector(
+                    key: ValueKey('camera-green-bg-$i'),
+                    onTap: () => setState(
+                      () => _greenBg = GreenBackground(gradient: i),
+                    ),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: GreenBackground(gradient: i).linear,
+                        border: Border.all(
+                          color:
+                              _greenBg.file == null && _greenBg.gradient == i
+                              ? AppColors.lime
+                              : Colors.white54,
+                          width: _greenBg.file == null && _greenBg.gradient == i
+                              ? 2.5
+                              : 1,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        SizedBox(
+          height: 84,
+          child: ListView(
+            key: const ValueKey('camera-fx-strip'),
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              _fxItem(
+                key: const ValueKey('camera-fx-none'),
+                label: 'None',
+                on: !_fxOn,
+                onTap: () => _pickFx(''),
+                child: const ColoredBox(
+                  color: Colors.black45,
+                  child: Icon(Icons.block, size: 22),
+                ),
+              ),
+              _fxItem(
+                key: const ValueKey('camera-fx-green'),
+                label: 'Green screen',
+                on: _green,
+                onTap: _toggleGreen,
+                child: Opacity(
+                  opacity: _video ? 0.5 : 1,
+                  child: const ColoredBox(
+                    color: Color(0xFF1FA34A),
+                    child: Icon(Icons.person_outline, size: 26),
+                  ),
+                ),
+              ),
+              for (final e in kFaceEffects)
+                _fxItem(
+                  key: ValueKey('camera-fx-${e.id}'),
+                  label: e.name,
+                  on: _fx == e.id,
+                  onTap: () => _pickFx(_fx == e.id ? '' : e.id),
+                  child: CustomPaint(
+                    foregroundPainter: FaceFxPainter(e.id, const [kSampleFace]),
+                    child: face,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -1093,7 +1618,18 @@ class _CameraScreenState extends State<CameraScreen>
           on: _showFilters,
           onTap: _recording
               ? null
-              : () => setState(() => _showFilters = !_showFilters),
+              : () => setState(() {
+                  _showFilters = !_showFilters;
+                  if (_showFilters) _showFx = false;
+                }),
+        ),
+        // v0.0.1 effects: face effects + green screen
+        _tool(
+          key: const ValueKey('camera-effects'),
+          icon: const Icon(Icons.face_retouching_natural),
+          label: 'Effects',
+          on: _showFx || _fxOn,
+          onTap: _recording ? null : _toggleEffects,
         ),
       ],
     );

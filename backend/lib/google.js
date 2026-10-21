@@ -379,6 +379,29 @@ export async function authDelete(sa, uid, fetchFn = fetch) {
   }
 }
 
+/** v0.0.1 Firebase Auth (admin): the account with this email, or null. */
+export async function authLookupEmail(sa, email, fetchFn = fetch) {
+  const j = await gfetch(
+    sa,
+    `https://identitytoolkit.googleapis.com/v1/projects/${sa.project_id}/accounts:lookup`,
+    { method: 'POST', body: JSON.stringify({ email: [email] }) },
+    'auth lookup',
+    fetchFn,
+  );
+  return (j.users || [])[0] || null;
+}
+
+/** v0.0.1 Firebase Auth (admin): mark the email as checked (sign up code). */
+export async function authSetEmailVerified(sa, uid, fetchFn = fetch) {
+  await gfetch(
+    sa,
+    `https://identitytoolkit.googleapis.com/v1/projects/${sa.project_id}/accounts:update`,
+    { method: 'POST', body: JSON.stringify({ localId: uid, emailVerified: true }) },
+    'auth update',
+    fetchFn,
+  );
+}
+
 /** Tests. */
 export function _resetTokenCache() {
   cached = null;

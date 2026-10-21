@@ -7,6 +7,7 @@ import { adminPassword } from '../lib/admin.js';
 import { VERSION } from '../lib/version.js';
 import { moderate } from '../lib/hi.js';
 import { translate } from '../lib/translate.js';
+import { esDiagnose } from '../lib/epidemic.js';
 
 const NEED = ['TIGRIS_ACCESS_KEY_ID', 'TIGRIS_SECRET_ACCESS_KEY', 'TIGRIS_BUCKET', 'FIREBASE_PROJECT_ID'];
 
@@ -46,6 +47,19 @@ export default async function handler(req, res) {
       translation = `server can't reach Google (the phone tries itself): ${e.message}`;
     }
   }
+  // v0.0.1: ?songs=1 -> how many songs the app can show (and why not)
+  let songs = env('EPIDEMIC_API_KEY') ? 'ok (Epidemic Sound)' : 'add EPIDEMIC_API_KEY';
+  if (String(req.url || '').includes('songs=1')) {
+    try {
+      songs = await esDiagnose();
+    } catch (e) {
+      songs = `check failed: ${e.message}`;
+    }
+  }
+  // v0.0.1: email code at sign up (Gmail)
+  const emailCodes = env('GMAIL_USER') && env('GMAIL_APP_PASSWORD')
+    ? `ok (from ${env('GMAIL_USER')})`
+    : 'add GMAIL_USER and GMAIL_APP_PASSWORD (sign up email codes)';
   const missing = NEED.filter((n) => !env(n));
   // Values with spaces / new lines still work (they are cleaned), but show a hint.
   const warnings = [...NEED, 'TIGRIS_ENDPOINT', 'PUBLIC_MEDIA_BASE_URL']
@@ -89,7 +103,8 @@ export default async function handler(req, res) {
           ? `ok via ${env('OPENROUTER_API_KEY') ? 'OpenRouter' : 'Gemini'} (${songLimits().perDay} per person, ${songLimits().cap} for everyone per day)`
           : 'add OPENROUTER_API_KEY or GEMINI_API_KEY (optional, paid)',
         // Epidemic Sound songs for posts, clips and moments
-        songs: env('EPIDEMIC_API_KEY') ? 'ok (Epidemic Sound)' : 'add EPIDEMIC_API_KEY',
+        songs,
+        emailCodes,
         adminLogin: adminPassword() ? 'ok' : process.env.ADMIN_PASSWORD ? 'ADMIN_PASSWORD too short (16+)' : 'add ADMIN_PASSWORD',
       },
     }),

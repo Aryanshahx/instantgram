@@ -14,6 +14,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/errors.dart';
 import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/post.dart';
+import '../../../shared/widgets/face_effects.dart';
 import '../../../shared/widgets/ig_buttons.dart';
 import '../../../shared/widgets/media_links.dart';
 import '../../../shared/widgets/media_view.dart';
@@ -1088,6 +1089,7 @@ class _CoverPickerScreenState extends State<CoverPickerScreen> {
             children: [
               // same as the editor: the video fills its own shape
               applyMatrix(e.filter, VideoPlayer(c)),
+              if (e.face case final fx?) FaceFxLayer(fx: fx, controller: c),
               StillOverlays(
                 key: const ValueKey('cover-overlays'),
                 overlays: e.overlays,

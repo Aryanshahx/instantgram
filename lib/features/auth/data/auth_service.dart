@@ -1,8 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../../core/services/account_family.dart';
+import '../../../core/services/api_client.dart';
 import '../../../core/services/saved_accounts.dart';
 import '../../../shared/models/user_profile.dart';
 import '../../profile/data/user_repository.dart';
@@ -26,6 +28,71 @@ class AuthService {
   static final AuthService instance = AuthService._();
 
   FirebaseAuth get _auth => FirebaseAuth.instance;
+
+  /// Tests: fake server for the sign up email code.
+  @visibleForTesting
+  static Future<Map<String, dynamic>> Function(
+    String path,
+    Map<String, dynamic> body,
+  )?
+  debugApi;
+
+  Future<Map<String, dynamic>> _api(
+    String path,
+    Map<String, dynamic> body, {
+    bool auth = true,
+  }) {
+    final fake = debugApi;
+    if (fake != null) return fake(path, body);
+    return ApiClient.instance.post(path, body, auth: auth);
+  }
+
+  /// v0.0.1: emails a 6 digit code. Returns seconds until "Send again".
+  Future<int> sendSignupCode(String email) async {
+    try {
+      final r = await _api('/api/u', {
+        'action': 'otpSend',
+        'email': email.trim(),
+      }, auth: false);
+      return (r['resendIn'] as num?)?.toInt() ?? 60;
+    } on ApiException catch (e) {
+      throw AuthFailure(e.message);
+    }
+  }
+
+  /// v0.0.1: checks the code. Returns a token for [signUp].
+  Future<String> verifySignupCode(String email, String code) async {
+    try {
+      final r = await _api('/api/u', {
+        'action': 'otpVerify',
+        'email': email.trim(),
+        'code': code.trim(),
+      }, auth: false);
+      final t = r['otpToken'];
+      if (t is! String || t.isEmpty) {
+        throw const AuthFailure('Could not check the code. Try again.');
+      }
+      return t;
+    } on ApiException catch (e) {
+      throw AuthFailure(e.message);
+    }
+  }
+
+  /// v0.0.1: before sending a code, the username must be free.
+  Future<void> checkUsername(String username) async {
+    final uname = username.trim().toLowerCase();
+    if (!usernamePattern.hasMatch(uname)) {
+      throw const AuthFailure(
+        'Username: 3-30 chars, only letters, numbers, . and _',
+      );
+    }
+    try {
+      final taken = await _db.collection('usernames').doc(uname).get();
+      if (taken.exists) throw const AuthFailure('That username is taken.');
+    } on FirebaseException catch (e) {
+      throw AuthFailure(e.message ?? 'Could not check username.');
+    }
+  }
   FirebaseFirestore get _db => FirebaseFirestore.instance;
 
   static final RegExp usernamePattern = RegExp(r'^[a-z0-9._]{3,30}$');
@@ -130,6 +197,7 @@ class AuthService {
     required String password,
     required DateTime birthDate,
     required String language,
+    required String otpToken,
     String country = '',
   }) async {
     if (ageOn(birthDate, DateTime.now()) < kMinAge) {
@@ -161,6 +229,24 @@ class AuthService {
     }
 
     final user = cred.user!;
+    // v0.0.1: the email code was right -> server marks the email verified
+    // (the database only takes new profiles with a checked email)
+    try {
+      await _api('/api/accounts', {
+        'action': 'verifyEmail',
+        'otpToken': otpToken,
+      });
+      await user.getIdToken(true);
+    } catch (e) {
+      try {
+        await user.delete();
+      } catch (_) {}
+      throw AuthFailure(
+        e is ApiException
+            ? e.message
+            : 'Could not check your email. Try again.',
+      );
+    }
     final profile = UserProfile(
       uid: user.uid,
       name: name.trim(),

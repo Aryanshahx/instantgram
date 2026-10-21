@@ -1,6 +1,11 @@
 // GET /u/<username>  (rewritten to /api/u?name=<username> by vercel.json)
 // Small web page for shared profile links and QR codes:
 // "Open in InstantGram" opens the app (instantgram://u/<username>).
+// v0.0.1: POST /api/u = sign up email codes (no login needed), see lib/otp.js
+import { postHandler } from '../lib/http.js';
+import { notSetUp, serviceAccount } from '../lib/google.js';
+import { handleOtp } from '../lib/otp.js';
+
 const APP_PACKAGE = 'com.hypertechlabs.instantgram';
 const DOWNLOAD_URL = 'https://github.com/Aryanshahx/instantgram/releases/latest';
 
@@ -50,7 +55,15 @@ export function page(name) {
 </body></html>`;
 }
 
+const otp = postHandler(async (req, body) => {
+  const sa = serviceAccount();
+  if (!sa) throw notSetUp('Email codes');
+  const ip = String(req.headers?.['x-forwarded-for'] || '').split(',')[0].trim();
+  return handleOtp(sa, body, { ip });
+});
+
 export default function handler(req, res) {
+  if (req.method === 'POST' || req.method === 'OPTIONS') return otp(req, res);
   const url = new URL(req.url, 'http://x');
   const name = cleanName(url.searchParams.get('name'));
   res.statusCode = name ? 200 : 404;

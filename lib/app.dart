@@ -6,6 +6,7 @@ import 'core/services/calls.dart';
 import 'core/services/app_settings.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/auth_gate.dart';
+import 'shared/widgets/tablet_frame.dart';
 
 class InstantGramApp extends StatelessWidget {
   const InstantGramApp({super.key, this.home});
@@ -37,7 +38,8 @@ class InstantGramApp extends StatelessWidget {
               ),
               disableAnimations: mq.disableAnimations || s.reduceMotion.value,
             ),
-            child: child ?? const SizedBox.shrink(),
+            // v0.0.1: tablets / landscape = centered column
+            child: TabletFrame(child: child ?? const SizedBox.shrink()),
           );
         },
       ),

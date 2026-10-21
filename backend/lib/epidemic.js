@@ -118,28 +118,104 @@ const clampInt = (v, lo, hi, d) => {
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d;
 };
 
+const COL_ID = /^[A-Za-z0-9_-]{1,80}$/;
+/** Playlists read for the home list (free-tier ones come first). */
+export const HOME_COLLECTIONS = 8;
+
+/**
+ * v0.0.1 fix: "Popularity" search gives mostly premium (preview-only)
+ * songs, so the list was EMPTY. Now the home list = songs from the
+ * playlists (free ones first) + the usable popular songs, no duplicates.
+ */
 export async function esHome(uid, { key, fetchFn, now = Date.now() }) {
-  return cached('home', async () => {
-    const [top, cols] = await Promise.all([
-      esFetch('/v0/tracks/search?sort=Popularity&order=desc&limit=50', { key, fetchFn, uid }),
-      esFetch('/v0/collections?excludeField=tracks&limit=20', { key, fetchFn, uid }).catch(() => ({ collections: [] })),
-    ]);
-    const collections = (Array.isArray(cols?.collections) ? cols.collections : [])
-      .filter((c) => c && typeof c.id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(c.id) && c.name)
-      .map((c) => ({ id: c.id, name: String(c.name).slice(0, 60), cover: String(c.images?.S || c.images?.default || '') }));
-    return { tracks: tracksOut(top?.tracks), collections };
-  }, now);
+  const hit = cache.get('home');
+  if (hit && now - hit.at < CACHE_MS) return hit.value;
+  const o = { key, fetchFn, uid };
+  const [top, cols] = await Promise.all([
+    esFetch('/v0/tracks/search?sort=Popularity&order=desc&limit=60', o).catch((e) => ({ error: e })),
+    esFetch('/v0/collections?excludeField=tracks&limit=30', o).catch((e) => ({ error: e })),
+  ]);
+  // both failed: show the real reason (key wrong, not set, ...)
+  if (top?.error && cols?.error) throw top.error;
+  const all = (Array.isArray(cols?.collections) ? cols.collections : [])
+    .filter((c) => c && typeof c.id === 'string' && COL_ID.test(c.id) && c.name);
+  const lists = await Promise.all(
+    all.slice(0, HOME_COLLECTIONS).map((c) =>
+      esFetch(`/v0/collections/${c.id}?limit=100`, o)
+        .then((j) => tracksOut(j?.tracks))
+        .catch(() => [])),
+  );
+  const seen = new Set();
+  const tracks = [];
+  const add = (list) => {
+    for (const t of list) {
+      if (seen.has(t.id)) continue;
+      seen.add(t.id);
+      tracks.push(t);
+    }
+  };
+  // a mix: popular usable songs first, then songs from each playlist in turn
+  add(tracksOut(top?.tracks));
+  const longest = Math.max(0, ...lists.map((l) => l.length));
+  for (let i = 0; i < longest; i++) add(lists.map((l) => l[i]).filter(Boolean));
+  const usable = new Set(all.slice(0, HOME_COLLECTIONS).filter((_, i) => lists[i].length > 0).map((c) => c.id));
+  const shown = all.filter((c, i) => usable.has(c.id) || i >= HOME_COLLECTIONS);
+  const collections = (usable.size ? shown : all)
+    .map((c) => ({ id: c.id, name: String(c.name).slice(0, 60), cover: String(c.images?.S || c.images?.default || '') }));
+  const value = { tracks: tracks.slice(0, 300), collections };
+  // an empty answer is not kept (next open tries again)
+  if (value.tracks.length) {
+    cache.set('home', { at: now, value });
+    if (cache.size > 300) cache.delete(cache.keys().next().value);
+  }
+  return value;
 }
+
+/** Words in a song (for searching the home songs when search finds nothing). */
+const words = (t) => `${t.title} ${t.artist} ${t.mood}`.toLowerCase();
 
 export async function esSearch(uid, body, { key, fetchFn, now = Date.now() }) {
   const term = typeof body?.term === 'string' ? body.term.trim().slice(0, 200) : '';
   if (!term) return { tracks: [] };
   const offset = clampInt(body?.offset, 0, 500, 0);
-  const q = new URLSearchParams({ term, sort: 'Relevance', order: 'desc', limit: '40', offset: String(offset) });
+  const q = new URLSearchParams({ term, sort: 'Relevance', order: 'desc', limit: '60', offset: String(offset) });
   return cached(`s:${term.toLowerCase()}:${offset}`, async () => {
     const j = await esFetch(`/v0/tracks/search?${q}`, { key, fetchFn, uid });
-    return { tracks: tracksOut(j?.tracks) };
+    const found = tracksOut(j?.tracks);
+    if (found.length || offset > 0) return { tracks: found };
+    // v0.0.1: only premium songs matched -> look in the usable home songs
+    let home;
+    try {
+      home = await esHome(uid, { key, fetchFn, now });
+    } catch {
+      return { tracks: [] };
+    }
+    const parts = term.toLowerCase().split(/\s+/).filter(Boolean);
+    return { tracks: home.tracks.filter((t) => parts.every((p) => words(t).includes(p))).slice(0, 60) };
   }, now);
+}
+
+/** v0.0.1 /api/health?songs=1: why the song list could be empty. */
+export async function esDiagnose({ key = env('EPIDEMIC_API_KEY'), fetchFn = fetch } = {}) {
+  if (!key) return { ok: false, reason: 'EPIDEMIC_API_KEY is not set in Vercel' };
+  const out = { ok: false };
+  try {
+    const top = await esFetch('/v0/tracks/search?sort=Popularity&order=desc&limit=60', { key, fetchFn });
+    const list = Array.isArray(top?.tracks) ? top.tracks : [];
+    out.popular = list.length;
+    out.popularUsable = tracksOut(list).length;
+  } catch (e) {
+    out.popularError = e?.message || String(e);
+  }
+  try {
+    const h = await esHome('health', { key, fetchFn, now: Date.now() });
+    out.homeSongs = h.tracks.length;
+    out.playlists = h.collections.length;
+    out.ok = h.tracks.length > 0;
+  } catch (e) {
+    out.homeError = e?.message || String(e);
+  }
+  return out;
 }
 
 export async function esCollection(uid, body, { key, fetchFn, now = Date.now() }) {

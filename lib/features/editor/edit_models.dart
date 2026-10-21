@@ -279,6 +279,7 @@ class EditItem {
     voicePath: hasVoice ? voicePath : '',
     voiceStartMs: hasVoice ? voiceStartMs : 0,
     voiceDurMs: hasVoice ? voiceDurMs : 0,
+    face: src.isVideo ? src.face : null,
   );
 }
 

@@ -173,6 +173,32 @@ class VideoOverlay {
   }
 }
 
+/// Face effect on a filmed video (glasses, ears ...): which effect and
+/// where the face is over time ([track], see FaceTrack). Drawn while
+/// playing, like the texts.
+class FaceFx {
+  const FaceFx({required this.effect, required this.track});
+
+  final String effect;
+
+  /// "v1;ms,lx,ly,rx,ry,l,t,r,b;ms;..." (a sample without numbers = no face).
+  final String track;
+
+  static const int maxTrackLength = 60000;
+
+  Map<String, dynamic> toMap() => {'fx': effect, 't': track};
+
+  static FaceFx? fromMap(Object? v) {
+    if (v is! Map) return null;
+    final fx = v['fx'], t = v['t'];
+    if (fx is! String || fx.isEmpty || fx.length > 30) return null;
+    if (t is! String || !t.startsWith('v1') || t.length > maxTrackLength) {
+      return null;
+    }
+    return FaceFx(effect: fx, track: t);
+  }
+}
+
 /// Edits for a video that are applied while playing
 /// (the original file is uploaded unchanged).
 class VideoEdits {
@@ -188,7 +214,11 @@ class VideoEdits {
     this.voicePath = '',
     this.voiceStartMs = 0,
     this.voiceDurMs = 0,
+    this.face,
   });
+
+  /// v0.0.1 effects: face effect from the camera (null = none).
+  final FaceFx? face;
 
   /// 0 = from the start.
   final int trimStartMs;
@@ -239,6 +269,7 @@ class VideoEdits {
     voiceKey: key,
     voiceStartMs: voiceStartMs,
     voiceDurMs: voiceDurMs,
+    face: face,
   );
 
   /// Moments: no voice over.
@@ -249,6 +280,7 @@ class VideoEdits {
     muted: muted,
     cuts: cuts,
     overlays: overlays,
+    face: face,
   );
 
   Map<String, dynamic> toMap() => {
@@ -261,6 +293,7 @@ class VideoEdits {
     if (voiceUrl.isNotEmpty) ...{'voiceUrl': voiceUrl, 'voiceKey': voiceKey},
     if (voicePath.isNotEmpty) 'voicePath': voicePath,
     if (hasVoice) ...{'voiceStartMs': voiceStartMs, 'voiceDurMs': voiceDurMs},
+    if (face != null) 'face': face!.toMap(),
   };
 
   factory VideoEdits.fromMap(Map<String, dynamic> m) => VideoEdits(
@@ -285,6 +318,7 @@ class VideoEdits {
     voicePath: _str(m['voicePath']),
     voiceStartMs: _int(m['voiceStartMs']),
     voiceDurMs: _int(m['voiceDurMs']),
+    face: FaceFx.fromMap(m['face']),
   );
 }
 

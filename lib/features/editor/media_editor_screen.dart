@@ -18,7 +18,9 @@ import '../../core/services/gesture_exclusion.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/time_ago.dart';
+import '../../shared/widgets/face_effects.dart';
 import '../../shared/widgets/media_links.dart';
+import '../../shared/widgets/smooth_clock.dart';
 import '../../shared/models/post.dart';
 import '../../shared/widgets/video_extras.dart';
 import '../../shared/widgets/stickers.dart';
@@ -128,7 +130,6 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
 
   // v0.12: selected text / sticker on a video, voice over
   int? _selOverlay;
-  double _gestureSize = 0.08;
   DateTime _lastSkip = DateTime.fromMillisecondsSinceEpoch(0);
   VoiceTrack? _voiceTrack;
   AudioRecorder? _rec;
@@ -152,8 +153,18 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
   bool _tlWasPlaying = false;
   DateTime _tlSeekAt = DateTime(2000);
   DateTime _tlHoldUntil = DateTime(2000);
-  int _tlPosMs = 0;
-  DateTime _tlPosAt = DateTime(2000);
+  // v0.0.1: smooth white line while playing (no shaking)
+  final SmoothClock _tlClock = SmoothClock();
+
+  // v0.0.1: pinch ANYWHERE to resize the text / sticker your first
+  // finger is on (it was hard to get both fingers on a small text)
+  final Map<int, Offset> _cvPtrs = {};
+  double? _cvPinchDist;
+  double _cvPinchBase = 0;
+  TextLayer? _cvText;
+  int? _cvOverlay;
+  TextLayer? _selText;
+  double _handleBase = 0;
   final Map<int, Offset> _tlPtrs = {};
   bool _pinching = false;
   double _pinchDist = 1;
@@ -988,7 +999,8 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
           child: SizedBox(
             width: fw,
             height: fh,
-            child: Stack(
+            child: _pinchArea(
+              Stack(
               children: [
                 RepaintBoundary(
                   child: ClipRect(
@@ -1000,6 +1012,9 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                           Positioned.fill(
                             child: InteractiveViewer(
                               transformationController: item.zoom,
+                              // v0.0.1: no photo zoom while resizing a text
+                              scaleEnabled: !_cvResizing && _cvText == null,
+                              panEnabled: !_cvResizing && _cvText == null,
                               constrained: false,
                               minScale: 1,
                               maxScale: 5,
@@ -1026,6 +1041,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                     child: IgnorePointer(child: CustomPaint(painter: _Grid())),
                   ),
               ],
+            ),
             ),
           ),
         );
@@ -1055,23 +1071,31 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
     );
     final picture = t.sticker && StickerPack.isPack(t.text);
     final limits = _sizeLimits(t.text, t.sticker);
-    return Positioned(
-      left: t.pos.dx * fw,
-      top: t.pos.dy * fh,
-      child: FractionalTranslation(
-        translation: const Offset(-0.5, -0.5),
-        child: GestureDetector(
-          onScaleStart: (_) => _gestureSize = t.size,
-          onScaleUpdate: (d) => setState(() {
-            t.pos = Offset(
-              (t.pos.dx + d.focalPointDelta.dx / fw).clamp(0.0, 1.0),
-              (t.pos.dy + d.focalPointDelta.dy / fh).clamp(0.0, 1.0),
-            );
-            if (d.pointerCount > 1) {
-              t.size = (_gestureSize * d.scale).clamp(limits.$1, limits.$2);
-            }
-          }),
-          onTap: () => t.sticker ? _removeSticker(item, t) : _editText(item, t),
+    final sel = identical(_selText, t);
+    final body = Listener(
+      // first finger on it: pinch anywhere resizes it
+      onPointerDown: (_) {
+        if (_cvPtrs.isEmpty) {
+          _cvText = t;
+          if (!sel) setState(() => _selText = t);
+        }
+      },
+      child: GestureDetector(
+        onScaleUpdate: (d) => setState(() {
+          t.pos = Offset(
+            (t.pos.dx + d.focalPointDelta.dx / fw).clamp(0.0, 1.0),
+            (t.pos.dy + d.focalPointDelta.dy / fh).clamp(0.0, 1.0),
+          );
+        }),
+        onTap: () => t.sticker ? _removeSticker(item, t) : _editText(item, t),
+        child: Container(
+          padding: const EdgeInsets.all(11),
+          decoration: sel
+              ? BoxDecoration(
+                  border: Border.all(color: Colors.white70, width: 1),
+                  borderRadius: BorderRadius.circular(6),
+                )
+              : null,
           child: picture
               ? StickerImage(text: t.text, width: t.size * fw)
               : ConstrainedBox(
@@ -1095,7 +1119,135 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
         ),
       ),
     );
+    return Positioned(
+      left: t.pos.dx * fw,
+      top: t.pos.dy * fh,
+      child: FractionalTranslation(
+        translation: const Offset(-0.5, -0.5),
+        child: Stack(
+          children: [
+            body,
+            if (sel)
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: _resizeHandle(
+                  key: const ValueKey('text-resize'),
+                  onStart: () => _handleBase = t.size,
+                  onDrag: (dx) => setState(() {
+                    _handleBase += dx / fw * (picture ? 1.0 : 0.35);
+                    t.size = _handleBase.clamp(limits.$1, limits.$2);
+                  }),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
+
+  /// v0.0.1: drag the corner to make a text / sticker bigger or smaller.
+  Widget _resizeHandle({
+    required Key key,
+    required VoidCallback onStart,
+    required ValueChanged<double> onDrag,
+  }) {
+    return GestureDetector(
+      key: key,
+      behavior: HitTestBehavior.opaque,
+      onPanStart: (_) => onStart(),
+      onPanUpdate: (d) => onDrag((d.delta.dx + d.delta.dy) / 2),
+      child: Container(
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          shape: BoxShape.circle,
+          boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black45)],
+        ),
+        child: const Icon(
+          Icons.open_in_full_rounded,
+          size: 13,
+          color: Colors.black,
+        ),
+      ),
+    );
+  }
+
+  // ---- pinch anywhere on the picture = size of the touched text / sticker
+  double _cvSpan() {
+    final p = _cvPtrs.values.take(2).toList();
+    if (p.length < 2) return 1;
+    return math.max(12.0, (p[0] - p[1]).distance);
+  }
+
+  void _cvDown(PointerDownEvent e) {
+    if (_cvPtrs.isEmpty && _cvText == null && _cvOverlay == null) {
+      // first finger on the empty picture: nothing selected
+      if (_selText != null) setState(() => _selText = null);
+    }
+    _cvPtrs[e.pointer] = e.position;
+    if (_cvPtrs.length == 2) {
+      final item = _item;
+      final t = _cvText;
+      final o = _cvOverlay;
+      if (t != null) {
+        _cvPinchBase = t.size;
+      } else if (o != null && o < item.overlays.length) {
+        _cvPinchBase = item.overlays[o].size;
+      } else {
+        return;
+      }
+      _cvPinchDist = _cvSpan();
+      setState(() {}); // the photo zoom stops while you resize
+    }
+  }
+
+  void _cvMove(PointerMoveEvent e) {
+    if (!_cvPtrs.containsKey(e.pointer)) return;
+    _cvPtrs[e.pointer] = e.position;
+    final d0 = _cvPinchDist;
+    if (d0 == null || _cvPtrs.length < 2) return;
+    final k = _cvSpan() / d0;
+    final item = _item;
+    final t = _cvText;
+    final o = _cvOverlay;
+    setState(() {
+      if (t != null) {
+        final l = _sizeLimits(t.text, t.sticker);
+        t.size = (_cvPinchBase * k).clamp(l.$1, l.$2);
+      } else if (o != null && o < item.overlays.length) {
+        final ov = item.overlays[o];
+        final l = _sizeLimits(ov.text, ov.isSticker);
+        item.overlays[o] = ov.copyWith(
+          size: (_cvPinchBase * k).clamp(l.$1, l.$2),
+        );
+      }
+    });
+  }
+
+  void _cvUp(PointerEvent e) {
+    _cvPtrs.remove(e.pointer);
+    if (_cvPtrs.length < 2) _cvPinchDist = null;
+    if (_cvPtrs.isEmpty) {
+      final was = _cvText != null || _cvOverlay != null;
+      _cvText = null;
+      _cvOverlay = null;
+      if (was) setState(() {});
+    }
+  }
+
+  bool get _cvResizing => _cvPinchDist != null;
+
+  Widget _pinchArea(Widget child) => Listener(
+    key: const ValueKey('editor-pinch-area'),
+    behavior: HitTestBehavior.translucent,
+    onPointerDown: _cvDown,
+    onPointerMove: _cvMove,
+    onPointerUp: _cvUp,
+    onPointerCancel: _cvUp,
+    child: child,
+  );
 
   Future<void> _removeSticker(EditItem item, TextLayer t) async {
     final ok = await showModalBottomSheet<bool>(
@@ -1274,7 +1426,8 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
           child: AspectRatio(
             aspectRatio: item.videoAspect,
             // v0.12: square corners (what you see is what is posted)
-            child: ClipRect(
+            child: _pinchArea(
+              ClipRect(
               child: Stack(
                 fit: StackFit.expand,
                 children: [
@@ -1282,6 +1435,9 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                     item.color.isNone ? null : item.color.matrix,
                     VideoPlayer(c),
                   ),
+                  // v0.0.1 effects: face effect from the camera
+                  if (item.src.face case final fx?)
+                    FaceFxLayer(fx: fx, controller: c),
                   _overlaysOnCanvas(item, c),
                   _linksOnCanvas(item),
                   // v0.15: play / pause is next to the timeline (not here)
@@ -1293,6 +1449,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                     ),
                 ],
               ),
+            ),
             ),
           ),
         ),
@@ -1324,48 +1481,79 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
                       height: fh,
                       child: Opacity(
                         opacity: item.overlays[i].visibleAt(ms) ? 1 : 0.4,
-                        child: GestureDetector(
-                          onTap: () {
-                            final o = item.overlays[i];
-                            if (_selOverlay == i && !o.isSticker) {
-                              _editOverlay(i);
-                            } else {
-                              setState(() => _selOverlay = i);
-                            }
-                          },
-                          onScaleStart: (_) => setState(() {
-                            _selOverlay = i;
-                            _gestureSize = item.overlays[i].size;
-                          }),
-                          onScaleUpdate: (d) => setState(() {
-                            final o = item.overlays[i];
-                            item.overlays[i] = o.copyWith(
-                              x: (o.x + d.focalPointDelta.dx / fw).clamp(0, 1),
-                              y: (o.y + d.focalPointDelta.dy / fh).clamp(0, 1),
-                              size: d.pointerCount > 1
-                                  ? (_gestureSize * d.scale).clamp(
-                                      _sizeLimits(o.text, o.isSticker).$1,
-                                      _sizeLimits(o.text, o.isSticker).$2,
-                                    )
-                                  : o.size,
-                            );
-                          }),
-                          child: Container(
-                            padding: const EdgeInsets.all(2),
-                            decoration: _selOverlay == i
-                                ? BoxDecoration(
-                                    border: Border.all(
-                                      color: Colors.white70,
-                                      width: 1,
+                        child: Stack(
+                          children: [
+                            Listener(
+                              // first finger on it: pinch anywhere = size
+                              onPointerDown: (_) {
+                                if (_cvPtrs.isEmpty) _cvOverlay = i;
+                              },
+                              child: GestureDetector(
+                                onTap: () {
+                                  final o = item.overlays[i];
+                                  if (_selOverlay == i && !o.isSticker) {
+                                    _editOverlay(i);
+                                  } else {
+                                    setState(() => _selOverlay = i);
+                                  }
+                                },
+                                onScaleStart: (_) =>
+                                    setState(() => _selOverlay = i),
+                                onScaleUpdate: (d) => setState(() {
+                                  final o = item.overlays[i];
+                                  item.overlays[i] = o.copyWith(
+                                    x: (o.x + d.focalPointDelta.dx / fw).clamp(
+                                      0,
+                                      1,
                                     ),
-                                    borderRadius: BorderRadius.circular(4),
-                                  )
-                                : null,
-                            child: OverlayView(
-                              overlay: item.overlays[i],
-                              frameWidth: fw,
+                                    y: (o.y + d.focalPointDelta.dy / fh).clamp(
+                                      0,
+                                      1,
+                                    ),
+                                  );
+                                }),
+                                child: Container(
+                                  padding: const EdgeInsets.all(11),
+                                  decoration: _selOverlay == i
+                                      ? BoxDecoration(
+                                          border: Border.all(
+                                            color: Colors.white70,
+                                            width: 1,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                        )
+                                      : null,
+                                  child: OverlayView(
+                                    overlay: item.overlays[i],
+                                    frameWidth: fw,
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
+                            if (_selOverlay == i)
+                              Positioned(
+                                right: 0,
+                                bottom: 0,
+                                child: _resizeHandle(
+                                  key: ValueKey('ov-resize-$i'),
+                                  onStart: () =>
+                                      _handleBase = item.overlays[i].size,
+                                  onDrag: (dx) => setState(() {
+                                    final o = item.overlays[i];
+                                    final l = _sizeLimits(o.text, o.isSticker);
+                                    final pic =
+                                        o.isSticker &&
+                                        StickerPack.isPack(o.text);
+                                    _handleBase += dx / fw * (pic ? 1.0 : 0.35);
+                                    item.overlays[i] = o.copyWith(
+                                      size: _handleBase.clamp(l.$1, l.$2),
+                                    );
+                                  }),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ),
@@ -2039,7 +2227,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
 
   /// Every frame: the timeline follows the playing video (smooth, also
   /// between the player's position updates).
-  void _onTlTick(Duration _) {
+  void _onTlTick(Duration elapsed) {
     final c = _video;
     if (c == null ||
         !_videoReady ||
@@ -2050,16 +2238,17 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
       return;
     }
     final now = DateTime.now();
-    if (now.isBefore(_tlHoldUntil)) return;
-    final v = c.value;
-    var ms = v.position.inMilliseconds;
-    if (ms != _tlPosMs) {
-      _tlPosMs = ms;
-      _tlPosAt = now;
-    } else if (v.isPlaying) {
-      final gone = now.difference(_tlPosAt).inMilliseconds;
-      ms += (math.min(gone, 700) * v.playbackSpeed).round();
+    if (now.isBefore(_tlHoldUntil)) {
+      _tlClock.reset();
+      return;
     }
+    final v = c.value;
+    final ms = _tlClock.position(
+      reported: v.position.inMilliseconds,
+      playing: v.isPlaying,
+      nowMs: elapsed.inMilliseconds,
+      speed: v.playbackSpeed,
+    );
     final pos = _tlScroll.position;
     final t = (ms.clamp(0, _item.durationMs) * _tlPx).clamp(
       0.0,
@@ -2075,8 +2264,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
     if (!force && now.difference(_tlSeekAt).inMilliseconds < 60) return;
     _tlSeekAt = now;
     final ms = _tlMs.clamp(_item.trimStart, _item.endMs);
-    _tlPosMs = ms;
-    _tlPosAt = now;
+    _tlClock.reset();
     c.seekTo(Duration(milliseconds: ms));
   }
 
@@ -2204,8 +2392,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
 
         // ---- trim handles of the selected part
         void preview(int ms) {
-          _tlPosMs = ms;
-          _tlPosAt = DateTime.now();
+          _tlClock.reset();
           c.seekTo(Duration(milliseconds: ms));
         }
 

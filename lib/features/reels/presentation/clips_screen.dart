@@ -83,18 +83,35 @@ class _ClipsScreenState extends State<ClipsScreen> {
   int _count = 0;
   final Set<String> _deleted = {};
   Stream<List<Post>>? _stream;
+  bool _refreshing = false;
+
+  // v0.19 Hyper Intelligence: ranked, steady order
+  Stream<List<Post>> _makeStream() => PostRepository.instance
+      .recent(type: Post.clip, limit: ClipsWarmup.limit)
+      .map((l) => HyperFeed.instance.ordered('clips', l, mode: FeedMode.clips));
+
+  /// v0.0.1: refresh button = new clips, fresh order, back to the top.
+  Future<void> _refresh() async {
+    if (_refreshing || widget.clips != null) return;
+    HapticFeedback.selectionClick();
+    HyperFeed.instance.reset('clips');
+    setState(() {
+      _refreshing = true;
+      _order.clear();
+      _current = 0;
+      _prefetchedFor = -1;
+      _showTopBar = true;
+      _stream = _makeStream();
+    });
+    if (_pageCtrl.hasClients) _pageCtrl.jumpToPage(0);
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    if (mounted) setState(() => _refreshing = false);
+  }
 
   @override
   void initState() {
     super.initState();
-    if (widget.clips == null) {
-      // v0.19 Hyper Intelligence: ranked, steady order
-      _stream = PostRepository.instance
-          .recent(type: Post.clip, limit: ClipsWarmup.limit)
-          .map(
-            (l) => HyperFeed.instance.ordered('clips', l, mode: FeedMode.clips),
-          );
-    }
+    if (widget.clips == null) _stream = _makeStream();
     AppSettings.instance.load();
     SystemVolume.instance.get().then((v) {
       if (mounted) setState(() => _volume = v);
@@ -317,6 +334,34 @@ class _ClipsScreenState extends State<ClipsScreen> {
                                 ],
                               ),
                             ),
+                            const Spacer(),
+                            // v0.0.1: refresh (hides with the back button)
+                            if (widget.clips == null)
+                              IconButton(
+                                key: const ValueKey('clips-refresh'),
+                                tooltip: 'Refresh',
+                                onPressed: _refresh,
+                                icon: _refreshing
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : const Icon(
+                                        Icons.refresh_rounded,
+                                        size: 25,
+                                        shadows: [
+                                          Shadow(
+                                            blurRadius: 8,
+                                            color: Colors.black54,
+                                          ),
+                                        ],
+                                      ),
+                              ),
+                            const SizedBox(width: 4),
                           ],
                         ),
                       ),
@@ -1522,7 +1567,12 @@ class _ClipPlayerState extends State<ClipPlayer>
       child: LayoutBuilder(
         builder: (context, box) {
           Widget child = live != null
-              ? videoSurface(live, m.edits.filter, overlays: m.edits.overlays)
+              ? videoSurface(
+                  live,
+                  m.edits.filter,
+                  overlays: m.edits.overlays,
+                  face: m.edits.face,
+                )
               : SizedBox.expand(
                   child: NetImage(m.thumbUrl, fit: BoxFit.contain),
                 );

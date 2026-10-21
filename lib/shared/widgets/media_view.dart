@@ -16,6 +16,7 @@ import '../../core/theme/app_colors.dart';
 import '../../features/editor/filters.dart';
 import '../../features/music/presentation/music_screen.dart';
 import '../models/post.dart';
+import 'face_effects.dart';
 import 'hi_blur.dart';
 import 'media_links.dart';
 import 'net_image.dart';
@@ -43,6 +44,7 @@ Widget videoSurface(
   List<double>? filter, {
   BoxFit fit = BoxFit.contain,
   List<VideoOverlay> overlays = const [],
+  FaceFx? face,
 }) {
   final v = c.value;
   final s = v.size;
@@ -60,12 +62,15 @@ Widget videoSurface(
     );
   }
   // v0.12: texts / stickers scale with the video
-  if (overlays.isNotEmpty) {
+  // v0.0.1 effects: + the face effect from the camera
+  if (overlays.isNotEmpty || face != null) {
     video = Stack(
       fit: StackFit.expand,
       children: [
         video,
-        VideoOverlayLayer(overlays: overlays, controller: c),
+        if (face != null) FaceFxLayer(fx: face, controller: c),
+        if (overlays.isNotEmpty)
+          VideoOverlayLayer(overlays: overlays, controller: c),
       ],
     );
   }
@@ -411,6 +416,7 @@ class _MediaVideoState extends State<MediaVideo> {
               _edits.filter,
               fit: widget.fit,
               overlays: _edits.overlays,
+              face: _edits.face,
             ),
           if (_failed)
             const Center(

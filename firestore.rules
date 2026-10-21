@@ -51,6 +51,9 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if signedIn() && me() == uid
         && request.resource.data.uid == uid
+        // v0.0.1: a new email + password account must pass the email code
+        && (request.auth.token.get('firebase', {}).get('sign_in_provider', '') != 'password'
+            || request.auth.token.get('email_verified', false) == true)
         // v0.13: only the admin website sets these
         && !request.resource.data.keys().hasAny(['verified', 'banned'])
         && (!('country' in request.resource.data)

@@ -13,6 +13,7 @@ import 'package:instantgram/core/services/api_client.dart';
 import 'package:instantgram/core/services/chat_prefs.dart';
 import 'package:instantgram/core/services/media_service.dart';
 import 'package:instantgram/core/services/music_player.dart';
+import 'package:instantgram/core/services/vision_service.dart';
 import 'package:instantgram/core/theme/app_theme.dart';
 import 'package:instantgram/features/camera/camera_screen.dart';
 import 'package:instantgram/features/editor/edit_models.dart';
@@ -149,7 +150,42 @@ class FakeCamera extends CameraPlatform with MockPlatformInterfaceMixin {
 
   @override
   Future<void> dispose(int cameraId) async => log.add('dispose');
+
+  // v0.0.1 effects: camera frames for ML Kit
+  StreamController<CameraImageData>? frames;
+
+  @override
+  bool supportsImageStreaming() => true;
+
+  @override
+  Stream<CameraImageData> onStreamedFrameAvailable(
+    int cameraId, {
+    CameraImageStreamOptions? options,
+  }) {
+    log.add('stream');
+    final c = StreamController<CameraImageData>(
+      onCancel: () => log.add('stream stop'),
+    );
+    frames = c;
+    return c.stream;
+  }
 }
+
+/// One NV21 camera frame (one plane, like CameraX gives).
+CameraImageData _nv21(int w, int h) => CameraImageData(
+  format: const CameraImageFormat(ImageFormatGroup.nv21, raw: 17),
+  width: w,
+  height: h,
+  planes: [
+    CameraImagePlane(
+      bytes: Uint8List(w * h * 3 ~/ 2),
+      bytesPerRow: w,
+      bytesPerPixel: 1,
+      width: w,
+      height: h,
+    ),
+  ],
+);
 
 // ---------------------------------------------------------------- helpers
 
@@ -711,6 +747,115 @@ void main() {
       );
       expect(plain.color.preset, 0);
       expect(plain.muted, isFalse);
+    });
+  });
+
+  // ------------------------------------------------------- v0.0.1 effects
+  group('camera effects', () {
+    late List<MethodCall> calls;
+    late Completer<bool> install;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+
+    setUp(() {
+      calls = [];
+      VisionService.instance.debugReset();
+      messenger.setMockMethodCallHandler(VisionService.channel, (c) async {
+        calls.add(c);
+        switch (c.method) {
+          case 'status':
+            return false;
+          case 'install':
+            return install.future;
+          case 'analyze':
+            return {
+              'w': 240,
+              'h': 320,
+              'faces': [
+                {
+                  'lx': 0.4,
+                  'ly': 0.4,
+                  'rx': 0.6,
+                  'ry': 0.4,
+                  'l': 0.3,
+                  't': 0.3,
+                  'r': 0.7,
+                  'b': 0.7,
+                },
+              ],
+            };
+        }
+        return null;
+      });
+    });
+    tearDown(() {
+      messenger.setMockMethodCallHandler(VisionService.channel, null);
+      VisionService.instance.debugReset();
+    });
+
+    testWidgets('download once, then glasses follow the face', (t) async {
+      // made inside the test (fake time) so it can finish here
+      install = Completer<bool>();
+      await _openCamera(t);
+      await t.tap(find.byKey(const ValueKey('camera-effects')));
+      await _frames(t, 2);
+      // first time: the face model is downloaded (not in the APK)
+      expect(find.byKey(const ValueKey('camera-fx-downloading')), findsOneWidget);
+      expect(calls.map((c) => c.method), contains('install'));
+      expect(cam.log, isNot(contains('stream')));
+      install.complete(true);
+      await _frames(t, 3);
+      expect(find.byKey(const ValueKey('camera-fx-downloading')), findsNothing);
+      expect(find.byKey(const ValueKey('camera-fx-strip')), findsOneWidget);
+      await t.tap(find.byKey(const ValueKey('camera-fx-sunglasses')));
+      await _frames(t, 2);
+      expect(cam.log, contains('stream'));
+      cam.frames!.add(_nv21(640, 480));
+      await _frames(t, 3);
+      final a = calls.lastWhere((c) => c.method == 'analyze').arguments as Map;
+      // made small before it goes to ML Kit
+      expect(a['w'], 320);
+      expect(a['h'], 240);
+      expect((a['bytes'] as Uint8List).length, 320 * 240 * 3 ~/ 2);
+      expect(a['rotation'], 90);
+      expect(a['mirror'], isFalse);
+      expect(a['face'], isTrue);
+      expect(a['segment'], isFalse);
+      expect(find.byKey(const ValueKey('camera-face-fx')), findsOneWidget);
+      // green screen = photos only
+      await t.tap(find.byKey(const ValueKey('camera-fx-green')));
+      await t.pump();
+      expect(
+        find.text('Green screen works for photos. Switch to Photo.'),
+        findsOneWidget,
+      );
+      // no effect -> camera frames stop, glasses gone
+      await t.tap(find.byKey(const ValueKey('camera-fx-none')));
+      await _frames(t, 2);
+      expect(cam.log, contains('stream stop'));
+      expect(find.byKey(const ValueKey('camera-face-fx')), findsNothing);
+      // second time: no download
+      final installs = calls.where((c) => c.method == 'install').length;
+      await t.tap(find.byKey(const ValueKey('camera-effects')));
+      await _frames(t, 2);
+      await t.tap(find.byKey(const ValueKey('camera-effects')));
+      await _frames(t, 2);
+      expect(calls.where((c) => c.method == 'install').length, installs);
+      expect(find.byKey(const ValueKey('camera-fx-strip')), findsOneWidget);
+      await _finish(t);
+    });
+
+    testWidgets('download fails -> message, no effects', (t) async {
+      install = Completer<bool>();
+      await _openCamera(t);
+      await t.tap(find.byKey(const ValueKey('camera-effects')));
+      await _frames(t, 2);
+      install.completeError(PlatformException(code: 'x', message: 'net'));
+      await _frames(t, 3);
+      expect(find.byKey(const ValueKey('camera-fx-downloading')), findsNothing);
+      expect(find.byKey(const ValueKey('camera-fx-strip')), findsNothing);
+      expect(find.byType(SnackBar), findsOneWidget);
+      await _finish(t);
     });
   });
 }

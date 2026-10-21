@@ -23,19 +23,24 @@ class ApiClient {
   static final ApiClient instance = ApiClient._();
 
   /// [timeout]: AI songs take up to a few minutes (default 30 s).
+  /// [auth] false: no login needed (v0.0.1 sign up email code).
   Future<Map<String, dynamic>> post(
     String path,
     Map<String, dynamic> body, {
     Duration timeout = const Duration(seconds: 30),
+    bool auth = true,
   }) async {
     if (!AppConfig.hasApi) {
       throw const ApiException(
         'Upload server is not set up yet (API_BASE_URL missing).',
       );
     }
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw const ApiException('Please log in again.');
-    final token = await user.getIdToken();
+    String? token;
+    if (auth) {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw const ApiException('Please log in again.');
+      token = await user.getIdToken();
+    }
 
     final http.Response res;
     try {
@@ -43,7 +48,7 @@ class ApiClient {
           .post(
             Uri.parse('${AppConfig.apiBaseUrl}$path'),
             headers: {
-              'Authorization': 'Bearer $token',
+              if (token != null) 'Authorization': 'Bearer $token',
               'Content-Type': 'application/json',
             },
             body: jsonEncode(body),

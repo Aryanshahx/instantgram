@@ -23,7 +23,10 @@ import io.flutter.plugin.common.MethodChannel
 // v0.14: + gesture exclusion for the editor timeline.
 // v0.15: + app icon switch (activity aliases).
 // v0.16: + custom icon = a home-screen shortcut with your own picture.
+// v0.0.1 effects: + face effects / green screen (VisionChannel, ML Kit).
 class MainActivity : FlutterActivity() {
+    private var vision: VisionChannel? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         createChannels()
@@ -31,6 +34,8 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        vision?.close()
+        vision = VisionChannel(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "instantgram/system")
             .setMethodCallHandler { call, result ->
                 try {
@@ -104,6 +109,12 @@ class MainActivity : FlutterActivity() {
                     result.error("settings", e.message, null)
                 }
             }
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        vision?.close()
+        vision = null
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 
     private fun canPin(): Boolean {

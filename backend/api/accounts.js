@@ -2,6 +2,7 @@
 //   { action: 'list' }                    -> { accounts: [{uid, username, name, photoUrl}], owner }
 //   { action: 'create', username, name }  -> { uid, token }
 //   { action: 'switch', uid }             -> { token }
+//   { action: 'verifyEmail', otpToken }   -> { verified }  (v0.0.1 sign up code)
 //
 // You log in once (email + password) and pick which account to use.
 // The extra accounts have no password of their own: this server checks
@@ -13,7 +14,8 @@ import { importPKCS8, SignJWT } from 'jose';
 import { randomInt } from 'node:crypto';
 import { requireUser } from '../lib/firebase-auth.js';
 import { HttpError, postHandler } from '../lib/http.js';
-import { commitWrites, getDoc, getDocMeta, isPreconditionError, notSetUp, serviceAccount } from '../lib/google.js';
+import { authLookup, authSetEmailVerified, commitWrites, getDoc, getDocMeta, isPreconditionError, notSetUp, serviceAccount } from '../lib/google.js';
+import { readToken } from '../lib/otp.js';
 
 /** Max accounts on one login (the main one included). */
 export const FAMILY_MAX = 5;
@@ -151,6 +153,17 @@ export async function switchTo(sa, uid, body, fetchFn = fetch) {
   return { token: await customToken(sa, target) };
 }
 
+/** v0.0.1: the sign up code was right -> the email is verified. */
+export async function verifyEmail(sa, uid, body, fetchFn = fetch, now = Date.now()) {
+  const email = readToken(sa, body.otpToken, now);
+  if (!email) throw new HttpError(400, 'The email code is too old. Get a new code.');
+  const user = await authLookup(sa, uid, fetchFn);
+  if (!user) throw new HttpError(404, 'Account not found');
+  if (String(user.email || '').toLowerCase() !== email) throw new HttpError(403, 'This code is for another email');
+  if (user.emailVerified !== true) await authSetEmailVerified(sa, uid, fetchFn);
+  return { verified: true };
+}
+
 export async function handle(uid, body, { sa = serviceAccount(), fetchFn = fetch } = {}) {
   if (!sa) throw notSetUp('Accounts');
   switch (body.action) {
@@ -160,6 +173,8 @@ export async function handle(uid, body, { sa = serviceAccount(), fetchFn = fetch
       return create(sa, uid, body, { fetchFn });
     case 'switch':
       return switchTo(sa, uid, body, fetchFn);
+    case 'verifyEmail':
+      return verifyEmail(sa, uid, body, fetchFn);
     default:
       throw new HttpError(400, 'Unknown action');
   }
