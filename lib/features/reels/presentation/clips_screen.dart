@@ -1447,7 +1447,7 @@ class _ClipPlayerState extends State<ClipPlayer>
       if (c.replyTo != null)
         Positioned(
           left: 14,
-          bottom: (c.hasMusic ? 74 : 60) + (_items.length > 1 ? 16 : 0),
+          bottom: (c.showsAudio ? 74 : 60) + (_items.length > 1 ? 16 : 0),
           right: 80,
           child: Align(
             alignment: Alignment.centerLeft,
@@ -1462,7 +1462,7 @@ class _ClipPlayerState extends State<ClipPlayer>
         Positioned(
           left: 0,
           right: 0,
-          bottom: c.hasMusic ? 66 : 56,
+          bottom: c.showsAudio ? 66 : 56,
           child: IgnorePointer(
             child: PageDots(
               key: const ValueKey('clip-dots'),
@@ -1522,9 +1522,12 @@ class _ClipPlayerState extends State<ClipPlayer>
                         MusicChip(
                           key: ValueKey('clip-audio-${c.id}'),
                           name: c.audioLabel,
-                          onTap: c.hasAudioPage
-                              ? () => openMusicOf(context, c)
-                              : null,
+                          // never falls through to "open profile"
+                          onTap: () {
+                            if (!c.hasAudioPage) return;
+                            _ctrl?.pause();
+                            openMusicOf(context, c);
+                          },
                         ),
                       ],
                     ],

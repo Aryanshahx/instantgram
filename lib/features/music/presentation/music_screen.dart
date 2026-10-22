@@ -17,6 +17,7 @@ import '../../../shared/widgets/skeleton.dart';
 /// Old posts without a song page: nothing happens.
 void openMusicOf(BuildContext context, Post post) {
   if (!post.hasAudioPage) return;
+  // v0.0.1: an older video without its page -> '' (made while loading)
   Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (_) => MusicScreen(musicId: post.musicId, from: post),
@@ -55,7 +56,10 @@ class _MusicScreenState extends State<MusicScreen> {
   bool _failed = false;
   bool _missing = false;
 
-  String get _owner => 'music-page-${widget.musicId}';
+  /// The song page id ('' = an older video's page that is being made).
+  late String _id = widget.musicId;
+
+  String get _owner => 'music-page-$_id';
 
   @override
   void initState() {
@@ -72,8 +76,14 @@ class _MusicScreenState extends State<MusicScreen> {
   Future<void> _load() async {
     final repo = MusicRepository.instance;
     try {
-      final t = await repo.track(widget.musicId);
-      final posts = await repo.postsWith(widget.musicId);
+      final from = widget.from;
+      if (_id.isEmpty && from != null) {
+        final id = await repo.originalOf(from);
+        if (!mounted) return;
+        setState(() => _id = id);
+      }
+      final t = await repo.track(_id);
+      final posts = await repo.postsWith(_id);
       if (!mounted) return;
       setState(() {
         _track = t;
@@ -86,7 +96,13 @@ class _MusicScreenState extends State<MusicScreen> {
     }
   }
 
-  int get _startMs => widget.from?.audioStartMs ?? 0;
+  /// Where the song starts: the post's start point, or (the video's own
+  /// sound) where the video starts after its trim.
+  int get _startMs {
+    final from = widget.from;
+    if (from != null && from.hasMusic) return from.audioStartMs;
+    return _track?.startMs ?? from?.audioStartMs ?? 0;
+  }
 
   void _togglePlay(MusicTrack t) {
     final p = MusicPlayer.instance;
@@ -255,7 +271,9 @@ class _MusicScreenState extends State<MusicScreen> {
                     border: Border.all(color: AppColors.border),
                     borderRadius: BorderRadius.circular(22),
                   ),
-                  child: SaveAudioButton(musicId: widget.musicId),
+                  child: _id.isEmpty
+                      ? const SizedBox(width: 22)
+                      : SaveAudioButton(musicId: _id),
                 ),
               ],
             ),

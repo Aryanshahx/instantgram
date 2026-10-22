@@ -158,6 +158,7 @@ class MusicRepository {
     _allAt = null;
     _home = null;
     _homeAt = null;
+    _originals.clear();
   }
 
   // ------------------------------------------------- Epidemic Sound
@@ -267,6 +268,24 @@ class MusicRepository {
           );
     return list;
   }
+
+  final Map<String, String> _originals = {};
+
+  /// v0.0.1: the "Original audio" page of [post] (its id). Older videos
+  /// get it now (the server makes it from the video's sound).
+  Future<String> originalOf(Post post) async {
+    if (post.musicId.isNotEmpty) return post.musicId;
+    final known = _originals[post.id];
+    if (known != null) return known;
+    final id = _str(
+      (await call({'action': 'origAudio', 'postId': post.id}, _short))['id'],
+    );
+    if (id.isEmpty) throw const ApiException('Could not open this audio');
+    _originals[post.id] = id;
+    return id;
+  }
+
+  static String _str(Object? v) => v is String ? v : '';
 
   Future<MusicTrack?> track(String id) async {
     if (id.isEmpty || id.contains('/')) return null;

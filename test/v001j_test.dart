@@ -15,9 +15,12 @@ import 'package:instantgram/core/services/original_audio.dart';
 import 'package:instantgram/core/theme/app_theme.dart';
 import 'package:instantgram/features/auth/presentation/permission_gate.dart';
 import 'package:instantgram/features/feed/presentation/home_screen.dart';
+import 'package:instantgram/features/music/data/music_repository.dart';
+import 'package:instantgram/features/music/presentation/music_screen.dart';
 import 'package:instantgram/features/post/data/upload_queue.dart';
 import 'package:instantgram/features/profile/data/famous_index.dart';
 import 'package:instantgram/features/reels/data/clips_warmup.dart';
+import 'package:instantgram/shared/models/music.dart';
 import 'package:instantgram/shared/models/post.dart';
 import 'package:instantgram/shared/widgets/async_views.dart';
 import 'package:instantgram/shared/widgets/emoji_picker.dart';
@@ -306,9 +309,116 @@ void main() {
       expect(phone.showsAudio, isTrue);
       expect(phone.hasAudioPage, isFalse, reason: 'older post, no page');
       expect(phone.audioLabel, 'Music');
-      final plain = _p('p4');
-      expect(plain.showsAudio, isFalse);
-      expect(plain.hasAudioPage, isFalse);
+      // older video without a song: its own sound (page made on tap)
+      final old = _p('p4');
+      expect(old.showsAudio, isTrue);
+      expect(old.hasAudioPage, isTrue);
+      expect(old.audioLabel, 'Original audio');
+    });
+
+    test('older posts: every video with sound, not photos / sound off', () {
+      expect(_p('m1', extra: {'muteAudio': true}).showsAudio, isFalse);
+      final photo = _p(
+        'f1',
+        extra: {
+          'type': 'post',
+          'mediaUrl': 'https://x/f1.jpg',
+          'media': [
+            {'type': 'photo', 'url': 'https://x/f1.jpg'},
+          ],
+        },
+      );
+      expect(photo.showsAudio, isFalse);
+      expect(photo.hasAudioPage, isFalse);
+      final mixed = _p(
+        'f2',
+        extra: {
+          'type': 'post',
+          'media': [
+            {'type': 'photo', 'url': 'https://x/a.jpg'},
+            {'type': 'video', 'url': 'https://x/b.mp4'},
+          ],
+        },
+      );
+      expect(mixed.hasOriginalAudio, isTrue);
+      final mutedVideo = _p(
+        'f3',
+        extra: {
+          'type': 'post',
+          'media': [
+            {
+              'type': 'video',
+              'url': 'https://x/b.mp4',
+              'edits': {'muteAudio': true},
+            },
+          ],
+        },
+      );
+      expect(mutedVideo.showsAudio, isFalse);
+      // a song from another app (no page) never becomes "Original audio"
+      expect(_p('s1', extra: {'musicId': 'es_9'}).hasOriginalAudio, isFalse);
+    });
+
+    testWidgets('older video: tap -> page made once, Use keeps the trim', (
+      t,
+    ) async {
+      final repo = MusicRepository.instance;
+      final oldCall = repo.call;
+      final calls = <Map<String, dynamic>>[];
+      repo.debugReset();
+      repo.call = (body, timeout) async {
+        calls.add(Map<String, dynamic>.from(body));
+        return {'id': 'o_${body['postId']}', 'source': 'original'};
+      };
+      final asked = <String>[];
+      MusicRepository.debugTrack = (id) async {
+        asked.add(id);
+        return MusicTrack.fromMap(id, {
+          'source': 'original',
+          'title': 'Original audio',
+          'artist': '@amit',
+          'url': 'https://x/old1.mp4',
+          'startMs': 2500,
+          'durationMs': 8000,
+        });
+      };
+      MusicRepository.debugPostsWith = (id) async => [
+        _p('old1', extra: {'musicId': id}),
+      ];
+      PickedAudio? used;
+      MusicScreen.debugUse = (a) => used = a;
+      addTearDown(() {
+        repo.call = oldCall;
+        repo.debugReset();
+        MusicRepository.debugTrack = null;
+        MusicRepository.debugPostsWith = null;
+        MusicScreen.debugUse = null;
+      });
+      final post = _p('old1');
+      await t.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark,
+          home: Scaffold(body: Center(child: AudioLine(post: post))),
+        ),
+      );
+      await t.tap(find.byKey(const ValueKey('post-audio-old1')));
+      for (var i = 0; i < 8; i++) {
+        await t.pump(const Duration(milliseconds: 100));
+      }
+      expect(calls, [
+        {'action': 'origAudio', 'postId': 'old1'},
+      ]);
+      expect(asked, ['o_old1']);
+      await t.tap(find.byKey(const ValueKey('music-use')));
+      await t.pump();
+      expect(used?.musicId, 'o_old1');
+      expect(used?.url, 'https://x/old1.mp4');
+      expect(used?.startMs, 2500, reason: 'starts where the video starts');
+      // second time: the page is known, no new server call
+      expect(await repo.originalOf(post), 'o_old1');
+      expect(calls.length, 1);
+      await t.pumpWidget(const SizedBox());
+      await t.pump(const Duration(seconds: 1));
     });
 
     test('only for videos without music, sound on, not moments', () {

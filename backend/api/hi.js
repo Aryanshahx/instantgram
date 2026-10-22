@@ -16,6 +16,8 @@
 //   -> the new AI song (Google Lyria via OpenRouter or Gemini). Daily limit per person + for the app.
 // Epidemic Sound: POST /api/hi { action: 'esHome' | 'esSearch' | 'esCollection' |
 //   'esPreview' | 'esUse' | 'esTracks' } (see lib/epidemic.js, key EPIDEMIC_API_KEY).
+// v0.0.1: POST /api/hi { action: 'origAudio', postId } -> "Original audio" page
+//   for an older video post (see lib/original.js).
 import { requireUser } from '../lib/firebase-auth.js';
 import { HttpError, env, postHandler, send } from '../lib/http.js';
 import { getDoc, notSetUp, serviceAccount } from '../lib/google.js';
@@ -25,6 +27,7 @@ import { handleReport, updateTrending } from '../lib/safety.js';
 import { FULL_COST, makeSong, quotaOf } from '../lib/music.js';
 import { putFile } from '../lib/tigris.js';
 import { ES_ACTIONS, handleEs } from '../lib/epidemic.js';
+import { origAudio } from '../lib/original.js';
 
 const ID = /^[A-Za-z0-9_-]{6,64}$/;
 
@@ -32,6 +35,10 @@ export async function handle(uid, body, { sa = serviceAccount(), fetchFn = fetch
   if (ES_ACTIONS.includes(body.action)) {
     if (body.action === 'esUse' && !sa) throw notSetUp('Songs');
     return handleEs(sa, uid, body, { key: esKey, fetchFn, save, now });
+  }
+  if (body.action === 'origAudio') {
+    if (!sa) throw notSetUp('Songs');
+    return origAudio(sa, uid, body, { fetchFn, now });
   }
   if (body.action === 'songInfo') {
     if (!sa) throw notSetUp('AI songs');
