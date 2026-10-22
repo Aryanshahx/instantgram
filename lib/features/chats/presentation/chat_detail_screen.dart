@@ -1270,7 +1270,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   if (_multi) return const SizedBox.shrink();
                   return ErrorView(error: snap.error);
                 }
-                if (!snap.hasData) return const LoadingView();
+                if (!snap.hasData) {
+                  return const LoadingView(kind: SkeletonKind.chat);
+                }
                 final msgs = _visible(snap.data!);
                 _shown = msgs;
                 WidgetsBinding.instance.addPostFrameCallback(

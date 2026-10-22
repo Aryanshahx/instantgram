@@ -627,20 +627,32 @@ class HyperFeed with WidgetsBindingObserver {
 
   /// Home feed: [base] (people you follow + famous) + [extras] (posts with
   /// your top hashtags, newest clips) -> ranked, steady order.
+  ///
+  /// [extraParts] sends more posts in parts (each part shows as soon as it
+  /// arrives). While the people you follow have no posts and the extras are
+  /// still coming, nothing is sent (the screen keeps its loading shapes
+  /// instead of flashing "Your feed is empty").
   Stream<List<Post>> discover(
     Stream<List<Post>> base, {
     Future<List<Post>> Function()? extras,
+    Stream<List<Post>> Function()? extraParts,
     String key = 'discover',
   }) {
     late final StreamController<List<Post>> c;
     StreamSubscription<List<Post>>? sub;
+    StreamSubscription<List<Post>>? partsSub;
     List<Post>? last;
     var extra = const <Post>[];
+    var extrasDone = extras == null && extraParts == null;
     void emit() {
       final l = last;
       if (l == null || c.isClosed) return;
-      final ids = {for (final p in l) p.id};
-      final all = [...l, ...extra.where((p) => !ids.contains(p.id))];
+      if (l.isEmpty && extra.isEmpty && !extrasDone) return;
+      final ids = <String>{};
+      final all = <Post>[
+        for (final p in [...l, ...extra])
+          if (ids.add(p.id)) p,
+      ];
       c.add(ordered(key, all, mode: FeedMode.discover));
     }
 
@@ -653,15 +665,35 @@ class HyperFeed with WidgetsBindingObserver {
         if (extras != null) {
           extras()
               .then((e) {
-                extra = e;
+                extra = [...extra, ...e];
+                extrasDone = extraParts == null;
                 emit();
               })
               .catchError((Object e) {
                 debugPrint('HyperFeed extras: $e');
+                extrasDone = extraParts == null;
+                emit();
               });
         }
+        if (extraParts != null) {
+          partsSub = extraParts().listen(
+            (part) {
+              if (part.isEmpty) return;
+              extra = [...extra, ...part];
+              emit();
+            },
+            onError: (Object e) => debugPrint('HyperFeed extras: $e'),
+            onDone: () {
+              extrasDone = true;
+              emit();
+            },
+          );
+        }
       },
-      onCancel: () => sub?.cancel(),
+      onCancel: () {
+        partsSub?.cancel();
+        return sub?.cancel();
+      },
     );
     return c.stream;
   }

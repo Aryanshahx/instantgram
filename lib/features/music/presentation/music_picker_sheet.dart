@@ -11,6 +11,7 @@ import '../../../core/utils/time_ago.dart';
 import '../../../shared/models/music.dart';
 import '../../../shared/widgets/net_image.dart';
 import '../data/music_repository.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 const String _kPreview = 'music-picker';
 
@@ -153,17 +154,9 @@ class _MusicPickerSheetState extends State<MusicPickerSheet> {
     length: 5,
     child: Column(
       children: [
-        const SizedBox(height: 8),
-        Container(
-          width: 36,
-          height: 4,
-          decoration: BoxDecoration(
-            color: AppColors.border,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
+        // the sheet already shows one drag bar (theme), no second one here
         Padding(
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 2),
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 2),
           child: TextField(
             key: const ValueKey('audio-search'),
             controller: _searchCtrl,
@@ -491,14 +484,15 @@ class _AudioList extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = tracks;
     if (l == null) {
-      return Center(
+      return Align(
+        alignment: failed ? Alignment.center : Alignment.topCenter,
         child: failed
             ? TextButton(
                 key: ValueKey('$listKey-retry'),
                 onPressed: onRetry,
                 child: const Text("Couldn't load. Tap to try again"),
               )
-            : const CircularProgressIndicator(color: AppColors.lime),
+            : const Skeleton(kind: SkeletonKind.tracks),
       );
     }
     final list = ListView.builder(
@@ -1010,7 +1004,7 @@ class _AiTabState extends State<_AiTab> with AutomaticKeepAliveClientMixin {
                   },
                   child: const Text("Couldn't load. Tap to try again"),
                 )
-              : const CircularProgressIndicator(),
+              : const Skeleton(kind: SkeletonKind.tracks, count: 3),
         ),
       );
     } else if (!info.enabled) {

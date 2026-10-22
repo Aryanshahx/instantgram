@@ -5,6 +5,7 @@ import '../../../shared/models/post.dart';
 import '../../../shared/navigation.dart';
 import '../../../shared/widgets/post_grid.dart';
 import '../../post/data/post_repository.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 /// Opens the page of one #hashtag.
 void openHashtag(BuildContext context, String tag) {
@@ -94,7 +95,8 @@ class _HashtagScreenState extends State<HashtagScreen> {
     return Scaffold(
       appBar: AppBar(title: Text('#${widget.tag}')),
       body: posts == null
-          ? Center(
+          ? Align(
+              alignment: _failed ? Alignment.center : Alignment.topCenter,
               child: _failed
                   ? TextButton(
                       key: const ValueKey('tag-retry'),
@@ -104,7 +106,7 @@ class _HashtagScreenState extends State<HashtagScreen> {
                       },
                       child: const Text("Couldn't load. Tap to try again"),
                     )
-                  : const CircularProgressIndicator(),
+                  : const Skeleton(kind: SkeletonKind.grid),
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,

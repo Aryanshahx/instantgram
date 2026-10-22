@@ -480,7 +480,8 @@ void main() {
     Future<void> deleteNow(WidgetTester t) async {
       await t.tap(find.byKey(const ValueKey('story-delete')));
       await _frames(t, 3);
-      await t.tap(find.text('Delete'));
+      // the dialog's button (the bottom bar also says "Delete")
+      await t.tap(find.widgetWithText(TextButton, 'Delete'));
       await _frames(t, 4);
     }
 
@@ -490,6 +491,17 @@ void main() {
       ];
       await open(t, groups);
       expect(_shownStory(t), 's1');
+      // v0.0.1: X at the top, Delete at the bottom (with its name)
+      final h = t.getSize(find.byType(StoryViewerScreen)).height;
+      expect(
+        t.getCenter(find.byKey(const ValueKey('story-close'))).dy,
+        lessThan(h * 0.2),
+      );
+      expect(
+        t.getCenter(find.byKey(const ValueKey('story-delete'))).dy,
+        greaterThan(h * 0.75),
+      );
+      expect(find.byKey(const ValueKey('story-delete-label')), findsOneWidget);
       await deleteNow(t);
       expect(deleted, ['s1']);
       expect(find.text('Moment deleted'), findsOneWidget);

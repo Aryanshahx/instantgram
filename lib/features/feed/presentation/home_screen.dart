@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../../../core/services/net_priority.dart';
 import '../../../shared/widgets/refresh_note.dart';
 
@@ -47,6 +49,27 @@ class HomeScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Sends each list when its future is done, then closes (errors skipped).
+Stream<List<Post>> partsStream(List<Future<List<Post>>> parts) {
+  final c = StreamController<List<Post>>();
+  var left = parts.length;
+  if (left == 0) {
+    c.close();
+    return c.stream;
+  }
+  for (final f in parts) {
+    f
+        .then((v) {
+          if (!c.isClosed) c.add(v);
+        }, onError: (Object _) {})
+        .whenComplete(() {
+          left--;
+          if (left == 0) c.close();
+        });
+  }
+  return c.stream;
 }
 
 class _HomeFeed extends StatefulWidget {
@@ -110,7 +133,7 @@ class _HomeFeedState extends State<_HomeFeed> {
       if (refreshed) HyperFeed.instance.reset('discover');
       _stream = HyperFeed.instance.discover(
         PostRepository.instance.feedFor(authors),
-        extras: _extras,
+        extraParts: _extraParts,
       );
     }
     return _stream;
@@ -120,17 +143,27 @@ class _HomeFeedState extends State<_HomeFeed> {
 
   /// More than people you follow: posts with your top hashtags, trending
   /// posts + the newest clips (so new creators get a chance).
-  static Future<List<Post>> _extras() async {
-    final tags = HyperFeed.instance.topTags(3);
-    final repo = PostRepository.instance;
-    final r = await Future.wait([
-      repo.interestCandidates(tags),
-      // v0.20: trending (best of the last 48 hours, 1 read)
-      repo.loadTrending().catchError((Object _) => <Post>[]),
-    ]);
-    final clips = ClipsWarmup.instance.latest ?? const <Post>[];
-    return [...r[0], ...r[1], ...clips.take(30)];
+  /// Each part shows as soon as it is ready. Loaded once per pull to
+  /// refresh (when famous people or follows change, the same parts are used
+  /// again at once instead of loading again).
+  Stream<List<Post>> _extraParts() {
+    if (_extrasFor != _refresh || _extraFutures.isEmpty) {
+      _extrasFor = _refresh;
+      final tags = HyperFeed.instance.topTags(3);
+      final repo = PostRepository.instance;
+      _extraFutures = [
+        repo.interestCandidates(tags).catchError((Object _) => <Post>[]),
+        // v0.20: trending (best of the last 48 hours, 1 read)
+        repo.loadTrending().catchError((Object _) => <Post>[]),
+        // the newest clips (ready from app start, kept on account switch)
+        ClipsWarmup.instance.first().then((l) => l.take(30).toList()),
+      ];
+    }
+    return partsStream(_extraFutures);
   }
+
+  int _extrasFor = -1;
+  List<Future<List<Post>>> _extraFutures = const [];
 
   /// v0.13: waits for the server (background downloads pause meanwhile).
   Future<void> _onRefresh() async {
@@ -205,7 +238,9 @@ class _HomeFeedState extends State<_HomeFeed> {
             ),
           ),
           if (stream == null)
-            const SliverToBoxAdapter(child: LoadingView())
+            const SliverToBoxAdapter(
+              child: LoadingView(kind: SkeletonKind.post),
+            )
           else
             StreamBuilder<List<Post>>(
               stream: stream,
@@ -216,7 +251,9 @@ class _HomeFeedState extends State<_HomeFeed> {
                   );
                 }
                 if (!snap.hasData) {
-                  return const SliverToBoxAdapter(child: LoadingView());
+                  return const SliverToBoxAdapter(
+                    child: LoadingView(kind: SkeletonKind.post),
+                  );
                 }
                 // v0.19: "Not interested" hides at once
                 final posts = snap.data!

@@ -26,7 +26,7 @@ class PostDetailScreen extends StatelessWidget {
         builder: (context, snap) {
           if (snap.hasError) return ErrorView(error: snap.error);
           if (snap.connectionState == ConnectionState.waiting) {
-            return const LoadingView();
+            return const LoadingView(kind: SkeletonKind.post, count: 1);
           }
           final post = snap.data;
           if (post == null) {

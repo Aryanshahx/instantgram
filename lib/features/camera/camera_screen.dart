@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
@@ -17,6 +18,7 @@ import '../editor/edit_models.dart';
 import '../editor/filters.dart';
 import '../music/presentation/music_picker_sheet.dart';
 import 'fx_bake.dart';
+import '../../shared/widgets/skeleton.dart';
 
 /// What our camera gives back: the photo / video (or gallery picks) and
 /// the song chosen in the camera.
@@ -64,7 +66,16 @@ class CameraScreen extends StatefulWidget {
 }
 
 class _CameraScreenState extends State<CameraScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+  /// v0.0.1: quick 3D turn while the camera flips (0 = flat, 1 = edge on).
+  late final AnimationController _turn = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 140),
+  );
+
+  /// Zoom range of each camera (asked once, flips don't wait for it).
+  final Map<String, (double, double)> _zoomRange = {};
+
   List<CameraDescription> _cams = const [];
   int _camIndex = 0;
   CameraController? _ctrl;
@@ -148,6 +159,7 @@ class _CameraScreenState extends State<CameraScreen>
     _countdownTimer?.cancel();
     _filterNameTimer?.cancel();
     _focusTimer?.cancel();
+    _turn.dispose();
     MusicPlayer.instance.stop(_kMusic);
     _ctrl?.dispose();
     _mask?.dispose();
@@ -235,25 +247,42 @@ class _CameraScreenState extends State<CameraScreen>
       await c.dispose();
       return;
     }
-    try {
-      await c.lockCaptureOrientation(DeviceOrientation.portraitUp);
-    } catch (_) {}
-    var min = 1.0, max = 1.0;
-    try {
-      min = await c.getMinZoomLevel();
-      max = await c.getMaxZoomLevel();
-    } catch (_) {}
-    try {
-      await c.setFlashMode(_video ? FlashMode.off : _flash);
-    } catch (_) {}
     _torch = false;
-    setState(() {
-      _ctrl = c;
-      _minZoom = min;
-      _maxZoom = max < min ? min : (max > 10 ? 10 : max);
-      _zoom = min;
-    });
+    // v0.0.1: the picture shows at once; the settings follow together
+    setState(() => _ctrl = c);
+    await _configure(c);
     unawaited(_syncStream());
+  }
+
+  /// Orientation lock, flash and zoom range - all at the same time.
+  Future<void> _configure(CameraController c) async {
+    final key = c.description.name;
+    Future<void> zoom() async {
+      if (_zoomRange.containsKey(key)) return;
+      try {
+        final r = await Future.wait([c.getMinZoomLevel(), c.getMaxZoomLevel()]);
+        _zoomRange[key] = (r[0], r[1]);
+      } catch (_) {}
+    }
+
+    Future<void> quiet(Future<void> Function() f) async {
+      try {
+        await f();
+      } catch (_) {}
+    }
+
+    await Future.wait<void>([
+      quiet(() => c.lockCaptureOrientation(DeviceOrientation.portraitUp)),
+      quiet(() => c.setFlashMode(_video ? FlashMode.off : _flash)),
+      zoom(),
+    ]);
+    if (!mounted || _ctrl != c) return;
+    final (lo, hi) = _zoomRange[key] ?? (1.0, 1.0);
+    setState(() {
+      _minZoom = lo;
+      _maxZoom = hi < lo ? lo : (hi > 10 ? 10 : hi);
+      _zoom = lo;
+    });
   }
 
   // ------------------------------------------------------------ effects
@@ -425,10 +454,7 @@ class _CameraScreenState extends State<CameraScreen>
         await c.setDescription(_cams[next]);
         _camIndex = next;
       } else {
-        setState(() => _ctrl = null);
-        await c.dispose();
-        _camIndex = next;
-        await _open(_cams[next]);
+        await _quickFlip(c, next);
       }
     } on CameraException catch (e) {
       _snack(_why(e));
@@ -436,8 +462,43 @@ class _CameraScreenState extends State<CameraScreen>
       _snack("Couldn't switch camera");
     } finally {
       _busy = false;
+      if (_turn.value > 0 && mounted) unawaited(_turn.reverse());
       if (mounted) setState(() {});
     }
+  }
+
+  /// v0.0.1: faster flip - the same camera controller switches lens (no
+  /// new controller, no black loading screen); a quick turn hides the
+  /// switch. Falls back to closing and opening again.
+  Future<void> _quickFlip(CameraController c, int next) async {
+    final turned = _turn.forward(from: 0);
+    // the frames for effects stop while the lens changes
+    if (c.value.isStreamingImages) {
+      try {
+        await c.stopImageStream();
+      } catch (_) {}
+    }
+    _clearLive();
+    try {
+      await c.setDescription(_cams[next]);
+      _camIndex = next;
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _ctrl = null);
+      try {
+        await c.dispose();
+      } catch (_) {}
+      _camIndex = next;
+      await _open(_cams[next]);
+      return;
+    }
+    if (!mounted) return;
+    _torch = false;
+    await turned;
+    if (!mounted) return;
+    setState(() {});
+    await Future.wait<void>([_configure(c), _turn.reverse()]);
+    unawaited(_syncStream());
   }
 
   Future<void> _setZoom(double z) async {
@@ -1101,8 +1162,9 @@ class _CameraScreenState extends State<CameraScreen>
     final c = _ctrl;
     if (c == null || !c.value.isInitialized) {
       return const ColoredBox(
+        key: ValueKey('camera-starting'),
         color: Colors.black,
-        child: Center(child: CircularProgressIndicator(color: AppColors.lime)),
+        child: LoadingSweep(),
       );
     }
     final ratio = c.value.aspectRatio; // long side / short side
@@ -1129,15 +1191,41 @@ class _CameraScreenState extends State<CameraScreen>
           _setFilter(_filter + ((_swipeDx + v / 10) < 0 ? 1 : -1));
         }
       },
-      child: ColorFiltered(
-        colorFilter: ColorFilter.matrix(ColorEdits(preset: _filter).matrix),
-        child: FittedBox(
-          fit: BoxFit.cover,
-          clipBehavior: Clip.hardEdge,
-          child: SizedBox(
-            width: 100,
-            height: 100 * ratio,
-            child: _liveLayers(c, Size(100, 100 * ratio)),
+      child: AnimatedBuilder(
+        animation: _turn,
+        builder: (context, child) {
+          final v = _turn.value;
+          if (v == 0) return child!;
+          // flip: turns to the side, the other lens turns back in
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              Transform(
+                alignment: Alignment.center,
+                transform: Matrix4.identity()
+                  ..setEntry(3, 2, 0.0012)
+                  ..rotateY(v * math.pi / 2),
+                child: child,
+              ),
+              IgnorePointer(
+                child: ColoredBox(
+                  key: const ValueKey('camera-flipping'),
+                  color: Colors.black.withValues(alpha: 0.85 * v),
+                ),
+              ),
+            ],
+          );
+        },
+        child: ColorFiltered(
+          colorFilter: ColorFilter.matrix(ColorEdits(preset: _filter).matrix),
+          child: FittedBox(
+            fit: BoxFit.cover,
+            clipBehavior: Clip.hardEdge,
+            child: SizedBox(
+              width: 100,
+              height: 100 * ratio,
+              child: _liveLayers(c, Size(100, 100 * ratio)),
+            ),
           ),
         ),
       ),

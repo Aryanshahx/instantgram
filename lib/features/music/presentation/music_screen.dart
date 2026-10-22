@@ -11,11 +11,12 @@ import '../../post/data/post_repository.dart' show ViewSource;
 import '../../post/presentation/create_sheet.dart';
 import '../data/music_repository.dart';
 import 'music_picker_sheet.dart' show SaveAudioButton;
+import '../../../shared/widgets/skeleton.dart';
 
 /// Opens the song of [post] (tap on "♪ Song" on a post / clip).
 /// Old posts without a song page: nothing happens.
 void openMusicOf(BuildContext context, Post post) {
-  if (post.musicId.isEmpty || !post.hasMusic) return;
+  if (!post.hasAudioPage) return;
   Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (_) => MusicScreen(musicId: post.musicId, from: post),
@@ -269,7 +270,8 @@ class _MusicScreenState extends State<MusicScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Audio')),
       body: posts == null
-          ? Center(
+          ? Align(
+              alignment: _failed ? Alignment.center : Alignment.topCenter,
               child: _failed
                   ? TextButton(
                       key: const ValueKey('music-page-retry'),
@@ -279,7 +281,7 @@ class _MusicScreenState extends State<MusicScreen> {
                       },
                       child: const Text("Couldn't load. Tap to try again"),
                     )
-                  : const CircularProgressIndicator(),
+                  : const Skeleton(kind: SkeletonKind.grid),
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,

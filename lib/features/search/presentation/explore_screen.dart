@@ -240,7 +240,11 @@ class _ExploreScreenState extends State<ExploreScreen> {
           if (snap.hasError) {
             body = [SliverToBoxAdapter(child: ErrorView(error: snap.error))];
           } else if (!snap.hasData) {
-            body = [const SliverToBoxAdapter(child: LoadingView())];
+            body = [
+              const SliverToBoxAdapter(
+                child: LoadingView(kind: SkeletonKind.grid),
+              ),
+            ];
           } else if (!hasQuery) {
             final posts = snap.data!;
             body = posts.isEmpty
@@ -326,7 +330,9 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 _grid(clips),
               ],
               if (_searching)
-                const SliverToBoxAdapter(child: LoadingView(padding: 16))
+                const SliverToBoxAdapter(
+                  child: LoadingView(kind: SkeletonKind.grid, count: 1),
+                )
               else if (_people.isEmpty &&
                   _channels.isEmpty &&
                   _audios.isEmpty &&

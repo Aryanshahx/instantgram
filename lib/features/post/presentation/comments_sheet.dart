@@ -881,7 +881,9 @@ class _CommentsSheetState extends State<CommentsSheet> {
             stream: _stream,
             builder: (context, snap) {
               if (snap.hasError) return _filler(ErrorView(error: snap.error));
-              if (!snap.hasData) return _filler(const LoadingView());
+              if (!snap.hasData) {
+                return _filler(const LoadingView(kind: SkeletonKind.comments));
+              }
               final rows = _rows(snap.data!);
               if (rows.isEmpty) {
                 return _filler(

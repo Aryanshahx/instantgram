@@ -131,23 +131,31 @@ class _PostCardState extends State<PostCard>
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: GestureDetector(
-                      onTap: () => openProfile(context, p.authorId),
-                      child: Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              p.authorUsername,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        GestureDetector(
+                          onTap: () => openProfile(context, p.authorId),
+                          child: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  p.authorUsername,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
                               ),
-                            ),
+                              VerifiedBadge(uid: p.authorId),
+                            ],
                           ),
-                          VerifiedBadge(uid: p.authorId),
-                        ],
-                      ),
+                        ),
+                        // v0.0.1: song / original audio under the name
+                        if (p.showsAudio) AudioLine(post: p),
+                      ],
                     ),
                   ),
                   IconButton(

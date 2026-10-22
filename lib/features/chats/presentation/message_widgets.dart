@@ -20,6 +20,7 @@ import 'group_widgets.dart';
 import '../../../shared/widgets/verified_badge.dart';
 import '../../../shared/widgets/bio_font.dart';
 import '../../../shared/widgets/emoji_picker.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 /// Quick reactions on a long-press (v0.9). Default ones - you can change
 /// them ("+" -> Your quick reactions), see [QuickReactions].
@@ -1210,7 +1211,7 @@ class _ForwardSheetState extends State<ForwardSheet> {
                 future: _targets,
                 builder: (context, snap) {
                   if (!snap.hasData) {
-                    return const Center(child: CircularProgressIndicator());
+                    return const Skeleton();
                   }
                   final list = snap.data!.where((p) => p.matches(_q)).toList();
                   if (list.isEmpty) {

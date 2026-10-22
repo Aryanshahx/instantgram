@@ -118,7 +118,7 @@ class _MyPostPickerState extends State<MyPostPicker> {
       stream: stream,
       builder: (context, snap) {
         if (snap.hasError) return ErrorView(error: snap.error);
-        if (!snap.hasData) return const LoadingView();
+        if (!snap.hasData) return const LoadingView(kind: SkeletonKind.grid);
         final list = snap.data!;
         if (list.isEmpty) {
           return Center(

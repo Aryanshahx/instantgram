@@ -5,6 +5,7 @@ import '../../../core/services/app_icon.dart';
 import '../../../core/services/media_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../profile/presentation/profile_image_crop.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 /// v0.15: Settings -> App icon.
 class AppIconScreen extends StatefulWidget {
@@ -126,7 +127,7 @@ class _AppIconScreenState extends State<AppIconScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('App icon')),
       body: cur == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const Skeleton(count: 4)
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [

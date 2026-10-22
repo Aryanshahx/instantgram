@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 
 import '../../../core/theme/app_colors.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 /// Banner shape on the profile page (width : height).
 const double kBannerAspect = 2.5;
@@ -226,7 +227,10 @@ class _ProfileCropScreenState extends State<ProfileCropScreen> {
       body: _error.isNotEmpty
           ? Center(child: Text(_error))
           : _bytes == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const Padding(
+              padding: EdgeInsets.all(16),
+              child: ShimmerFill(radius: 16),
+            )
           : LayoutBuilder(
               builder: (context, box) {
                 final fw = box.maxWidth - 32;

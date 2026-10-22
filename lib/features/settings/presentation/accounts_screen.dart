@@ -13,6 +13,7 @@ import '../../../shared/widgets/username_status.dart';
 import '../../auth/data/auth_service.dart';
 import 'settings_screen.dart' show signOutEverything;
 import 'settings_widgets.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 /// v0.12: Settings -> Accounts. Switch between accounts saved on this
 /// phone, add another account, or remove one.
@@ -202,13 +203,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 ),
               ],
             ),
-            if (_busy)
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Center(
-                  child: CircularProgressIndicator(color: AppColors.lime),
-                ),
-              ),
+            if (_busy) const Skeleton(count: 1),
             const Padding(
               padding: EdgeInsets.fromLTRB(8, 12, 8, 0),
               child: Text(
@@ -343,7 +338,7 @@ VoidCallback showSwitching(BuildContext context, String username) {
             key: const ValueKey('switching'),
             mainAxisSize: MainAxisSize.min,
             children: [
-              const CircularProgressIndicator(color: AppColors.lime),
+              const Shimmer(child: SkeletonBox(height: 64, circle: true)),
               const SizedBox(height: 16),
               Text(
                 username.isEmpty

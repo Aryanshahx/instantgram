@@ -6,6 +6,7 @@ import '../../../shared/widgets/net_image.dart';
 import '../data/highlight_repository.dart';
 import '../data/moments_index.dart';
 import '../../../shared/widgets/hi_text_check.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 /// v0.15: the row of highlights under the profile buttons.
 /// Your own row starts with "New" (plus ring) to make a highlight.
@@ -457,7 +458,7 @@ class _HighlightEditorScreenState extends State<HighlightEditorScreen> {
       );
     }
     final list = _moments;
-    if (list == null) return const Center(child: CircularProgressIndicator());
+    if (list == null) return const Skeleton(kind: SkeletonKind.grid);
     if (list.isEmpty) {
       return const Center(
         child: Padding(

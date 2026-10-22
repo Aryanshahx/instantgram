@@ -248,7 +248,9 @@ void main() {
     }
     expect(tester.takeException(), isNull);
     expect(find.text('1/3'), findsOneWidget);
-    expect(find.text('Song'), findsOneWidget);
+    // v0.0.1: the song name is under the name now (post header), not on the
+    // picture
+    expect(find.text('Song'), findsNothing);
     expect(seen, 1);
     final box = tester.getSize(find.byType(PageView));
     expect(box.width / box.height, closeTo(9 / 16, 0.01));

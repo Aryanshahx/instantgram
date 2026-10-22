@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/models/post.dart';
 import '../data/chat_repository.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 /// v0.15: read the last messages from the chat list (long-press) WITHOUT
 /// opening the chat — nothing is marked as seen, no blue ticks for them.
@@ -63,13 +64,7 @@ class ChatPeek extends StatelessWidget {
                 if (!snap.hasData) {
                   return const SizedBox(
                     height: 80,
-                    child: Center(
-                      child: SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ),
+                    child: Skeleton(kind: SkeletonKind.chat, count: 2),
                   );
                 }
                 final list = pick(

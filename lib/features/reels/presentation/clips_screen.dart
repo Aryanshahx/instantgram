@@ -283,7 +283,9 @@ class _ClipsScreenState extends State<ClipsScreen> {
                           if (snap.hasError) {
                             return Center(child: ErrorView(error: snap.error));
                           }
-                          if (!snap.hasData) return const LoadingView();
+                          if (!snap.hasData) {
+                            return const LoadingView(kind: SkeletonKind.clip);
+                          }
                           return _pager(snap.data!);
                         },
                       ),
@@ -1311,7 +1313,7 @@ class _ClipPlayerState extends State<ClipPlayer>
                     fit: StackFit.expand,
                     children: [
                       if (!_ready && !_failed && !kDisableVideoPlayback)
-                        const Center(child: CircularProgressIndicator()),
+                        const LoadingSweep(),
                       if (_ready &&
                           _ctrl != null &&
                           !_ctrl!.value.isPlaying &&
@@ -1386,7 +1388,7 @@ class _ClipPlayerState extends State<ClipPlayer>
               ),
             ),
             if (!_ready && !_failed && !kDisableVideoPlayback)
-              const Center(child: CircularProgressIndicator()),
+              const LoadingSweep(),
 
             if (_ready && _ctrl != null && !_ctrl!.value.isPlaying && !_fast)
               Center(
@@ -1515,13 +1517,14 @@ class _ClipPlayerState extends State<ClipPlayer>
                           VerifiedBadge(uid: c.authorId, size: 14),
                         ],
                       ),
-                      if (c.hasMusic) ...[
+                      if (c.showsAudio) ...[
                         const SizedBox(height: 3),
                         MusicChip(
-                          name: c.audioName,
-                          onTap: c.musicId.isEmpty
-                              ? null
-                              : () => openMusicOf(context, c),
+                          key: ValueKey('clip-audio-${c.id}'),
+                          name: c.audioLabel,
+                          onTap: c.hasAudioPage
+                              ? () => openMusicOf(context, c)
+                              : null,
                         ),
                       ],
                     ],

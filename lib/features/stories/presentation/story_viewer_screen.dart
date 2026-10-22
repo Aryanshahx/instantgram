@@ -23,6 +23,7 @@ import '../data/story_views.dart';
 import 'story_extras.dart';
 import '../../../core/services/video_cache.dart';
 import '../../../shared/widgets/verified_badge.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 /// Full-screen moment viewer: tap right = next, tap left = back,
 /// hold = pause, swipe down = close. Plays photo and video moments.
@@ -369,7 +370,16 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     final ok = await showDialog<bool>(
       context: context,
       builder: (d) => AlertDialog(
-        title: const Text('Delete this moment?'),
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: const Text(
+          'Delete this moment?',
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+        ),
+        content: const Text(
+          'It will be gone for everyone.',
+          style: TextStyle(color: AppColors.textSecondary),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(d, false),
@@ -404,6 +414,8 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
         ..showSnackBar(
           const SnackBar(
             content: Text("Couldn't delete. Check your internet."),
+            behavior: SnackBarBehavior.floating,
+            margin: EdgeInsets.fromLTRB(16, 0, 16, 84),
           ),
         );
       _resume();
@@ -434,40 +446,83 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
+        // floats above the bottom bar (Delete stays free to tap)
         const SnackBar(
           content: Text('Moment deleted'),
           duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+          margin: EdgeInsets.fromLTRB(16, 0, 16, 84),
         ),
       );
   }
 
   /// v0.0.1: round, easy to hit buttons (a near miss no longer skips).
-  Widget _roundButton({
-    required Key key,
-    required IconData icon,
-    required String tip,
-    required VoidCallback? onTap,
-    Widget? child,
-  }) => Tooltip(
-    message: tip,
+  /// v0.0.1: plain X at the top right (no circle), big touch area.
+  Widget _closeButton() => Tooltip(
+    message: 'Close',
     child: GestureDetector(
-      key: key,
+      key: const ValueKey('story-close'),
       behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: SizedBox(
+      onTap: () => Navigator.of(context).maybePop(),
+      child: const SizedBox(
         width: 44,
         height: 44,
         child: Center(
-          child: Container(
-            width: 34,
-            height: 34,
-            decoration: const BoxDecoration(
-              color: Colors.black38,
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: child ?? Icon(icon, size: 21, color: Colors.white),
+          child: Icon(
+            Icons.close_rounded,
+            size: 28,
+            color: Colors.white,
+            shadows: [Shadow(blurRadius: 8, color: Colors.black54)],
           ),
+        ),
+      ),
+    ),
+  );
+
+  /// v0.0.1: Delete sits at the bottom of your own moment (icon over a
+  /// small label), away from the X.
+  Widget _deleteButton() => Tooltip(
+    message: 'Delete moment',
+    child: GestureDetector(
+      key: const ValueKey('story-delete'),
+      behavior: HitTestBehavior.opaque,
+      onTap: _deleting ? null : _delete,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 60, minHeight: 48),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: _deleting
+                  ? const Padding(
+                      padding: EdgeInsets.all(3),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(
+                      Icons.delete_outline_rounded,
+                      size: 24,
+                      color: Colors.white,
+                      shadows: [Shadow(blurRadius: 8, color: Colors.black54)],
+                    ),
+            ),
+            const SizedBox(height: 3),
+            const Text(
+              'Delete',
+              key: ValueKey('story-delete-label'),
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+                shadows: [Shadow(blurRadius: 6, color: Colors.black54)],
+              ),
+            ),
+          ],
         ),
       ),
     ),
@@ -486,13 +541,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
       );
     }
     if (c == null || !_videoReady) {
-      return const Center(
-        child: SizedBox(
-          width: 34,
-          height: 34,
-          child: CircularProgressIndicator(strokeWidth: 2.5),
-        ),
-      );
+      return const LoadingSweep();
     }
     return Center(
       child: AspectRatio(
@@ -647,29 +696,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                           ),
                         ],
                         const Spacer(),
-                        if (mine && live)
-                          _roundButton(
-                            key: const ValueKey('story-delete'),
-                            icon: Icons.delete_outline,
-                            tip: 'Delete',
-                            onTap: _deleting ? null : _delete,
-                            child: _deleting
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : null,
-                          ),
-                        _roundButton(
-                          key: const ValueKey('story-close'),
-                          icon: Icons.close,
-                          tip: 'Close',
-                          onTap: () => Navigator.of(context).maybePop(),
-                        ),
+                        _closeButton(),
                       ],
                     ),
                   ],
@@ -680,7 +707,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
             if (_story.hasMusic)
               Positioned(
                 left: 14,
-                bottom: mine && live ? 64 : 22,
+                bottom: mine && live ? 70 : 22,
                 right: 80,
                 child: SafeArea(
                   top: false,
@@ -731,14 +758,19 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                 bottom: 0,
                 child: SafeArea(
                   top: false,
+                  // v0.0.1: seen by on the left, Delete on the right
                   child: Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: Center(
-                      child: SeenByBar(
-                        key: ValueKey('seen-${_story.id}'),
-                        views: _viewsOf(_story),
-                        onTap: _openViewers,
-                      ),
+                    padding: const EdgeInsets.fromLTRB(14, 0, 6, 8),
+                    child: Row(
+                      children: [
+                        SeenByBar(
+                          key: ValueKey('seen-${_story.id}'),
+                          views: _viewsOf(_story),
+                          onTap: _openViewers,
+                        ),
+                        const Spacer(),
+                        _deleteButton(),
+                      ],
                     ),
                   ),
                 ),

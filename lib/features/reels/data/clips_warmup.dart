@@ -21,11 +21,38 @@ class ClipsWarmup {
   /// Last known clips list (null = not loaded yet).
   List<Post>? get latest => _latest;
 
+  /// How many app screens use it (see [stop]).
+  int _users = 0;
+
+  final List<Completer<List<Post>>> _waiting = [];
+
   void start() {
+    _users++;
     if (_sub != null) return;
+    // new account / account switch: the last list gets the first clip
+    // ready at once, the fresh list follows
+    final old = _latest;
+    if (old != null && old.isNotEmpty) _warm(old);
     _sub = PostRepository.instance
         .recent(type: Post.clip, limit: limit)
         .listen(_onClips, onError: (Object _) {});
+  }
+
+  /// The clips list as soon as there is one (at once when known; empty when
+  /// not running or after [wait]).
+  Future<List<Post>> first({Duration wait = const Duration(seconds: 4)}) {
+    final l = _latest;
+    if (l != null) return Future.value(l);
+    if (_sub == null) return Future.value(const <Post>[]);
+    final c = Completer<List<Post>>();
+    _waiting.add(c);
+    return c.future.timeout(
+      wait,
+      onTimeout: () {
+        _waiting.remove(c);
+        return const <Post>[];
+      },
+    );
   }
 
   void _onClips(List<Post> fresh) {
@@ -37,6 +64,14 @@ class ClipsWarmup {
       mode: FeedMode.clips,
     );
     _latest = list;
+    for (final c in _waiting) {
+      if (!c.isCompleted) c.complete(list);
+    }
+    _waiting.clear();
+    _warm(list);
+  }
+
+  void _warm(List<Post> list) {
     if (_warmed || list.isEmpty) return;
     _warmed = true;
     final first = list.first;
@@ -51,10 +86,17 @@ class ClipsWarmup {
     }
   }
 
+  /// Keeps the last list (clips are the same for every account), so the
+  /// next account's Clips tab and feed open with it at once.
   void stop() {
+    if (_users > 0) _users--;
+    if (_users > 0) return;
     _sub?.cancel();
     _sub = null;
-    _latest = null;
     _warmed = false;
+    for (final c in _waiting) {
+      if (!c.isCompleted) c.complete(const <Post>[]);
+    }
+    _waiting.clear();
   }
 }

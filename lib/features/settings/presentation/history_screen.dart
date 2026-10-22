@@ -101,7 +101,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   future: _future,
                   builder: (context, snap) {
                     if (snap.hasError) return ErrorView(error: snap.error);
-                    if (!snap.hasData) return const LoadingView();
+                    if (!snap.hasData) {
+                      return const LoadingView(kind: SkeletonKind.grid);
+                    }
                     final posts = snap.data!;
                     return PostGrid(
                       posts: posts,

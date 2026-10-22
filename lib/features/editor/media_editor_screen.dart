@@ -34,6 +34,7 @@ import 'photo_render.dart';
 import 'video_frames.dart';
 import '../../shared/widgets/bio_font.dart';
 import '../../shared/widgets/hi_text_check.dart';
+import '../../shared/widgets/skeleton.dart';
 
 /// Opens the editor for picked media, then the share screen.
 Future<void> openEditor(
@@ -955,7 +956,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
   Widget _photoCanvas(EditItem item) {
     final n = item.natural;
     if (n == null) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 2.5));
+      return const ShimmerFill(radius: 12);
     }
     return LayoutBuilder(
       builder: (context, box) {
@@ -1473,7 +1474,7 @@ class _MediaEditorScreenState extends State<MediaEditorScreen>
       );
     }
     if (c == null || !_videoReady) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 2.5));
+      return const ShimmerFill(radius: 12);
     }
     return GestureDetector(
       onTap: () => setState(() {

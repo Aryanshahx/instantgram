@@ -6,6 +6,7 @@ import '../../../core/services/gif_search.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/errors.dart';
 import '../../../shared/widgets/net_image.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 /// The GIF chosen in the picker (GIPHY).
 class PickedGif {
@@ -183,7 +184,7 @@ class _GifPickerSheetState extends State<GifPickerSheet> {
     }
     if (_gifs.isEmpty) {
       if (_loading) {
-        return const Center(child: CircularProgressIndicator());
+        return const Skeleton(kind: SkeletonKind.grid);
       }
       return Center(
         child: Text(

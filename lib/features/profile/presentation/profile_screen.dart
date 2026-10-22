@@ -56,7 +56,7 @@ class ProfileScreen extends StatelessWidget {
       builder: (context, snap) {
         if (snap.hasError) return Center(child: ErrorView(error: snap.error));
         if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
-          return const LoadingView();
+          return const LoadingView(kind: SkeletonKind.profile);
         }
         var profile = snap.data;
         final authUser = FirebaseAuth.instance.currentUser;
@@ -486,7 +486,7 @@ class _StreamGridState extends State<_StreamGrid>
         if (snap.hasError) {
           return SingleChildScrollView(child: ErrorView(error: snap.error));
         }
-        if (!snap.hasData) return const LoadingView();
+        if (!snap.hasData) return const LoadingView(kind: SkeletonKind.grid);
         final posts = snap.data!;
         return PostGrid(
           posts: posts,
@@ -527,7 +527,7 @@ class _RepostsTabState extends State<_RepostsTab>
         if (snap.hasError) {
           return SingleChildScrollView(child: ErrorView(error: snap.error));
         }
-        if (!snap.hasData) return const LoadingView();
+        if (!snap.hasData) return const LoadingView(kind: SkeletonKind.grid);
         final ids = snap.data!;
         final key = ids.join(',');
         if (key != _key || _future == null) {
@@ -540,7 +540,7 @@ class _RepostsTabState extends State<_RepostsTab>
             if (f.hasError) {
               return SingleChildScrollView(child: ErrorView(error: f.error));
             }
-            if (!f.hasData) return const LoadingView();
+            if (!f.hasData) return const LoadingView(kind: SkeletonKind.grid);
             final posts = f.data!;
             return PostGrid(
               posts: posts,

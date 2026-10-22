@@ -19,6 +19,7 @@ import '../data/chat_repository.dart';
 import '../data/group_repository.dart';
 import 'chat_detail_screen.dart';
 import 'group_widgets.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 /// v0.0.2: opens a group / channel chat.
 void openGroupChat(
@@ -277,7 +278,7 @@ class _PeoplePickerScreenState extends State<PeoplePickerScreen> {
             ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Skeleton()
                 : shown.isEmpty
                 ? Center(
                     child: Text(
@@ -685,7 +686,7 @@ class _FindChannelsScreenState extends State<FindChannelsScreen> {
                     ),
                   )
                 : list == null
-                ? const Center(child: CircularProgressIndicator())
+                ? const Skeleton()
                 : list.isEmpty
                 ? const Center(
                     child: Text(
@@ -1022,7 +1023,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             );
           }
           if (c == null) {
-            return const Center(child: CircularProgressIndicator());
+            return const Skeleton();
           }
           return _body(c);
         },

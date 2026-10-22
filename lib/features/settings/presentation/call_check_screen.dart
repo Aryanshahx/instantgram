@@ -6,6 +6,7 @@ import '../../../core/services/calls.dart';
 import '../../../core/services/system_settings.dart';
 import '../../../core/theme/app_colors.dart';
 import 'settings_widgets.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 /// v0.11 Settings -> Calls & notifications: checks everything a phone
 /// needs to ring when the app is closed, with a button to fix each one.
@@ -100,10 +101,7 @@ class _CallCheckScreenState extends State<CallCheckScreen> {
       title: 'Calls & notifications',
       children: [
         if (c == null)
-          const Padding(
-            padding: EdgeInsets.all(40),
-            child: Center(child: CircularProgressIndicator()),
-          )
+          const Skeleton(count: 4)
         else ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(18, 14, 18, 10),

@@ -40,7 +40,8 @@ import kotlin.math.min
  *  status  {segment}                          -> Boolean (ready on the phone)
  *  install {}                                 -> Boolean, sends "progress"
  *  segPrepare {path}                          -> Boolean (loads the model file)
- *  fxVideo {path, mode, bg?, out?}             -> {path?, cancelled}, sends "progress"
+  *  fxVideo {path, mode, bg?, out?}             -> {path?, cancelled}, sends "progress"
+ *  extractAudio {path, startMs, endMs, cuts, out?} -> {path, durationMs} or null
  *  cancelFx
  *  analyze {bytes (NV21), w, h, rotation, mirror, face, segment}
  *                                             -> {w, h, faces, mask?, mw, mh}
@@ -61,7 +62,8 @@ class VisionChannel(private val context: Context, messenger: BinaryMessenger) :
     private var fastDetector: FaceDetector? = null
     private var photoDetector: FaceDetector? = null
     private val selfie = Selfie(context)
-    private val fxWorker: ExecutorService = Executors.newSingleThreadExecutor()
+        private val fxWorker: ExecutorService = Executors.newSingleThreadExecutor()
+    private val audioWorker: ExecutorService = Executors.newSingleThreadExecutor()
     private var fx: VideoFx? = null
 
     @Volatile
@@ -145,6 +147,20 @@ class VisionChannel(private val context: Context, messenger: BinaryMessenger) :
                         if (done) r["path"] = out
                         r["cancelled"] = job.cancelled
                         r
+                    }
+                }
+                "extractAudio" -> {
+                    val path = call.argument<String>("path") ?: ""
+                    val out = call.argument<String>("out")?.takeIf { it.isNotEmpty() }
+                        ?: File(context.cacheDir, "orig_${System.currentTimeMillis()}.m4a").absolutePath
+                    val start = call.argument<Number>("startMs")?.toLong() ?: 0L
+                    val end = call.argument<Number>("endMs")?.toLong() ?: 0L
+                    val cuts = (call.argument<List<Number>>("cuts") ?: emptyList())
+                        .map { it.toLong() }
+                        .toLongArray()
+                    background(audioWorker, result) {
+                        val ms = AudioExtract.run(path, out, start, end, cuts)
+                        if (ms < 0) null else mapOf("path" to out, "durationMs" to ms)
                     }
                 }
                 "cancelFx" -> {

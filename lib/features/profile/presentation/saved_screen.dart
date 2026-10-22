@@ -26,7 +26,7 @@ class _SavedScreenState extends State<SavedScreen> {
         stream: _ids,
         builder: (context, snap) {
           if (snap.hasError) return ErrorView(error: snap.error);
-          if (!snap.hasData) return const LoadingView();
+          if (!snap.hasData) return const LoadingView(kind: SkeletonKind.grid);
           final key = snap.data!.join(',');
           if (key != _key || _future == null) {
             _key = key;
@@ -36,7 +36,7 @@ class _SavedScreenState extends State<SavedScreen> {
             future: _future,
             builder: (context, f) {
               if (f.hasError) return ErrorView(error: f.error);
-              if (!f.hasData) return const LoadingView();
+              if (!f.hasData) return const LoadingView(kind: SkeletonKind.grid);
               final posts = f.data!;
               return PostGrid(
                 posts: posts,

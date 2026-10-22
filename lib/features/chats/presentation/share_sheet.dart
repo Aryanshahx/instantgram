@@ -13,6 +13,7 @@ import '../../post/data/post_repository.dart';
 import '../data/chat_repository.dart';
 import 'group_widgets.dart';
 import '../../../shared/widgets/verified_badge.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 /// Loads who you can share with (tests replace this).
 typedef ShareTargetsLoader = Future<List<ChatPerson>> Function();
@@ -118,17 +119,8 @@ class _ShareSheetState extends State<ShareSheet> {
         height: h * 0.62,
         child: Column(
           children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 38,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.border,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
               child: IgTextField(
                 key: const ValueKey('share-search'),
                 hint: 'Search',
@@ -143,9 +135,7 @@ class _ShareSheetState extends State<ShareSheet> {
                 future: _targets,
                 builder: (context, snap) {
                   if (!snap.hasData) {
-                    return const Center(
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    );
+                    return const Skeleton();
                   }
                   final blocked = ContentFilter.instance;
                   final list = snap.data!

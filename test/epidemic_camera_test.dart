@@ -851,6 +851,46 @@ void main() {
       await _finish(t);
     });
 
+    testWidgets('flip (not filming): quick turn, same camera, effects go on', (
+      t,
+    ) async {
+      install = Completer<bool>();
+      await _openCamera(t);
+      await t.tap(find.byKey(const ValueKey('camera-effects')));
+      await _frames(t, 2);
+      install.complete(true);
+      await _frames(t, 3);
+      await t.tap(find.byKey(const ValueKey('camera-fx-sunglasses')));
+      await _frames(t, 2);
+      expect(cam.log, contains('stream'));
+      cam.log.clear();
+      await t.tap(find.byKey(const ValueKey('camera-flip')));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 60));
+      // a quick turn instead of a black loading screen
+      expect(find.byKey(const ValueKey('camera-flipping')), findsOneWidget);
+      expect(find.byKey(const ValueKey('camera-starting')), findsNothing);
+      await _frames(t, 6);
+      expect(find.byKey(const ValueKey('camera-flipping')), findsNothing);
+      expect(find.byKey(const ValueKey('fake-preview')), findsWidgets);
+      final log = cam.log;
+      final create = log.indexWhere((l) => l.startsWith('create front'));
+      expect(create, greaterThan(0), reason: log.join(', '));
+      // frames stop, the lens changes, frames start again
+      expect(log.indexOf('stream stop'), lessThan(log.indexOf('dispose')));
+      expect(log.indexOf('dispose'), lessThan(create));
+      expect(log.lastIndexOf('stream'), greaterThan(create));
+      cam.frames!.add(_nv21(640, 480));
+      await _frames(t, 3);
+      final a = calls.lastWhere((c) => c.method == 'analyze').arguments as Map;
+      expect(a['mirror'], isTrue, reason: 'front camera now');
+      // and back again
+      await t.tap(find.byKey(const ValueKey('camera-flip')));
+      await _frames(t, 6);
+      expect(cam.log.where((l) => l.startsWith('create back')), isNotEmpty);
+      await _finish(t);
+    });
+
     testWidgets('video: blur background live + put into the video', (t) async {
       messenger.setMockMethodCallHandler(VisionService.channel, (c) async {
         calls.add(c);

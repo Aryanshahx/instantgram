@@ -9,6 +9,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
+import 'package:instantgram/shared/widgets/skeleton.dart';
 import 'package:instantgram/core/services/app_icon.dart';
 import 'package:instantgram/core/services/app_settings.dart';
 import 'package:instantgram/core/services/content_filter.dart';
@@ -302,6 +303,7 @@ void main() {
       await _frames(t, 10);
       // before v0.16 this spun forever
       expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.byType(Shimmer), findsNothing);
       expect(find.text('3 viewers'), findsOneWidget);
       expect(find.text('3 rewatches'), findsOneWidget);
       expect(find.text('1 like'), findsOneWidget);

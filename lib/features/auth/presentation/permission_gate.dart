@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/services/calls.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../shared/widgets/skeleton.dart';
 import '../../settings/presentation/settings_screen.dart'
     show signOutEverything;
 
@@ -20,12 +21,21 @@ class PermissionGate extends StatefulWidget {
   static Future<void> Function()? debugAskNotifications;
   static Future<void> Function()? debugAskLockScreen;
 
+  /// Tests: forget that both were allowed before.
+  static void debugReset() => _PermissionGateState._okBefore = false;
+
   @override
   State<PermissionGate> createState() => _PermissionGateState();
 }
 
 class _PermissionGateState extends State<PermissionGate> {
-  ({bool notifications, bool lockScreen})? _st;
+  /// Both were allowed earlier in this run of the app. A new account or an
+  /// account switch then opens at once (still checked again quietly).
+  static bool _okBefore = false;
+
+  ({bool notifications, bool lockScreen})? _st = _okBefore
+      ? (notifications: true, lockScreen: true)
+      : null;
   late final AppLifecycleListener _life;
   bool _busy = false;
 
@@ -47,6 +57,7 @@ class _PermissionGateState extends State<PermissionGate> {
   Future<void> _check() async {
     final f = PermissionGate.debugCheck ?? Calls.instance.mustHave;
     final st = await f();
+    _okBefore = st.notifications && st.lockScreen;
     if (mounted) setState(() => _st = st);
   }
 
@@ -136,7 +147,7 @@ class _PermissionGateState extends State<PermissionGate> {
     if (st == null) {
       return const Scaffold(
         backgroundColor: AppColors.background,
-        body: Center(child: CircularProgressIndicator()),
+        body: SafeArea(child: Skeleton(kind: SkeletonKind.post)),
       );
     }
     if (_ok) return widget.child;

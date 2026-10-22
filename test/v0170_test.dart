@@ -293,6 +293,7 @@ void main() {
       PermissionGate.debugCheck = null;
       PermissionGate.debugAskNotifications = null;
       PermissionGate.debugAskLockScreen = null;
+      PermissionGate.debugReset();
     });
 
     testWidgets('all allowed -> the app opens', (t) async {

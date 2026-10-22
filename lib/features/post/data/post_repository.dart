@@ -206,6 +206,8 @@ class PostRepository {
     String musicId = '',
     int audioStartMs = 0,
     int audioDurationMs = 0,
+    UploadedMedia? origAudio,
+    int origDurationMs = 0,
     PostOptions options = const PostOptions(),
     ReplyRef? replyTo,
   }) async {
@@ -220,13 +222,13 @@ class PostRepository {
     final coverUrl = cover?.url ?? first.coverUrl;
     final coverKey = cover?.key ?? (first.isVideo ? first.thumbKey : '');
     // music update: the song gets a page ("use this audio")
-    final music = audio == null
-        ? null
-        : musicLink(
-            postId: postId,
-            musicId: musicId,
-            audioKey: audio.key,
-          );
+    // v0.0.1: no music -> the video's own sound gets a page
+    final orig = audio == null && musicId.isEmpty ? origAudio : null;
+    final music = audio != null
+        ? musicLink(postId: postId, musicId: musicId, audioKey: audio.key)
+        : orig != null && orig.key.isNotEmpty
+        ? (id: 'o_$postId', create: true)
+        : null;
     await _commitPost(
         ref,
         me: me,
@@ -248,17 +250,24 @@ class PostRepository {
             options: options,
             replyTo: replyTo,
           );
-          if (withMusic && audio != null) {
+          final src = audio ?? orig;
+          if (withMusic && src != null) {
             final m = _db.collection('music').doc(music!.id);
+            final ms = audio != null ? audioDurationMs : origDurationMs;
             if (music.create) {
               batch.set(m, {
                 'source': 'original',
                 'ownerUid': me.uid,
-                'title': cut(audioName.isEmpty ? 'Original audio' : audioName, 120),
+                'title': cut(
+                  audio == null || audioName.isEmpty
+                      ? 'Original audio'
+                      : audioName,
+                  120,
+                ),
                 'artist': cut('@${me.username}', 80),
-                'url': audio.url,
-                'key': audio.key,
-                'durationMs': audioDurationMs < 0 ? 0 : audioDurationMs,
+                'url': src.url,
+                'key': src.key,
+                'durationMs': ms < 0 ? 0 : ms,
                 'uses': 1,
                 'hidden': false,
                 'createdAt': FieldValue.serverTimestamp(),
@@ -365,6 +374,8 @@ class PostRepository {
         if (musicId.isNotEmpty) 'musicId': musicId,
         if (audioStartMs > 0) 'audioStartMs': audioStartMs,
       },
+      // v0.0.1: "Original audio" (the video keeps its own sound)
+      if (audio == null && musicId.isNotEmpty) 'musicId': musicId,
       // v0.9: made as an answer to a comment
       if (replyTo != null) 'replyTo': replyTo.toMap(),
     });

@@ -252,18 +252,9 @@ class _EmojiPickerSheetState extends State<EmojiPickerSheet> {
       height: h * 0.72,
       child: Column(
         children: [
-          const SizedBox(height: 8),
-          Container(
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: AppColors.border,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          // ---- your quick reactions
+          // ---- your quick reactions (the sheet shows its own drag bar)
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 8, 0),
+            padding: const EdgeInsets.fromLTRB(14, 0, 8, 0),
             child: Row(
               children: [
                 const Expanded(

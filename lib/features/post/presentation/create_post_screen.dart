@@ -29,6 +29,7 @@ import '../data/upload_queue.dart';
 import 'create_sheet.dart' show ComposeReply;
 import 'my_post_picker.dart' show ReplyStickerChip;
 import '../../../shared/widgets/hi_text_check.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 export '../../editor/edit_models.dart' show ComposeMode, EditedMedia;
 export '../../../shared/widgets/media_view.dart' show PageDots;
@@ -1110,7 +1111,10 @@ class _CoverPickerScreenState extends State<CoverPickerScreen> {
         ms: _ms,
       );
     }
-    return const CircularProgressIndicator();
+    return AspectRatio(
+      aspectRatio: safeAspect(widget.item.aspectRatio),
+      child: const ShimmerFill(radius: 16),
+    );
   }
 
   Widget _frameTile(int i) {

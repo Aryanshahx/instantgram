@@ -8,6 +8,7 @@ import '../../shared/models/post.dart';
 import '../../shared/widgets/post_grid.dart' show ClipCover;
 import '../post/data/post_repository.dart';
 import 'post_insights.dart';
+import '../../shared/widgets/skeleton.dart';
 
 /// Opens Analytics for one of your posts / clips.
 Future<void> openPostInsights(BuildContext context, Post post) {
@@ -70,9 +71,7 @@ class _PostInsightsScreenState extends State<PostInsightsScreen> {
           }
           final data = snap.data;
           if (data == null) {
-            return const Center(
-              child: CircularProgressIndicator(color: AppColors.lime),
-            );
+            return const Skeleton(count: 5);
           }
           return RefreshIndicator(
             color: AppColors.lime,

@@ -2,21 +2,30 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/errors.dart';
+import 'skeleton.dart';
 
+export 'skeleton.dart'
+    show
+        SkeletonKind,
+        Skeleton,
+        SkeletonBox,
+        Shimmer,
+        ShimmerFill,
+        LoadingSweep;
+
+/// Loading place holder: grey shapes with a moving light (no circle).
 class LoadingView extends StatelessWidget {
-  const LoadingView({super.key, this.padding = 40});
+  const LoadingView({super.key, this.padding = 40, this.kind, this.count});
+
+  /// kept for old callers; only used by [kind] == null (small list)
   final double padding;
+  final SkeletonKind? kind;
+  final int? count;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: EdgeInsets.all(padding),
-    child: const Center(
-      child: SizedBox(
-        width: 28,
-        height: 28,
-        child: CircularProgressIndicator(strokeWidth: 2.6),
-      ),
-    ),
+  Widget build(BuildContext context) => Skeleton(
+    kind: kind ?? SkeletonKind.list,
+    count: count ?? (padding < 30 ? 2 : null),
   );
 }
 

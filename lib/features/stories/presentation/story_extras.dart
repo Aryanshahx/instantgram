@@ -11,6 +11,7 @@ import '../../../shared/widgets/net_image.dart';
 import '../../../shared/widgets/verified_badge.dart';
 import '../../editor/filters.dart';
 import '../data/story_views.dart';
+import '../../../shared/widgets/skeleton.dart';
 
 // ------------------------------------------------------------ "Seen by" bar
 
@@ -245,7 +246,7 @@ class _StoryViewersSheetState extends State<StoryViewersSheet> {
               const SizedBox(height: 6),
               Expanded(
                 child: !snap.hasData
-                    ? const Center(child: CircularProgressIndicator())
+                    ? const Skeleton()
                     : list.isEmpty
                     ? Center(
                         child: Text(

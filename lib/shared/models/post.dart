@@ -770,6 +770,23 @@ class Post {
   bool get isClip => type == clip;
   bool get hasMusic => audioUrl.isNotEmpty;
 
+  /// v0.0.1: the video's own sound has a page ("Original audio").
+  bool get hasOriginalAudio => !hasMusic && musicId.startsWith('o_');
+
+  /// Shown under the name; tap opens the audio page ("Use this audio").
+  bool get showsAudio => hasMusic || hasOriginalAudio;
+
+  /// The audio has a page to open.
+  bool get hasAudioPage =>
+      musicId.isNotEmpty && !musicId.contains('/') && showsAudio;
+
+  /// Name of the song / "Original audio".
+  String get audioLabel => audioName.isNotEmpty
+      ? audioName
+      : hasOriginalAudio
+      ? 'Original audio'
+      : 'Music';
+
   /// Every photo / video, in order (works for old and new posts).
   List<MediaItem> get items {
     if (media.isNotEmpty) return media;

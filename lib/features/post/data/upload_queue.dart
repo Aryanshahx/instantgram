@@ -10,6 +10,7 @@ import '../../../core/services/api_client.dart';
 import '../../../core/services/background_upload.dart';
 import '../../../core/services/hyper_intelligence.dart';
 import '../../../core/services/media_service.dart';
+import '../../../core/services/original_audio.dart';
 import '../../../core/services/uploader.dart';
 import '../../../core/services/video_prep.dart';
 import '../../../core/utils/errors.dart';
@@ -172,6 +173,11 @@ class UploadTask {
 
   UploadedMedia? cover;
   UploadedMedia? audio;
+
+  /// v0.0.1: the first video's own sound ("Original audio" page; only
+  /// when no music was added) and its length.
+  UploadedMedia? orig;
+  int origMs = 0;
   UploadStatus status = UploadStatus.waiting;
   double progress = 0;
   String error = '';
@@ -239,6 +245,8 @@ class UploadTask {
     'replyDone': replyDone,
     'cover': _media(cover),
     'audio': _media(audio),
+    'orig': _media(orig),
+    'origMs': origMs,
     'status': status == UploadStatus.failed ? 'failed' : 'waiting',
     'error': error,
     'tries': tries,
@@ -281,6 +289,8 @@ class UploadTask {
         ..replyDone = m['replyDone'] == true
         ..cover = _readMedia(m['cover'])
         ..audio = _readMedia(m['audio'])
+        ..orig = _readMedia(m['orig'])
+        ..origMs = (m['origMs'] as num?)?.toInt() ?? 0
         ..status = m['status'] == 'failed'
             ? UploadStatus.failed
             : UploadStatus.waiting
@@ -647,6 +657,45 @@ class UploadQueue extends ChangeNotifier {
         }),
       );
     }
+    // v0.0.1: no music added -> the video's own sound gets a page, so
+    // others can tap it under your name and use the same audio
+    final firstVideo = t.items.where((m) => m.isVideo).firstOrNull;
+    if (firstVideo != null &&
+        t.orig == null &&
+        t.musicId.isEmpty &&
+        OriginalAudio.wanted(
+          isMoment: t.isMoment,
+          hasMusic: t.audioPath != null || t.audioUrl.isNotEmpty,
+          isVideo: true,
+          muted: firstVideo.edits.muted,
+        )) {
+      slots.add(
+        // about 128 kbit/s
+        _Slot(max(16000, firstVideo.durationMs * 16), (p) async {
+          final a = await OriginalAudio.extract(
+            firstVideo.path,
+            firstVideo.edits,
+          );
+          if (a == null) return; // no sound / not AAC: post without it
+          try {
+            t.orig = await MediaService.instance.upload(
+              File(a.path),
+              kind: MediaKind.audio,
+              onProgress: p,
+            );
+            t.origMs = a.durationMs;
+            _save();
+          } catch (e) {
+            if (e is UploadRejected || e is FileSystemException) return;
+            rethrow; // network: try again with the whole task
+          } finally {
+            try {
+              await File(a.path).delete();
+            } catch (_) {}
+          }
+        }),
+      );
+    }
 
     final upTotal = max(1, slots.fold<int>(0, (a, s) => a + s.weight));
     final prepShare = needPrep ? 0.3 : 0.0;
@@ -756,6 +805,8 @@ class UploadQueue extends ChangeNotifier {
         musicId: t.musicId,
         audioStartMs: t.audioStartMs,
         audioDurationMs: t.audioDurationMs,
+        origAudio: t.orig,
+        origDurationMs: t.origMs,
         options: t.options,
         replyTo: t.replyTo,
         media: [
@@ -896,7 +947,7 @@ class UploadQueue extends ChangeNotifier {
       }
     }
     if (deleteUploads) {
-      for (final u in [t.cover, t.audio]) {
+      for (final u in [t.cover, t.audio, t.orig]) {
         if (u != null && u.key.isNotEmpty) {
           unawaited(MediaService.instance.delete(u.key));
         }

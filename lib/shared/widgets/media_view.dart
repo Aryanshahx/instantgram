@@ -22,6 +22,7 @@ import 'media_links.dart';
 import 'net_image.dart';
 import 'video_extras.dart';
 import '../../core/services/video_cache.dart';
+import 'skeleton.dart';
 
 /// Tests: don't create real video players.
 bool kDisableVideoPlayback = false;
@@ -426,13 +427,7 @@ class _MediaVideoState extends State<MediaVideo> {
               ),
             )
           else if (!_ready && widget.active && !kDisableVideoPlayback)
-            const Center(
-              child: SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(strokeWidth: 2.5),
-              ),
-            ),
+            const LoadingSweep(),
           if (!widget.active)
             Center(
               child: Icon(
@@ -671,21 +666,8 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
                       child: PageDots(count: items.length, index: _index),
                     ),
                   ),
-                if (p.hasMusic)
-                  Positioned(
-                    left: 10,
-                    bottom: items.length > 1 ? 26 : 10,
-                    right: 60,
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: MusicChip(
-                        name: p.audioName,
-                        onTap: p.musicId.isEmpty
-                            ? null
-                            : () => openMusicOf(context, p),
-                      ),
-                    ),
-                  ),
+                // v0.0.1: the song / original audio is under the name now
+
                 if (_hasSound)
                   Positioned(
                     right: 10,
@@ -725,6 +707,47 @@ class _PostMediaState extends State<PostMedia> with PageCoverAware {
 }
 
 /// "♪ Song name" label.
+/// v0.0.1: small "♪ song name" line under the name of a post. Tap opens
+/// the audio page ("Use this audio").
+class AudioLine extends StatelessWidget {
+  const AudioLine({super.key, required this.post});
+  final Post post;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = post;
+    final line = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.music_note, size: 13, color: AppColors.textPrimary),
+        const SizedBox(width: 3),
+        Flexible(
+          child: Text(
+            p.audioLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500,
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ),
+      ],
+    );
+    if (!p.hasAudioPage) return line;
+    return GestureDetector(
+      key: ValueKey('post-audio-${p.id}'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => openMusicOf(context, p),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: line,
+      ),
+    );
+  }
+}
+
 class MusicChip extends StatelessWidget {
   const MusicChip({super.key, required this.name, this.onTap});
   final String name;
